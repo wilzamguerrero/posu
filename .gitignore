@@ -1,0 +1,9 @@
+node_modules
+dist
+.tmp-rig
+public/wasm
+.wrangler
+
+# Fuentes FBX de Mixamo: 380 MB y GitHub rechaza archivos de mas de 100 MB.
+# Se convierten a public/models/*.glb con `npm run convert`.
+mixamo/

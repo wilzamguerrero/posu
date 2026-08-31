@@ -1,0 +1,7 @@
+# Proyecto de Cloudflare Pages (sitio estatico, sin funciones ni backend).
+#
+#   npm run build            genera dist/
+#   npx wrangler pages deploy   publica dist/ en Cloudflare
+name = "posu"
+compatibility_date = "2026-08-31"
+pages_build_output_dir = "dist"

@@ -1,0 +1,25 @@
+# Cabeceras para Cloudflare Pages.
+#
+# Importante: NO se envian Cross-Origin-Embedder-Policy ni
+# Cross-Origin-Opener-Policy. MediaPipe descarga el modelo `.task` desde
+# storage.googleapis.com, que no responde con CORP, y con COEP activo el
+# navegador bloquearia esa peticion. El detector no necesita memoria
+# compartida (no usa hilos de wasm), asi que se prescinde de ambas.
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/wasm/*
+  Cache-Control: public, max-age=31536000, immutable
+  Cross-Origin-Resource-Policy: cross-origin
+
+/models/*
+  Cache-Control: public, max-age=604800
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=()
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate

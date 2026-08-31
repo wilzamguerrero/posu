@@ -1,0 +1,592 @@
+/**
+ * POSU · Punto de entrada
+ * ---------------------------------------------------------------------------
+ * Arranca los modulos en el orden en que se necesitan (visor 3D → personaje →
+ * captura → interfaz), los conecta mediante el objeto `app` y expone las
+ * acciones que usan los paneles y los atajos de teclado. Aqui vive tambien el
+ * bucle de captura: un unico `onFrame` que pide un fotograma al detector, se lo
+ * pasa al motor de pose y redibuja el esqueleto y las guias.
+ */
+
+import './styles/theme.css';
+import './styles/app.css';
+
+import { DEFAULTS, STORAGE_KEY, DEFAULT_MODEL_URL, MODEL_LIBRARY } from './config.js';
+import { Settings } from './core/Settings.js';
+import { Viewport } from './core/Viewport.js';
+import { Character } from './model/Character.js';
+import { PoseEngine } from './pose/PoseEngine.js';
+import { PoseLibrary } from './pose/PoseLibrary.js';
+import { PoseDetector } from './mocap/PoseDetector.js';
+import { HandTracker } from './mocap/HandTracker.js';
+import { MocapSource } from './mocap/MocapSource.js';
+import { Overlay2D } from './mocap/Overlay2D.js';
+import { ManualPosing } from './posing/ManualPosing.js';
+import { HandRig, HAND_PRESET_BY_ID } from './model/HandRig.js';
+import { Guides } from './guides/Guides.js';
+import { SceneEditor } from './scene/SceneEditor.js';
+import { UI } from './ui/UI.js';
+import { StatusBar } from './ui/StatusBar.js';
+import { pickFile } from './ui/panels.js';
+import { initToasts, toast } from './ui/Toast.js';
+import { errorText } from './core/errors.js';
+import { hydrateIcons } from './ui/icons.js';
+
+/* ── Pantalla de arranque ──────────────────────────────────────────────── */
+
+const bootEl = document.getElementById('boot');
+const bootFill = document.getElementById('boot-bar-fill');
+const bootMsg = document.getElementById('boot-msg');
+const boot = (pct, message) => {
+  if (bootFill) bootFill.style.width = Math.round(pct * 100) + '%';
+  if (message && bootMsg) bootMsg.textContent = message;
+};
+const bootDone = () => {
+  boot(1);
+  bootEl?.classList.add('is-done');
+  document.getElementById('app')?.removeAttribute('aria-busy');
+  setTimeout(() => bootEl?.remove(), 600);
+};
+
+/** Descarga un Blob con el nombre indicado. */
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+const isModelFile = (name) => /\.(glb|gltf|fbx)$/i.test(name);
+
+/** Url del modelo de la biblioteca, con vuelta al de siempre si el id no existe. */
+const libraryUrl = (id) => MODEL_LIBRARY.find((entry) => entry.id === id)?.url ?? DEFAULT_MODEL_URL;
+
+async function main() {
+  hydrateIcons(document);
+  initToasts(document.getElementById('toasts'));
+
+  const settings = new Settings(DEFAULTS, STORAGE_KEY);
+  // La captura nunca arranca congelada por un valor heredado de la sesion.
+  settings.set('mocap.frozen', false, { silent: true });
+
+  boot(0.08, 'Preparando el motor 3D…');
+  const viewport = new Viewport(document.getElementById('gl-canvas'), settings);
+
+  const character = new Character(settings);
+  viewport.add(character.root);
+  // El autofoco pregunta al personaje donde esta la cabeza, las manos, etc.
+  viewport.cameras.focusProvider = (target) => (character.loaded ? character.focusPoint(target) : null);
+
+  const engine = new PoseEngine(settings, character);
+  const detector = new PoseDetector(settings);
+  const overlay = new Overlay2D(document.getElementById('mocap-overlay'), settings);
+  const guides = new Guides(document.getElementById('guide-canvas'), settings, viewport);
+
+  const app = {
+    settings, viewport, character, engine, detector, overlay, guides,
+    hooks: {}, actions: {},
+  };
+
+  detector.onFallback = (aviso) => {
+    toast(aviso, 'warn');
+    settings.set('mocap.delegate', 'CPU');
+  };
+
+  const source = new MocapSource(settings, {
+    video: document.getElementById('mocap-video'),
+    image: document.getElementById('mocap-image'),
+    onStatus: (st) => onSourceStatus(st),
+  });
+  app.source = source;
+
+  const library = new PoseLibrary(character, { onChange: () => app.hooks.refreshPoses?.() });
+  app.library = library;
+
+  const posing = new ManualPosing({
+    settings, viewport, character,
+    onSelect: (entry) => settings.set('ui.selectedBone', entry?.label ?? entry?.key ?? ''),
+  });
+  app.posing = posing;
+  settings.on('ui.manualPosing', (v) => posing.setEnabled(v === true));
+  // Rig de manos: deduce los ejes de flexion del propio esqueleto y aplica los
+  // valores de `hands.*`. El guardia evita que copiar una mano en la otra
+  // vuelva a entrar en el mismo suscriptor.
+  const hands = new HandRig(character, settings);
+  app.hands = hands;
+  // Rastreador de dedos por camara: usa su propio modelo de MediaPipe y
+  // escribe sobre el mismo rig, asi que se carga solo si se pide.
+  const tracker = new HandTracker(settings, hands);
+  app.tracker = tracker;
+  tracker.onCount = (n) => app.hooks.handCount?.(n);
+  let enHands = false;
+  const rigWrite = (fn) => {
+    if (enHands) return;
+    enHands = true;
+    try { fn(); } finally { enHands = false; }
+  };
+  const ladoEditado = () => (settings.get('hands.edit') === 'right' ? 'right' : 'left');
+
+  settings.on('hands.*', (value, prev, path) => {
+    const parts = String(path).split('.');
+    if (parts[1] === 'edit') return;                      // solo cambia la vista
+    if (parts[1] === 'fingers') {
+      posing.rebuild();
+      posing.setEnabled(settings.get('ui.manualPosing') === true);
+      if (value === true && settings.get('ui.manualPosing') !== true) {
+        toast('Activa el posado manual para usar los manejadores de falange');
+      }
+      return;
+    }
+    if (parts[1] === 'link') {
+      if (value === true) rigWrite(() => hands.mirror(ladoEditado()));
+      return;
+    }
+    if (enHands) return;
+    const side = parts[1] === 'right' ? 'right' : 'left';
+    rigWrite(() => {
+      // Tocar un dedo a mano deja de ser un gesto de la lista.
+      if (parts[2] && parts[2] !== 'preset') settings.set(`hands.${side}.preset`, 'libre');
+      if (settings.get('hands.link') === true) hands.mirror(side);
+      hands.apply();
+    });
+  });
+
+  /* ── Acciones de la interfaz ────────────────────────────────────────── */
+
+  const actions = app.actions;
+
+  actions.loadModelFile = async () => {
+    const file = await pickFile('.glb,.gltf,.fbx');
+    if (file) await loadCharacter(file);
+  };
+  actions.loadLibraryModel = async (id) => {
+    const entry = MODEL_LIBRARY.find((e) => e.id === id);
+    if (!entry) return false;
+    settings.set('figure.model', entry.id);
+    const ok = await loadCharacter(entry.url);
+    if (ok) toast('Figura: ' + entry.label, 'ok');
+    return ok;
+  };
+  actions.resetModel = () => {
+    settings.set('figure.model', 'character');
+    return loadCharacter(DEFAULT_MODEL_URL);
+  };
+
+  actions.handleDroppedFile = async (file) => {
+    if (isModelFile(file.name)) return loadCharacter(file);
+    const ok = await source.useFile(file);
+    if (!ok) return;
+    settings.set('mocap.source', source.kind === 'imagen' ? 'imagen' : 'video');
+    await startCapture();
+  };
+
+  actions.startCapture = () => startCapture();
+  actions.stopCapture = () => stopCapture();
+  actions.loadMediaFile = async () => {
+    const file = await pickFile('image/*,video/*');
+    if (!file) return;
+    await actions.handleDroppedFile(file);
+  };
+  actions.detectStill = async () => {
+    if (source.kind !== 'imagen') {
+      toast('Carga primero una imagen de referencia', 'warn');
+      return;
+    }
+    const frame = await source.detectStill(detector);
+    if (!frame?.landmarks?.length) {
+      toast('No se ha reconocido ninguna figura en la imagen', 'warn');
+      return;
+    }
+    settings.set('mocap.frozen', false);
+    engine.update(frame, 1 / 30);
+    overlay.draw(source, frame);
+    toast('Pose extraida de la imagen', 'ok');
+  };
+
+  actions.frameFigure = () => {
+    if (!character.loaded) return;
+    character.refreshBounds();
+    viewport.frame(character.box);
+  };
+  actions.resetCamera = () => {
+    settings.reset('camera');
+    viewport.cameras.setView('tres cuartos');
+    actions.frameFigure();
+  };
+  actions.setView = (name) => {
+    viewport.cameras.setView(name);
+  };
+
+  actions.resetPose = () => {
+    posing.mark?.();
+    engine.release();
+    hands.apply();          // el reposo borra los dedos: se recuperan los valores
+    toast('Pose de reposo restaurada');
+  };
+  actions.handPreset = (id) => {
+    if (!hands.ready) { toast('El personaje cargado no trae dedos', 'warn'); return; }
+    const objetivo = settings.get('hands.link') === true ? null : ladoEditado();
+    rigWrite(() => hands.applyPreset(objetivo, id));
+    toast('Gesto: ' + (HAND_PRESET_BY_ID[id]?.label ?? id).toLowerCase());
+  };
+  actions.mirrorHand = () => {
+    if (!hands.ready) { toast('El personaje cargado no trae dedos', 'warn'); return; }
+    const side = ladoEditado();
+    rigWrite(() => hands.mirror(side));
+    toast(side === 'left' ? 'Mano izquierda copiada en la derecha' : 'Mano derecha copiada en la izquierda');
+  };
+  actions.presetPose = (tipo) => {
+    settings.set('mocap.frozen', true);
+    library.preset(tipo);
+    toast(tipo === 't' ? 'Pose T aplicada' : 'Pose A aplicada');
+  };
+  actions.undo = () => {
+    if (!posing.canUndo) return;
+    posing.undo();
+  };
+
+  actions.capturePose = (name) => {
+    const item = library.capture(name ?? '');
+    if (!item) {
+      toast('Todavia no hay un modelo cargado', 'warn');
+      return;
+    }
+    app.hooks.refreshPoses?.();
+    toast(`Guardada «${item.name}»`, 'ok');
+  };
+  actions.applyPose = (id) => {
+    settings.set('mocap.frozen', true);
+    if (library.apply(id)) toast('Pose aplicada');
+  };
+  actions.deletePose = (id) => {
+    library.remove(id);
+    app.hooks.refreshPoses?.();
+  };
+  actions.exportPoses = () => {
+    if (!library.list().length) {
+      toast('No hay poses que exportar', 'warn');
+      return;
+    }
+    download(new Blob([library.exportJSON()], { type: 'application/json' }), `posu-poses-${stamp()}.json`);
+  };
+  actions.importPoses = async () => {
+    const file = await pickFile('.json,application/json');
+    if (!file) return;
+    const count = library.importJSON(await file.text());
+    app.hooks.refreshPoses?.();
+    toast(count ? `${count} pose(s) importada(s)` : 'El archivo no contiene poses validas', count ? 'ok' : 'err');
+  };
+
+  actions.screenshot = async (transparent = false) => {
+    try {
+      const blob = await viewport.screenshot({ scale: 2, transparent });
+      if (!blob) throw new Error('sin datos');
+      download(blob, `posu-${stamp()}.png`);
+      toast('Captura guardada', 'ok');
+    } catch (err) {
+      console.error('[Captura de pantalla]', err);
+      toast('No se pudo generar la imagen', 'err');
+    }
+  };
+  actions.copySettings = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(settings.state, null, 2));
+      toast('Ajustes copiados al portapapeles', 'ok');
+    } catch {
+      toast('El navegador no permite copiar al portapapeles', 'warn');
+    }
+  };
+  actions.resetAll = () => {
+    stopCapture();
+    settings.reset();
+    engine.release();
+    toast('Ajustes restablecidos');
+  };
+
+  /* ── Escena del usuario: solidos y luces ────────────────────────────── */
+
+  // Se crea antes de la interfaz porque los paneles preguntan por app.scene.
+  const sceneEditor = new SceneEditor({
+    settings,
+    viewport,
+    // Mientras se posa la figura a mano, el gizmo del editor no roba el raton.
+    blocked: () => settings.get('ui.manualPosing') === true,
+    onSelect: () => app.hooks.refreshScene?.(),
+  });
+  app.scene = sceneEditor;
+
+  actions.addObject = (type) => {
+    sceneEditor.addObject(type);
+    toast('Solido insertado. W mover · E girar · R escalar');
+  };
+  actions.addLight = (type) => {
+    sceneEditor.addLight(type);
+    toast('Luz insertada. Colocala con el gizmo (W)');
+  };
+  actions.selectItem = (id) => sceneEditor.select(id);
+  actions.alignPerspective = () => {
+    if (!guides.perspective.active) { toast('Elige antes un modo de perspectiva'); return; }
+    guides.perspective.alignCamera();
+    toast('Camara alineada al modo de perspectiva');
+  };
+  actions.duplicateItem = (id) => { if (id) sceneEditor.duplicate(id); };
+  actions.removeItem = (id) => { if (id) sceneEditor.remove(id); };
+  actions.clearScene = () => {
+    if (!sceneEditor.list().length) return;
+    sceneEditor.clearAll();
+    toast('Escena vaciada');
+  };
+
+  /* ── Interfaz ───────────────────────────────────────────────────────── */
+
+  boot(0.2, 'Montando la interfaz…');
+  const ui = new UI(app);
+  app.ui = ui;
+  const statusbar = new StatusBar(document.getElementById('statusbar'), app);
+  app.statusbar = statusbar;
+
+  /** Refleja en la interfaz el estado real de la fuente de captura. */
+  function onSourceStatus(st) {
+    const live = !!st.active;
+    app.hooks.captureState?.(live);
+    if (st.error) {
+      ui.setStatus(st.error, 'err');
+      statusbar.setCapture('error', 'err');
+      toast(st.error, 'err');
+      return;
+    }
+    if (!live) {
+      ui.setStatus('Captura detenida');
+      statusbar.setCapture('inactiva');
+      overlay.clear();
+      ui.setMocapFps(0);
+      return;
+    }
+    const size = st.size?.width ? ` · ${st.size.width}×${st.size.height}` : '';
+    const label = st.kind === 'webcam' ? (st.label || 'Camara') : st.label || st.kind;
+    ui.setStatus(`${st.kind === 'imagen' ? 'Imagen' : st.kind === 'video' ? 'Video' : 'Camara'}: ${label}${size}`, 'ok');
+    statusbar.setCapture(st.kind === 'webcam' ? 'camara en directo' : st.kind, 'ok');
+  }
+
+  /* ── Bucle de captura ───────────────────────────────────────────────── */
+
+  let lastFrame = null;
+  let detectorReady = false;
+  // Se mide la frecuencia real de inferencia, no la teorica: con el limitador
+  // del delegado CPU el coste por deteccion ya no dice a que ritmo se analiza.
+  let detWindow = 0;
+  let detCount = 0;
+
+  viewport.onFrame((dt) => {
+    // Guias 2D: el propio modulo corta pronto si no hay ninguna activa.
+    guides.draw();
+
+    if (!source.active) return;
+
+    if (source.kind === 'imagen') {
+      overlay.draw(source, source.still);
+      statusbar.setConfidence(engine.confidence);
+      return;
+    }
+
+    if (detectorReady) {
+      const frame = detector.detectVideo(source.element, performance.now());
+      if (frame?.landmarks?.length) {
+        lastFrame = frame;
+        engine.update(frame, dt);
+        detCount++;
+      } else if (lastFrame && !detector.throttled && detector.lastError) {
+        // Un fallo persistente no debe dejar la figura congelada sin aviso.
+        statusbar.setConfidence(engine.confidence);
+      }
+      // Los dedos van por su cuenta: aunque el cuerpo no se detecte en este
+      // fotograma, las manos siguen mandando (y con su propio limitador).
+      tracker.update(source.element, performance.now(), lastFrame);
+      detWindow += dt;
+      if (detWindow >= 1) {
+        ui.setMocapFps(detCount / detWindow);
+        app.hooks.detectorInfo?.(detector.describe());
+        detWindow = 0;
+        detCount = 0;
+      }
+    }
+    overlay.draw(source, lastFrame, tracker.hands);
+    statusbar.setConfidence(engine.confidence);
+  });
+
+  /* ── Arranque y parada de la captura ────────────────────────────────── */
+
+  async function startCapture() {
+    const kind = settings.get('mocap.source');
+    try {
+      if (kind === 'webcam') {
+        ui.setStatus('Abriendo la camara…');
+        const ok = await source.startWebcam({ deviceId: settings.get('mocap.deviceId') });
+        if (!ok) return false;
+      } else if (!source.active) {
+        // Imagen o video: hace falta un archivo antes de poder analizar.
+        const file = await pickFile(kind === 'imagen' ? 'image/*' : 'video/*');
+        if (!file) return false;
+        if (!(await source.useFile(file))) return false;
+      }
+
+      ui.setStatus('Cargando el modelo de deteccion…');
+      detectorReady = false;
+      await detector.ensure(source.detectorMode, (msg) => ui.setStatus(msg));
+      detectorReady = true;
+      await ensureTracker();       // segundo modelo, solo si los dedos estan activos
+      settings.set('mocap.frozen', false);
+      onSourceStatus({ kind: source.kind, active: source.active, label: source.label, size: source.size });
+
+      app.hooks.detectorInfo?.(detector.describe());
+      if (source.kind === 'imagen') await actions.detectStill();
+      return true;
+    } catch (err) {
+      console.error('[Captura]', err);
+      ui.setStatus('No se pudo iniciar la captura', 'err');
+      toast(`No se pudo iniciar la captura: ${errorText(err)}`, 'err');
+      return false;
+    }
+  }
+
+  function stopCapture() {
+    source.stop();
+    detectorReady = false;
+    lastFrame = null;
+    engine.reset();
+    if (tracker.count) { tracker.count = 0; app.hooks.handCount?.(0); hands.apply(); }
+    tracker.hands = [];
+    overlay.clear();
+    ui.setMocapFps(0);
+    statusbar.setConfidence(0);
+  }
+
+  /* ── Recarga de los modelos de deteccion ────────────────────────────── */
+
+  /** Carga el modelo de manos si los dedos por camara estan activados. */
+  async function ensureTracker() {
+    if (settings.get('mocap.hands') !== true) return false;
+    try {
+      await tracker.ensure((msg) => ui.setStatus(msg));
+      return true;
+    } catch (err) {
+      console.error('[Manos]', err);
+      toast('No se pudo cargar el modelo de manos: ' + errorText(err), 'err');
+      settings.set('mocap.hands', false);
+      return false;
+    }
+  }
+
+  // El delegado y la calidad no se pueden cambiar en caliente: hay que volver
+  // a crear el detector. Si la captura esta en marcha se hace al momento para
+  // que el cambio se note sin tener que pararla y arrancarla a mano.
+  let recargando = false;
+  settings.on(['mocap.delegate', 'mocap.modelQuality'], async () => {
+    if (!source.active || source.kind === 'imagen' || recargando) return;
+    recargando = true;
+    detectorReady = false;
+    try {
+      await detector.ensure(source.detectorMode, (msg) => ui.setStatus(msg));
+      detectorReady = true;
+      if (tracker.stale) { tracker.dispose(); await ensureTracker(); }
+      ui.setStatus('Detector: ' + detector.describe(), 'ok');
+      toast('Deteccion recargada · ' + detector.describe(), 'ok');
+    } catch (err) {
+      console.error('[Detector]', err);
+      ui.setStatus('No se pudo recargar el detector', 'err');
+      toast('No se pudo recargar el detector: ' + errorText(err), 'err');
+    } finally {
+      recargando = false;
+    }
+  });
+
+  // Activar los dedos por camara descarga su modelo la primera vez; al
+  // apagarlos las manos recuperan la postura elegida en el panel.
+  settings.on('mocap.hands', async (value) => {
+    if (value === true) {
+      if (!hands.ready) {
+        toast('El personaje cargado no trae dedos', 'warn');
+        settings.set('mocap.hands', false);
+        return;
+      }
+      if (source.active && source.kind !== 'imagen') await ensureTracker();
+      return;
+    }
+    if (tracker.count) app.hooks.handCount?.(0);
+    tracker.count = 0;
+    tracker.hands = [];
+    hands.apply();
+  });
+
+  /* ── Carga del personaje ────────────────────────────────────────────── */
+
+  async function loadCharacter(src) {
+    const label = typeof src === 'string' ? 'modelo incluido' : src.name;
+    ui.setStatus(`Cargando ${label}…`);
+    try {
+      await character.load(src, {
+        onProgress: (ev) => {
+          if (ev?.total) boot(0.3 + 0.6 * (ev.loaded / ev.total), 'Cargando la figura…');
+        },
+      });
+    } catch (err) {
+      console.error('[Modelo]', err);
+      ui.setStatus('No se pudo cargar el modelo', 'err');
+      toast(`No se pudo cargar el modelo: ${errorText(err)}`, 'err');
+      return false;
+    }
+
+    guides.setCharacter(character);
+    if (hands.rebuild()) hands.apply();   // ejes de los dedos del nuevo esqueleto
+    posing.rebuild();
+    posing.setEnabled(settings.get('ui.manualPosing') === true);
+    engine.reset();
+    character.refreshBounds();
+    viewport.frame(character.box);
+
+    // Solo se avisa de los huesos que la aplicacion necesita: faltar la
+    // coronilla o los dedos de los pies es normal y no cambia nada visible.
+    if (character.missingRequired?.length) {
+      console.warn('[Modelo] huesos sin correspondencia:', character.missingRequired);
+      toast(`Faltan ${character.missingRequired.length} huesos del esqueleto estandar`, 'warn');
+    } else if (character.missing?.length) {
+      console.info('[Modelo] huesos opcionales ausentes:', character.missing);
+    }
+    ui.setStatus(typeof src === 'string' ? 'Listo' : `Figura cargada: ${label}`, 'ok');
+    return true;
+  }
+
+  /* ── Secuencia de arranque ──────────────────────────────────────────── */
+
+  boot(0.3, 'Cargando la figura…');
+  await loadCharacter(libraryUrl(settings.get('figure.model')));
+
+  boot(0.95, 'Ultimos ajustes…');
+  viewport.start();
+  bootDone();
+
+  if (settings.get('mocap.autoStart') === true && settings.get('mocap.source') === 'webcam') {
+    startCapture();
+  }
+
+  // Libera la camara al cerrar la pestana.
+  window.addEventListener('beforeunload', () => {
+    source.dispose();
+    settings.save();
+  });
+
+  // Utilidad de depuracion: `window.posu` permite inspeccionar todo en consola.
+  window.posu = app;
+}
+
+main().catch((err) => {
+  console.error('[POSU] fallo en el arranque:', err);
+  const msg = document.getElementById('boot-msg');
+  if (msg) {
+    msg.textContent = `No se pudo iniciar: ${errorText(err)}`;
+    msg.classList.add('is-error');
+  }
+});

@@ -1,0 +1,40 @@
+{
+  "name": "posu-anatomy-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "POSU — Estudio 3D de anatomia artistica con captura de pose por webcam (MediaPipe + Kalidokit + Three.js)",
+  "scripts": {
+    "predev": "node scripts/copy-wasm.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-wasm.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "convert": "node scripts/convert-model.mjs",
+    "test": "node tests/run.mjs",
+    "deploy": "npm run build && wrangler pages deploy dist"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.22",
+    "kalidokit": "^1.1.5",
+    "lucide": "^0.545.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.4.2",
+    "fbx2gltf": "^0.9.7",
+    "jsdom": "30.0.1",
+    "vite": "^7.1.5",
+    "wrangler": "^4.42.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260828.1": true,
+    "sharp@0.34.5": true,
+    "sharp@0.35.2": true
+  },
+  "overrides": {
+    "sharp": "0.35.2"
+  }
+}
