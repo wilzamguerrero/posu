@@ -94,4 +94,72 @@ console.log('botones de la barra del visor:', document.querySelectorAll('#viewpo
 
 toast('mensaje de prueba', 'ok');
 console.log('avisos:', document.querySelectorAll('#toasts > *').length);
+// 8 · El panel del elemento seleccionado se construye para TODOS los tipos.
+// El grupo "Elemento seleccionado" solo se arma cuando hay algo elegido, asi que
+// sin este recorrido un fallo ahi (una importacion que falta, un rango sin
+// definir) no aparece hasta que el usuario pincha un objeto en el visor.
+const { PRIMITIVES } = await import('../src/scene/primitives.js');
+const { LIGHT_TYPES, lightDefaults } = await import('../src/scene/lights.js');
+const { materialDefaults } = await import('../src/model/MaterialLibrary.js');
+
+const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
+const objDefs = PRIMITIVES.map((p, i) => ({
+  id: 'o' + i, type: p.id, name: p.label, visible: true,
+  position: vec(0, 0.4, 0), rotation: vec(), scale: vec(1, 1, 1),
+  params: { ...p.p }, material: materialDefaults('yeso'),
+  castShadow: true, receiveShadow: true,
+}));
+const luzDefs = LIGHT_TYPES.map((l, i) => ({
+  id: 'l' + i, type: l.id, name: l.label, visible: true,
+  position: vec(0, 1.9, 0), ...lightDefaults(l.id),
+}));
+
+// Un editor de escena simulado que lee de los ajustes, como el de verdad.
+app.scene = {
+  locate(id) {
+    let i = (settings.get('scene.objects') ?? []).findIndex((d) => d.id === id);
+    if (i >= 0) return { branch: 'objects', index: i, def: settings.get('scene.objects')[i] };
+    i = (settings.get('scene.lights') ?? []).findIndex((d) => d.id === id);
+    if (i >= 0) return { branch: 'lights', index: i, def: settings.get('scene.lights')[i] };
+    return null;
+  },
+  list: () => [
+    ...(settings.get('scene.objects') ?? []).map((d) => ({ id: d.id, label: d.name, icon: 'box', kind: 'objeto' })),
+    ...(settings.get('scene.lights') ?? []).map((d) => ({ id: d.id, label: d.name, icon: 'lightbulb', kind: 'luz' })),
+  ],
+};
+settings.set('scene.objects', objDefs);
+settings.set('scene.lights', luzDefs);
+
+// group() no marca su id en el DOM, asi que la seccion se busca por su titulo.
+const grupoPorTitulo = (titulo) => [...document.querySelectorAll('#sidebar-host .group-head')]
+  .find((h) => h.textContent.includes(titulo))?.parentElement
+  ?.querySelector('.group-body') ?? null;
+const cuerpo = grupoPorTitulo('Elemento seleccionado');
+if (!cuerpo) console.log('AVISO: no se encontro el grupo del elemento seleccionado');
+const cuenta = (id) => {
+  settings.set('scene.selected', id);
+  return {
+    controles: cuerpo?.querySelectorAll('input, select, button').length ?? 0,
+    rangos: cuerpo?.querySelectorAll('input[type="range"]').length ?? 0,
+  };
+};
+
+let minimo = Infinity, fallos = 0;
+for (const d of [...objDefs, ...luzDefs]) {
+  const { controles, rangos } = cuenta(d.id);
+  // Todo elemento trae al menos nombre, visibilidad, posicion (3 rangos) y los
+  // dos botones del pie; si sale por debajo de eso, algo no se ha pintado.
+  if (controles < 6 || rangos < 3) { console.log('  POCO: ' + d.type + ' -> ' + controles + ' controles, ' + rangos + ' rangos'); fallos++; }
+  minimo = Math.min(minimo, controles);
+}
+console.log('tipos de elemento revisados:', objDefs.length + luzDefs.length,
+  '· minimo de controles:', minimo, '·', fallos === 0 ? 'todos pintan' : fallos + ' incompletos');
+
+// La seleccion vacia vuelve al aviso, sin dejar controles colgando.
+settings.set('scene.selected', '');
+console.log('sin seleccion:', (cuerpo?.querySelectorAll('input').length ?? -1) === 0 ? 'solo el aviso' : 'quedan controles');
+console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.querySelectorAll('.list-row').length, 'filas');
+
+
 console.log(errors.length ? 'ERRORES: ' + errors.join(' | ') : 'sin errores en el DOM');

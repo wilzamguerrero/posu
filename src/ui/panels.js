@@ -8,7 +8,7 @@
  */
 
 import {
-  el, group, field, slider, toggle, segmented, select, color, buttons, notice, meter, listView, enableWhen,
+  el, group, field, slider, toggle, segmented, select, color, vector3, buttons, notice, meter, listView, enableWhen,
   presetGrid, reactive,
 } from './widgets.js';
 import { icon } from './icons.js';
