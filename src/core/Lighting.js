@@ -9,17 +9,23 @@
  *
  * Las sombras usan VSM porque es el unico filtro de Three.js donde el radio de
  * difuminado es un parametro real: asi el deslizador de "suavidad" se traduce
- * en penumbras mas anchas, que es justo lo que se estudia en claroscuro.
+ * en penumbras mas anchas, que es justo lo que se estudia en claroscuro. En
+ * equipos modestos y en modo compatible se cambia por PCF (ver
+ * core/capabilities.js): cuesta mucho menos, a cambio de que la suavidad deje
+ * de notarse.
  */
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { LIGHT_PRESETS } from '../config.js';
 
 export class Lighting {
-  constructor(scene, renderer, settings) {
+  constructor(scene, renderer, settings, profile = null) {
     this.scene = scene;
     this.renderer = renderer;
     this.settings = settings;
+    // Techo de calidad del equipo: limita el tamano del mapa de sombra y el
+    // numero de muestras del difuminado (ver core/capabilities.js).
+    this.profile = profile ?? { shadowMap: 2048, blurSamples: 16 };
 
     this.ambient = new THREE.AmbientLight(0x8fa6c4, 0.35);
 
@@ -27,7 +33,7 @@ export class Lighting {
     this.key.castShadow = true;
     this.key.shadow.camera.near = 0.1;
     this.key.shadow.camera.far = 24;
-    this.key.shadow.blurSamples = 16;
+    this.key.shadow.blurSamples = this.profile.blurSamples;
     this.keyTarget = new THREE.Object3D();
     this.keyTarget.position.set(0, 0.95, 0);
     this.key.target = this.keyTarget;
@@ -94,7 +100,9 @@ export class Lighting {
   }
 
   applyShadowMap() {
-    const size = Number(this.settings.get('quality.shadowMap')) || 2048;
+    const pedido = Number(this.settings.get('quality.shadowMap')) || 2048;
+    // 4096 en un telefono son 64 MiB de textura de sombra: el perfil manda.
+    const size = Math.min(pedido, this.profile.shadowMap);
     if (this.key.shadow.mapSize.width === size) return;
     this.key.shadow.mapSize.set(size, size);
     // Forzar la reconstruccion del render target de sombra.

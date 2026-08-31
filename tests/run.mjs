@@ -10,7 +10,7 @@ const dir = fileURLToPath(new URL('.', import.meta.url));
 // --import exige una URL: en Windows una ruta absoluta como "e:\..." se
 // interpretaria como esquema "e:".
 const loader = new URL('./loader.mjs', import.meta.url).href;
-const suites = ['figure.test.mjs', 'stage.test.mjs', 'perspective.test.mjs', 'hands.test.mjs', 'mocap.test.mjs', 'ui.test.mjs'];
+const suites = ['figure.test.mjs', 'stage.test.mjs', 'perspective.test.mjs', 'hands.test.mjs', 'mocap.test.mjs', 'graphics.test.mjs', 'watchdog.test.mjs', 'scene.test.mjs', 'ui.test.mjs'];
 
 let fallos = 0;
 for (const suite of suites) {

@@ -877,6 +877,8 @@ function settingsPanel(app) {
           { value: 24, label: '24 fps' },
         ] }).root,
       toggle({ path: 'quality.showStats', label: 'Mostrar contador de fotogramas' }),
+      toggle({ path: 'quality.compat', label: 'Modo compatible',
+        hint: 'Sombras y efectos por la ruta mas simple de WebGL. Actívalo si el visor sale en negro o el navegador pierde el contexto grafico. Requiere recargar.' }),
     ]),
     group({ id: 'st-export', title: 'Exportar', icon: 'download' }, [
       buttons([

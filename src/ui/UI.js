@@ -73,6 +73,8 @@ export class UI {
     this.#buildHud();
     this.#buildDropZone();
     this.#bindKeys();
+    // El editor de escena avisa cuando se elige un elemento en el visor.
+    app.hooks.revealScene = () => this.revealSection('scene');
     hydrateIcons(document);
   }
 
@@ -117,6 +119,18 @@ export class UI {
       this.settings.set('ui.sidebar', false);
       return;
     }
+    this.settings.batch(() => {
+      this.settings.set('ui.section', id);
+      this.settings.set('ui.sidebar', true);
+    });
+  }
+
+  /**
+   * Abre una seccion sin alternarla: lo usa la seleccion hecha en el visor, que
+   * debe acabar siempre con el panel del elemento a la vista.
+   */
+  revealSection(id) {
+    if (!this.panels.some((p) => p.id === id)) return;
     this.settings.batch(() => {
       this.settings.set('ui.section', id);
       this.settings.set('ui.sidebar', true);

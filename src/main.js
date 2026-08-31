@@ -45,7 +45,25 @@ const bootDone = () => {
   boot(1);
   bootEl?.classList.add('is-done');
   document.getElementById('app')?.removeAttribute('aria-busy');
-  setTimeout(() => bootEl?.remove(), 600);
+  if (!bootEl) return;
+  // Deja de recibir clics al momento: mientras se desvanece sigue cubriendo la
+  // pagina entera. Y se retira en cuanto acabe la transicion, sin esperar al
+  // temporizador, para que un compositor atascado no deje una capa opaca encima
+  // de la interfaz.
+  bootEl.style.pointerEvents = 'none';
+  const fuera = () => bootEl.remove();
+  bootEl.addEventListener('transitionend', fuera, { once: true });
+  setTimeout(fuera, 600);
+};
+
+/** Mensaje de error definitivo, en la pantalla de arranque si sigue visible. */
+const bootError = (text) => {
+  console.error('[POSU]', text);
+  const msg = document.getElementById('boot-msg');
+  if (!msg) return;
+  msg.textContent = text;
+  msg.classList.add('is-error');
+  document.getElementById('boot')?.classList.remove('is-done');
 };
 
 /** Descarga un Blob con el nombre indicado. */
@@ -75,10 +93,62 @@ async function main() {
   boot(0.08, 'Preparando el motor 3D…');
   const viewport = new Viewport(document.getElementById('gl-canvas'), settings);
 
+  /* ── Contexto grafico perdido ───────────────────────────────────────── */
+
+  // Hay controladores (tipicamente Linux con GPU hibrida, y tambien equipos que
+  // acaban dibujando por software) que tumban el contexto en el primer dibujo:
+  // los programas dejan de enlazar, la consola se llena de «VALIDATE_STATUS
+  // false» y el visor se queda en negro. La primera vez se reintenta en modo
+  // compatible; si vuelve a caerse se avisa y no se insiste, para no dejar la
+  // pagina recargandose en bucle.
+  const RETRY_KEY = 'posu.compat.retry';
+  const reintentado = (() => {
+    try { return sessionStorage.getItem(RETRY_KEY) === '1'; } catch { return false; }
+  })();
+
+  viewport.onContextLost = (gpu) => {
+    if (settings.get('quality.compat') === true || reintentado) {
+      const detalle = gpu ? ` (${gpu})` : '';
+      bootError(`El navegador ha perdido el contexto grafico${detalle}. Prueba con otro navegador o actualiza el controlador de la tarjeta grafica.`);
+      toast('Se ha perdido el contexto grafico', 'err');
+      return;
+    }
+    settings.set('quality.compat', true);
+    settings.save();
+    try { sessionStorage.setItem(RETRY_KEY, '1'); } catch { /* modo privado */ }
+    toast('Fallo grafico: se activa el modo compatible y se recarga…', 'warn');
+    setTimeout(() => location.reload(), 1200);
+  };
+  viewport.onContextRestored = () => toast('Contexto grafico recuperado', 'ok');
+
+  /* ── El navegador deja de dibujar ───────────────────────────────────── */
+
+  // Sintoma tipico: la ventana se queda en negro (o con el ultimo fotograma
+  // congelado), la consola limpia y la aplicacion viva por dentro. Pasa cuando
+  // el compositor del sistema deja de presentar la pagina; el visor ya ha vuelto
+  // a pedir el bucle, aqui se empuja tambien a repintar el resto de la interfaz.
+  let avisadoParon = false;
+  viewport.onRenderStall = () => {
+    const raiz = document.getElementById('app');
+    if (raiz) {
+      // Un cambio de opacidad imperceptible obliga al navegador a componer un
+      // fotograma nuevo de toda la pagina, no solo del lienzo 3D.
+      raiz.style.opacity = '0.999';
+      setTimeout(() => { raiz.style.opacity = ''; }, 60);
+    }
+    if (avisadoParon) return;
+    avisadoParon = true;
+    toast('El navegador habia dejado de dibujar; se ha reanudado el visor', 'warn');
+  };
+
+  // El modo compatible se decide al crear el renderizador: cambiarlo a mano
+  // solo surte efecto al recargar.
+  settings.on('quality.compat', () => toast('Recarga la pagina para aplicar el modo compatible', 'warn'));
+
   const character = new Character(settings);
   viewport.add(character.root);
   // El autofoco pregunta al personaje donde esta la cabeza, las manos, etc.
-  viewport.cameras.focusProvider = (target) => (character.loaded ? character.focusPoint(target) : null);
+  viewport.cameras.focusProvider = (target, out) => (character.loaded ? character.focusPoint(target, out) : null);
 
   const engine = new PoseEngine(settings, character);
   const detector = new PoseDetector(settings);
@@ -202,6 +272,7 @@ async function main() {
     }
     settings.set('mocap.frozen', false);
     engine.update(frame, 1 / 30);
+    viewport.invalidateShadows();
     overlay.draw(source, frame);
     toast('Pose extraida de la imagen', 'ok');
   };
@@ -224,23 +295,27 @@ async function main() {
     posing.mark?.();
     engine.release();
     hands.apply();          // el reposo borra los dedos: se recuperan los valores
+    viewport.invalidateShadows();
     toast('Pose de reposo restaurada');
   };
   actions.handPreset = (id) => {
     if (!hands.ready) { toast('El personaje cargado no trae dedos', 'warn'); return; }
     const objetivo = settings.get('hands.link') === true ? null : ladoEditado();
     rigWrite(() => hands.applyPreset(objetivo, id));
+    viewport.invalidateShadows();
     toast('Gesto: ' + (HAND_PRESET_BY_ID[id]?.label ?? id).toLowerCase());
   };
   actions.mirrorHand = () => {
     if (!hands.ready) { toast('El personaje cargado no trae dedos', 'warn'); return; }
     const side = ladoEditado();
     rigWrite(() => hands.mirror(side));
+    viewport.invalidateShadows();
     toast(side === 'left' ? 'Mano izquierda copiada en la derecha' : 'Mano derecha copiada en la izquierda');
   };
   actions.presetPose = (tipo) => {
     settings.set('mocap.frozen', true);
     library.preset(tipo);
+    viewport.invalidateShadows();
     toast(tipo === 't' ? 'Pose T aplicada' : 'Pose A aplicada');
   };
   actions.undo = () => {
@@ -259,7 +334,10 @@ async function main() {
   };
   actions.applyPose = (id) => {
     settings.set('mocap.frozen', true);
-    if (library.apply(id)) toast('Pose aplicada');
+    if (library.apply(id)) {
+      viewport.invalidateShadows();
+      toast('Pose aplicada');
+    }
   };
   actions.deletePose = (id) => {
     library.remove(id);
@@ -312,9 +390,14 @@ async function main() {
   const sceneEditor = new SceneEditor({
     settings,
     viewport,
-    // Mientras se posa la figura a mano, el gizmo del editor no roba el raton.
-    blocked: () => settings.get('ui.manualPosing') === true,
+    // El posado manual solo se queda el clic si hay un manejador de
+    // articulacion debajo; en el resto del visor se puede seguir eligiendo
+    // solidos y luces con el raton.
+    blocked: (event) => settings.get('ui.manualPosing') === true && !!event && posing.picks(event),
     onSelect: () => app.hooks.refreshScene?.(),
+    // Al elegir un elemento pinchandolo en el visor se abre su panel: si no, la
+    // seleccion se hacia a ciegas y habia que ir a la lista de escena.
+    onPick: () => app.hooks.revealScene?.(),
   });
   app.scene = sceneEditor;
 
@@ -397,6 +480,8 @@ async function main() {
       if (frame?.landmarks?.length) {
         lastFrame = frame;
         engine.update(frame, dt);
+        // La figura se mueve: hay que rehacer el mapa de sombras.
+        viewport.invalidateShadows();
         detCount++;
       } else if (lastFrame && !detector.throttled && detector.lastError) {
         // Un fallo persistente no debe dejar la figura congelada sin aviso.
@@ -405,6 +490,7 @@ async function main() {
       // Los dedos van por su cuenta: aunque el cuerpo no se detecte en este
       // fotograma, las manos siguen mandando (y con su propio limitador).
       tracker.update(source.element, performance.now(), lastFrame);
+      if (tracker.count) viewport.invalidateShadows();
       detWindow += dt;
       if (detWindow >= 1) {
         ui.setMocapFps(detCount / detWindow);
@@ -546,6 +632,7 @@ async function main() {
     engine.reset();
     character.refreshBounds();
     viewport.frame(character.box);
+    viewport.invalidateShadows();
 
     // Solo se avisa de los huesos que la aplicacion necesita: faltar la
     // coronilla o los dedos de los pies es normal y no cambia nada visible.
@@ -580,6 +667,36 @@ async function main() {
 
   // Utilidad de depuracion: `window.posu` permite inspeccionar todo en consola.
   window.posu = app;
+
+  /**
+   * Radiografia del estado grafico para pegar en la consola cuando algo se ve
+   * mal: dice si el bucle sigue vivo, cuanto hace del ultimo fotograma, que
+   * elemento ocupa el centro de la pantalla y si la interfaz esta maquetada.
+   * Se usa escribiendo `posu.diagnostico()`.
+   */
+  app.diagnostico = () => {
+    const centro = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+    const barra = document.querySelector('.titlebar')?.getBoundingClientRect();
+    const info = {
+      gpu: viewport.gpuName || 'desconocida',
+      perfil: viewport.profile.tier,
+      compatible: settings.get('quality.compat') === true,
+      bucle: viewport.running,
+      contextoPerdido: viewport.contextLost === true,
+      ultimoFotogramaHace: Math.round(performance.now() - viewport.watchdog.stamp) + ' ms',
+      parones: viewport.watchdog.stalls,
+      fps: Math.round(viewport.stats.fps),
+      visor: viewport.size,
+      pixelRatio: viewport.renderer.getPixelRatio(),
+      ventana: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio },
+      pestana: document.visibilityState,
+      pantallaArranque: !!document.getElementById('boot'),
+      barraTitulo: barra ? `${Math.round(barra.width)}×${Math.round(barra.height)}` : 'no existe',
+      enElCentro: centro ? centro.tagName.toLowerCase() + (centro.id ? '#' + centro.id : '') : 'nada',
+    };
+    console.table(info);
+    return info;
+  };
 }
 
 main().catch((err) => {

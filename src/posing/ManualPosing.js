@@ -154,6 +154,8 @@ export class ManualPosing {
     } else {
       bone.quaternion.copy(this.proxy.quaternion);
     }
+    // La figura se ha movido: su sombra ya no vale.
+    this.viewport.invalidateShadows?.();
     // El posado manual manda: se congela la captura para que no lo sobrescriba.
     if (this.settings.get('mocap.frozen') !== true) this.settings.set('mocap.frozen', true);
   }
@@ -201,6 +203,16 @@ export class ManualPosing {
     return hits.length ? hits[0].object.userData.key : null;
   }
 
+  /**
+   * ¿Este puntero cae sobre un manejador de articulacion? Lo consulta el editor
+   * de escena para no robarle el clic al posado (y viceversa: si no hay ningun
+   * manejador debajo, se puede seleccionar un solido aunque el modo pose siga
+   * encendido).
+   */
+  picks(event) {
+    return this.#pick(event) !== null;
+  }
+
   #onPointerDown(event) {
     if (!this.enabled || this.dragging || event.button !== 0) return;
     const key = this.#pick(event);
@@ -222,7 +234,11 @@ export class ManualPosing {
       e.mesh.material = e.key === key ? this.materialHover : this.material;
     }
     this.hovered = key;
-    this.viewport.renderer.domElement.style.cursor = key ? 'grab' : '';
+    // El cursor lo comparten el posado y el editor de escena: cada uno borra
+    // solo el suyo para no pisarse.
+    const dom = this.viewport.renderer.domElement;
+    if (key) dom.style.cursor = 'grab';
+    else if (dom.style.cursor === 'grab') dom.style.cursor = '';
   }
 
   // ------------------------------------------------------------- deshacer ---
@@ -242,6 +258,7 @@ export class ManualPosing {
     const pose = this.history.pop();
     if (!pose) return false;
     this.character?.setPose(pose, 1);
+    this.viewport.invalidateShadows?.();
     return true;
   }
 

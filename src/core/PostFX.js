@@ -23,25 +23,43 @@ import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
 import { LensShader } from './shaders/LensShader.js';
 
 export class PostFX {
-  constructor(renderer, scene, cameraRig, settings) {
+  constructor(renderer, scene, cameraRig, settings, profile = null) {
     this.renderer = renderer;
     this.scene = scene;
     this.rig = cameraRig;
     this.settings = settings;
+    this.profile = profile ?? { samples: 4 };
     this.size = new THREE.Vector2(1, 1);
     this.composer = null;
+    /**
+     * `dirty` marca que hay que *revisar* la cadena; `signature` describe la que
+     * esta montada. Asi mover el deslizador de floracion no rehace el
+     * compositor (la cadena no cambia, solo su intensidad) y ningun fotograma
+     * gasta tiempo comparando cadenas de texto.
+     */
+    this.dirty = true;
     this.signature = '';
     this.passes = {};
 
     settings.on(
       ['camera.dof', 'camera.bloom', 'camera.distortion', 'camera.distortion2', 'camera.chromatic',
         'camera.vignette', 'camera.grain', 'camera.projection', 'quality.ssao', 'quality.antialias'],
-      () => this.invalidate(),
+      () => { this.dirty = true; },
     );
   }
 
+  /** Fuerza el remontaje de la cadena (cambio de tamano, contexto recuperado). */
   invalidate() {
+    this.dirty = true;
     this.signature = '';
+  }
+
+  /** Revisa si la cadena montada sigue siendo la que piden los ajustes. */
+  #refresh() {
+    this.dirty = false;
+    const want = this.#wanted();
+    if (JSON.stringify(want) === this.signature) return;
+    this.#build(want);
   }
 
   /** Cadena de efectos deseada segun los ajustes actuales. */
@@ -63,9 +81,9 @@ export class PostFX {
     };
   }
 
-  #build() {
-    const want = this.#wanted();
+  #build(want = this.#wanted()) {
     this.signature = JSON.stringify(want);
+    this.dirty = false;
     this.composer?.dispose();
     this.passes = {};
 
@@ -78,7 +96,9 @@ export class PostFX {
       this.renderer,
       new THREE.WebGLRenderTarget(Math.max(1, this.size.x), Math.max(1, this.size.y), {
         type: THREE.HalfFloatType, // Rango alto: las luces fuertes no se recortan antes del mapeo de tonos.
-        samples: this.settings.get('quality.antialias') ? 4 : 0,
+        // El multimuestreo sobre una textura de coma flotante es la ruta menos
+        // soportada de WebGL2: el perfil lo apaga en equipos modestos.
+        samples: this.settings.get('quality.antialias') ? this.profile.samples : 0,
       }),
     );
     composer.addPass(new RenderPass(this.scene, this.rig.active));
@@ -164,9 +184,7 @@ export class PostFX {
   }
 
   render(dt = 0.016) {
-    const want = this.#wanted();
-    const sig = JSON.stringify(want);
-    if (sig !== this.signature) this.#build();
+    if (this.dirty) this.#refresh();
     this.#sync(dt);
 
     if (this.composer) {

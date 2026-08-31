@@ -57,7 +57,7 @@ export const DEFAULTS = {
     showSkeletonHelper: false,  // Helper de huesos de Three.js
     height: 1.75,               // Altura objetivo en metros
     turn: 0,                    // Giro del modelo en grados
-    anchor: 'centro',           // centro | suelo
+    anchor: 'suelo',            // suelo | centro  (por defecto, de pie en el suelo)
   },
 
   /**
@@ -223,6 +223,10 @@ export const DEFAULTS = {
     ssao: false,
     fpsCap: 0,                  // 0 = sin limite
     showStats: true,
+    // Ruta grafica minima (sombras PCF, sin multimuestreo, resolucion 1x). Se
+    // enciende sola si el contexto WebGL se pierde al arrancar, que es lo que
+    // ocurre con algunos controladores de Linux.
+    compat: false,
   },
 
   ui: {

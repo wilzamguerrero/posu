@@ -170,8 +170,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .viewport-toolbar {
   position: absolute;
   top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Centrada con `inset` y `margin: auto`, no con `left: 50%`: en un elemento
+     absoluto, `left: 50%` deja como ancho disponible solo la mitad derecha del
+     visor, y la barra se partia en dos filas mucho antes de hacer falta. */
+  left: 0;
+  right: 0;
+  width: max-content;
+  margin-inline: auto;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -183,9 +188,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
   box-shadow: var(--shadow-sm);
   z-index: 4;
   max-width: calc(100% - 24px);
-  flex-wrap: wrap;
-  justify-content: center;
+  /* Siempre una fila: si de verdad no cabe (pantallas estrechas) se desplaza en
+     horizontal, que estorba menos que una segunda fila sobre la figura. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
 }
+.viewport-toolbar::-webkit-scrollbar { display: none; }
+.viewport-toolbar > * { flex: 0 0 auto; }
 .toolbar-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 2px; }
 
 .viewport-badge {
@@ -554,7 +566,10 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
   .brand-sub { display: none; }
   .sidebar { position: absolute; top: var(--titlebar-h); bottom: var(--statusbar-h); left: var(--activitybar-w);
     width: min(320px, calc(100% - var(--activitybar-w))); z-index: 30; box-shadow: var(--shadow); }
-  .viewport-toolbar { top: auto; bottom: 10px; }
+  /* Abajo y con los botones mas juntos, para que la fila entera siga cabiendo. */
+  .viewport-toolbar { top: auto; bottom: 10px; gap: 2px; padding: 3px; }
+  .viewport-toolbar .icon-btn { width: 24px; height: 24px; }
+  .viewport-toolbar .toolbar-sep { margin: 0; }
   .mocap-hud { width: 190px; }
 }
 @media (prefers-reduced-motion: reduce) {

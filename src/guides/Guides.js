@@ -40,6 +40,8 @@ export class Guides {
     this.ctx = canvas.getContext('2d');
     this.character = null;
     this.dpr = 1;
+    /** ¿Queda algo dibujado en el lienzo? Evita borrarlo una y otra vez. */
+    this.painted = false;
     // Modulo hermano: la reticula de fugas, que necesita la camara para calcular
     // los puntos de fuga y por eso vive aqui, sobre el mismo lienzo 2D.
     this.perspective = new Perspective(settings, viewport);
@@ -84,12 +86,23 @@ export class Guides {
 
   draw() {
     const ctx = this.ctx;
-    if (!ctx || !this.#fit()) return;
+    if (!ctx) return;
+    // Con todas las guias apagadas basta con borrar una vez. Repintar un lienzo
+    // a pantalla completa en cada fotograma obliga al compositor a volver a
+    // subir la capa, y eso se nota sobre todo en movil.
+    if (!this.anyActive) {
+      if (this.painted) {
+        this.clear();
+        this.painted = false;
+      }
+      return;
+    }
+    if (!this.#fit()) return;
+    this.painted = true;
     const W = this.canvas.width;
     const H = this.canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    if (!this.anyActive) return;
 
     const g = this.settings.get('guides');
     const line = Math.max(1, this.dpr);
@@ -268,5 +281,6 @@ export class Guides {
     if (!this.ctx) return;
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.painted = false;
   }
 }

@@ -31,14 +31,18 @@ export class SceneEditor {
    * @param {object} deps
    * @param {import('../core/Settings.js').Settings} deps.settings
    * @param {import('../core/Viewport.js').Viewport} deps.viewport
-   * @param {() => boolean} [deps.blocked] Devuelve true si otro modulo manda.
+   * @param {(event?: PointerEvent) => boolean} [deps.blocked] Devuelve true si
+   *   otro modulo manda sobre ese clic (por ejemplo un manejador de pose).
    * @param {(id: string) => void} [deps.onSelect]
+   * @param {(id: string) => void} [deps.onPick] Seleccion hecha en el visor, no
+   *   en la lista: la interfaz aprovecha para mostrar la seccion de escena.
    */
-  constructor({ settings, viewport, blocked, onSelect } = {}) {
+  constructor({ settings, viewport, blocked, onSelect, onPick } = {}) {
     this.settings = settings;
     this.viewport = viewport;
     this.blocked = blocked ?? (() => false);
     this.onSelect = onSelect ?? null;
+    this.onPick = onPick ?? null;
 
     this.group = new THREE.Group();
     this.group.name = 'EscenaDelUsuario';
@@ -50,6 +54,17 @@ export class SceneEditor {
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
+    /** Id del elemento bajo el raton, para el contorno de aviso. */
+    this.hovered = '';
+
+    // Contorno del elemento apuntado: hace visible que la escena se puede
+    // seleccionar pinchando, sin tocar los materiales del usuario.
+    this.outline = new THREE.BoxHelper(new THREE.Object3D(), 0x4fc1ff);
+    this.outline.material.depthTest = false;
+    this.outline.material.transparent = true;
+    this.outline.material.opacity = 0.9;
+    this.outline.renderOrder = 997;
+    this.outline.visible = false;
 
     this.gizmo = new TransformControls(viewport.cameras.active, viewport.renderer.domElement);
     this.gizmo.size = 0.9;
@@ -63,10 +78,15 @@ export class SceneEditor {
     this.gizmoHelper = this.gizmo.getHelper?.() ?? this.gizmo;
     this.gizmoHelper.visible = false;
 
-    viewport.add(this.group, this.helpers, this.gizmoHelper);
+    viewport.add(this.group, this.helpers, this.gizmoHelper, this.outline);
 
     this._onPointerDown = (e) => this.#onPointerDown(e);
-    viewport.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
+    this._onPointerMove = (e) => this.#onPointerMove(e);
+    this._onPointerLeave = () => this.#setHover('');
+    const dom = viewport.renderer.domElement;
+    dom.addEventListener('pointerdown', this._onPointerDown);
+    dom.addEventListener('pointermove', this._onPointerMove);
+    dom.addEventListener('pointerleave', this._onPointerLeave);
     this.unsubscribe = viewport.onFrame(() => this.#sync());
 
     this.#bind();
@@ -239,6 +259,7 @@ export class SceneEditor {
     }
     for (const def of this.objectDefs) this.#ensureObject(def);
     for (const def of this.lightDefs) this.#ensureLight(def);
+    if (this.hovered && !this.items.has(this.hovered)) this.#setHover('');
     this.#attach(this.settings.get('scene.selected'));
     this.#refreshHelpers();
   }
@@ -415,6 +436,8 @@ export class SceneEditor {
     }
     // Un cambio de nombre o de visibilidad cambia la lista de la interfaz.
     if (resto === 'name' || resto === 'visible') this.onSelect?.(this.settings.get('scene.selected'));
+    // Si se esta editando justo lo que el raton senala, el contorno le sigue.
+    if (this.hovered === def.id) this.outline.setFromObject(item.object);
   }
 
   /* ── Gizmo y seleccion ──────────────────────────────────────────────── */
@@ -428,6 +451,8 @@ export class SceneEditor {
       return;
     }
     this.gizmo.attach(item.object);
+    // El contorno de aviso sobra sobre lo ya seleccionado: manda el gizmo.
+    if (this.hovered === id) this.#setHover('');
     // Girar o escalar una luz puntual no significa nada: solo se mueve.
     const soloMover = item.object.isLight && !item.object.isRectAreaLight;
     this.gizmo.showX = this.gizmo.showY = this.gizmo.showZ = true;
@@ -466,26 +491,78 @@ export class SceneEditor {
     return this.pointer;
   }
 
-  /** Seleccion con el raton. El gizmo y el posado manual tienen prioridad. */
-  #onPointerDown(event) {
-    if (event.button !== 0 || this.dragging || this.gizmo.axis || this.blocked()) return;
-    this.raycaster.setFromCamera(this.#pointerTo(event), this.viewport.cameras.active);
-    const candidatos = [];
+  /** Lo que se puede pinchar: los solidos visibles y el cuerpo de las luces. */
+  #pickables() {
+    const lista = [];
     for (const item of this.items.values()) {
       if (!item.object.visible) continue;
-      if (item.object.isLight) { if (item.pick.visible) candidatos.push(item.pick); }
-      else candidatos.push(item.object);
+      if (item.object.isLight) { if (item.pick?.visible) lista.push(item.pick); }
+      else lista.push(item.object);
     }
-    const hits = this.raycaster.intersectObjects(candidatos, false);
-    const id = hits[0]?.object?.userData?.itemId ?? '';
+    return lista;
+  }
+
+  /** Id del elemento que hay bajo el puntero, o '' si no hay ninguno. */
+  #pickAt(event) {
+    const objetos = this.#pickables();
+    if (!objetos.length) return '';
+    this.raycaster.setFromCamera(this.#pointerTo(event), this.viewport.cameras.active);
+    const hits = this.raycaster.intersectObjects(objetos, false);
+    return hits[0]?.object?.userData?.itemId ?? '';
+  }
+
+  /**
+   * ¿Manda el gizmo sobre este puntero? Se comprueba que siga atado a algo: al
+   * soltar la seleccion, TransformControls deja su ultimo eje apuntado puesto, y
+   * sin esta condicion el visor se quedaba sordo a los clics.
+   */
+  #gizmoBusy() {
+    return this.dragging || (!!this.gizmo.object && !!this.gizmo.axis);
+  }
+
+  /** Seleccion con el raton en el visor. El gizmo y el posado tienen prioridad. */
+  #onPointerDown(event) {
+    if (event.button !== 0 || this.#gizmoBusy() || this.blocked(event)) return;
+    const id = this.#pickAt(event);
     // Pinchar en el vacio deselecciona, que es lo esperado en un editor 3D.
-    if (id || this.settings.get('scene.selected')) this.select(id);
+    if (!id && !this.settings.get('scene.selected')) return;
+    this.select(id);
+    if (id) {
+      this.#setHover('');
+      this.onPick?.(id);
+    }
+  }
+
+  /**
+   * Aviso de que hay algo seleccionable debajo: contorno azul y cursor de mano.
+   * Sin esto la seleccion en el visor no se descubre, y hay que ir a la lista.
+   */
+  #onPointerMove(event) {
+    if (this.#gizmoBusy() || this.blocked(event)) { this.#setHover(''); return; }
+    this.#setHover(this.#pickAt(event));
+  }
+
+  #setHover(id) {
+    const marcado = id && id !== this.settings.get('scene.selected') ? id : '';
+    const dom = this.viewport.renderer.domElement;
+    // El cursor se comparte con el posado manual: solo se limpia el propio.
+    if (marcado) dom.style.cursor = 'pointer';
+    else if (dom.style.cursor === 'pointer') dom.style.cursor = '';
+    if (marcado === this.hovered) return;
+    this.hovered = marcado;
+
+    const item = marcado ? this.items.get(marcado) : null;
+    if (item) this.outline.setFromObject(item.object);
+    this.outline.visible = !!item;
   }
 
   /** Por fotograma: la camara del gizmo y los ayudantes que siguen a la luz. */
   #sync() {
     const cam = this.viewport.cameras.active;
     if (this.gizmo.camera !== cam) this.gizmo.camera = cam;
+    // Mientras se arrastra el gizmo, el elemento se mueve fuera del almacen: hay
+    // que pedir el repintado de la sombra en cada fotograma.
+    if (this.dragging) this.viewport.invalidateShadows?.();
     if (!this.helpers.visible) return;
     for (const item of this.items.values()) {
       if (item.helper?.update) item.helper.update();
@@ -513,12 +590,18 @@ export class SceneEditor {
 
   dispose() {
     this.unsubscribe?.();
-    this.viewport.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
+    const dom = this.viewport.renderer.domElement;
+    dom.removeEventListener('pointerdown', this._onPointerDown);
+    dom.removeEventListener('pointermove', this._onPointerMove);
+    dom.removeEventListener('pointerleave', this._onPointerLeave);
     for (const item of this.items.values()) this.#destroy(item);
     this.items.clear();
     this.gizmo.detach();
     this.gizmo.dispose?.();
     this.gizmoHelper.parent?.remove(this.gizmoHelper);
+    this.outline.parent?.remove(this.outline);
+    this.outline.geometry.dispose();
+    this.outline.material.dispose();
     this.group.parent?.remove(this.group);
     this.helpers.parent?.remove(this.helpers);
   }

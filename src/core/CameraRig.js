@@ -18,6 +18,14 @@ import { VIEW_PRESETS } from '../config.js';
 
 const DEG = Math.PI / 180;
 
+/** Vectores de trabajo: el bucle de camara no debe generar basura. */
+const _offset = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+const _focus = new THREE.Vector3();
+
+/** Cada cuantos milisegundos puede el autofoco escribir en los ajustes. */
+const FOCUS_INTERVAL = 120;
+
 export class CameraRig {
   /**
    * @param {Settings} settings
@@ -153,9 +161,9 @@ export class CameraRig {
     if (spin) {
       // Girar el acimut alrededor del objetivo equivale a poner la figura en
       // una plataforma giratoria, sin mover el punto de interes.
-      const offset = this.active.position.clone().sub(this.controls.target);
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), spin * DEG * dt);
-      this.active.position.copy(this.controls.target).add(offset);
+      _offset.copy(this.active.position).sub(this.controls.target);
+      _offset.applyAxisAngle(_up, spin * DEG * dt);
+      this.active.position.copy(this.controls.target).add(_offset);
     }
 
     this.controls.update();
@@ -163,12 +171,26 @@ export class CameraRig {
     const roll = this.settings.get('camera.roll');
     if (roll) this.active.rotateZ(roll * DEG);
 
-    if (this.settings.get('camera.autoFocus')) this.refreshFocus();
+    this.refreshFocus();
   }
 
-  /** Distancia al punto de interes elegido, para la profundidad de campo. */
+  /**
+   * Distancia al punto de interes elegido, para la profundidad de campo.
+   *
+   * Escribe en los ajustes, asi que no puede hacerse en cada fotograma: cada
+   * escritura notifica a los suscriptores, mueve el deslizador del panel y
+   * reprograma el guardado en localStorage. Al orbitar eso se traducia en
+   * sesenta reflows por segundo. Se limita en el tiempo y solo se calcula
+   * cuando la profundidad de campo esta encendida, que es lo unico que consume
+   * este valor.
+   */
   refreshFocus() {
-    const point = this.focusProvider?.(this.settings.get('camera.focusTarget'));
+    if (!this.settings.get('camera.autoFocus') || !this.settings.get('camera.dof')) return;
+    const now = performance.now();
+    if (now - (this._focusStamp ?? 0) < FOCUS_INTERVAL) return;
+    this._focusStamp = now;
+
+    const point = this.focusProvider?.(this.settings.get('camera.focusTarget'), _focus);
     const distance = point
       ? this.active.position.distanceTo(point)
       : this.active.position.distanceTo(this.controls.target);

@@ -141,13 +141,25 @@ check('el turntable conserva la distancia', Math.abs(despues.length() - antes.le
 settings.set('camera.turntable', 0);
 
 // ------------------------------------------------------------------ autofoco ---
+// El autofoco escribe en los ajustes, asi que solo mide cuando la profundidad
+// de campo esta encendida: es lo unico que consume la distancia de enfoque.
 settings.set('camera.autoFocus', true);
+settings.set('camera.dof', true);
 rig.focusProvider = () => new THREE.Vector3(0, 1.55, 0);
 rig.update(1 / 60);
 const esperada = rig.active.position.distanceTo(new THREE.Vector3(0, 1.55, 0));
 check('el autofoco mide la distancia al punto de interes',
   Math.abs(settings.get('camera.focusDistance') - esperada) < 0.01,
   settings.get('camera.focusDistance') + ' m frente a ' + esperada.toFixed(3) + ' m');
+
+settings.set('camera.dof', false);
+settings.set('camera.focusDistance', 3.2);
+rig._focusStamp = 0;
+rig.focusProvider = () => new THREE.Vector3(0, 0.2, 0);
+rig.update(1 / 60);
+check('sin profundidad de campo el autofoco no toca los ajustes',
+  settings.get('camera.focusDistance') === 3.2,
+  settings.get('camera.focusDistance') + ' m');
 settings.set('camera.autoFocus', false);
 
 // -------------------------------------------------------- guardar y volver ---
