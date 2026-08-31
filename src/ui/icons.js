@@ -20,6 +20,7 @@ import CircleCheck from 'lucide/dist/esm/icons/circle-check.js';
 import CircleDot from 'lucide/dist/esm/icons/circle-dot.js';
 import CircleX from 'lucide/dist/esm/icons/circle-x.js';
 import Columns3 from 'lucide/dist/esm/icons/columns-3.js';
+import CodeXml from 'lucide/dist/esm/icons/code-xml.js';
 import Contrast from 'lucide/dist/esm/icons/contrast.js';
 import Copy from 'lucide/dist/esm/icons/copy.js';
 import Cpu from 'lucide/dist/esm/icons/cpu.js';
@@ -117,7 +118,7 @@ import Link2 from 'lucide/dist/esm/icons/link-2.js';
 export const ICONS = {
   activity: Activity, aperture: Aperture, 'axis-3d': Axis3d, blend: Blend, bone: Bone,
   box: Box, camera: Camera, 'chevron-down': ChevronDown, 'circle-check': CircleCheck,
-  'circle-dot': CircleDot, 'circle-x': CircleX, 'columns-3': Columns3, contrast: Contrast,
+  'circle-dot': CircleDot, 'circle-x': CircleX, 'columns-3': Columns3, 'code-xml': CodeXml, contrast: Contrast,
   copy: Copy, cpu: Cpu, crop: Crop, crosshair: Crosshair, download: Download,
   droplet: Droplet, eye: Eye, 'eye-off': EyeOff, 'file-down': FileDown, 'file-up': FileUp,
   film: Film, 'flip-horizontal': FlipHorizontal, focus: Focus, 'folder-open': FolderOpen,

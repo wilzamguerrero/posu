@@ -162,4 +162,9 @@ console.log('sin seleccion:', (cuerpo?.querySelectorAll('input').length ?? -1) =
 console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.querySelectorAll('.list-row').length, 'filas');
 
 
+// 9 · La firma del autor sale en Ayuda > Acerca de.
+const firma = document.querySelector('#sidebar-host .credit');
+console.log('firma:', firma ? firma.textContent.replace(/s+/g, ' ').trim() : 'NO APARECE',
+  '· icono:', firma?.querySelectorAll('svg.svg-icon').length ?? 0);
+
 console.log(errors.length ? 'ERRORES: ' + errors.join(' | ') : 'sin errores en el DOM');

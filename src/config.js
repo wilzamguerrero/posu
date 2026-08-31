@@ -8,6 +8,10 @@
 export const STORAGE_KEY = 'posu.settings.v1';
 export const POSE_STORAGE_KEY = 'posu.poses.v1';
 
+/** Firma que se muestra en Ayuda › Acerca de. */
+export const APP_VERSION = '1.0';
+export const APP_AUTHOR = 'Wilzamguerrero';
+
 /** Modelo por defecto (generado por `npm run convert` desde el FBX de Mixamo). */
 export const DEFAULT_MODEL_URL = 'models/character.glb';
 

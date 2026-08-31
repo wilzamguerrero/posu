@@ -471,6 +471,20 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
   border: 1px solid var(--border-input); border-radius: 3px; padding: 0 3px;
 }
 
+/* Firma del autor (Ayuda > Acerca de) */
+.credit {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: 10.5px; color: var(--fg-dim); letter-spacing: 0.02em;
+}
+.credit .svg-icon { width: 12px; height: 12px; color: var(--link); flex: none; }
+.credit-dev { color: var(--fg-muted); }
+.credit-ver {
+  margin-left: auto; font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: 3px; padding: 0 4px; color: var(--fg-muted);
+}
+
 /* Barra de calidad de deteccion */
 .meter { height: 3px; border-radius: 2px; background: var(--border-strong); overflow: hidden; }
 .meter i { display: block; height: 100%; width: 0; background: var(--ok); transition: width 0.15s linear, background 0.3s ease; }

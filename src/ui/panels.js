@@ -14,6 +14,7 @@ import {
 import { icon } from './icons.js';
 import {
   FOCAL_PRESETS, VIEW_PRESETS, LIGHT_PRESETS, FOCUS_TARGETS, POSE_MODELS, MODEL_LIBRARY,
+  APP_VERSION, APP_AUTHOR,
 } from '../config.js';
 import {
   MATERIAL_PRESETS, MATERIAL_BY_ID, MATERIAL_RANGE, materialSupports, materialDefaults,
@@ -912,6 +913,12 @@ function settingsPanel(app) {
       notice('info',
         '<b>POSU</b> · estudio de anatomia y dibujo del natural. Three.js + MediaPipe Pose Landmarker + Kalidokit, '
         + 'ejecutandose por completo en tu navegador.'),
+      // Firma del autor: version en config.js para no repetir el numero.
+      el('div', { class: 'credit' }, [
+        icon('code-xml', 12),
+        el('span', { class: 'credit-dev', text: 'Dev by ' + APP_AUTHOR }),
+        el('span', { class: 'credit-ver', text: 'v' + APP_VERSION }),
+      ]),
     ]),
   ];
 }
