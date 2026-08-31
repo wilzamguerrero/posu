@@ -73,12 +73,34 @@ export class StatusBar {
     this.lens.set(ortho
       ? `orto ${Number(s.get('camera.orthoZoom')).toFixed(2)}×`
       : `${Math.round(s.get('camera.focalLength'))}mm ${s.get('camera.dof') ? 'f/' + Number(s.get('camera.fStop')).toFixed(1) : ''}`.trim());
-    const opacity = Number(s.get('figure.opacity'));
-    this.figure.set(String(s.get('figure.variant')) + (opacity < 0.999 ? ` · ${Math.round(opacity * 100)}%` : ''));
+    this.#paintFigure();
     const show = s.get('quality.showStats') !== false;
     this.tris.root.classList.toggle('hidden', !show);
     this.fps.root.classList.toggle('hidden', !show);
     this.bone.set(s.get('ui.selectedBone') ? String(s.get('ui.selectedBone')).replace(/^mixamorig:?/, '') : 'sin seleccion');
+  }
+
+  /**
+   * Malla visible y, cuando hay mas de una figura en la escena, el nombre de la
+   * que recibe la camara y las poses: sin esto no se sabe a quien se esta
+   * posando. Lo llama `main` cada vez que cambia la figura activa.
+   */
+  setFigure() { this.#paintFigure(); }
+
+  #paintFigure() {
+    const s = this.settings;
+    const figuras = this.app.figures;
+    const varias = (figuras?.count ?? 0) > 1;
+    const nombre = figuras?.activeDef?.name ?? '';
+    const opacity = Number(s.get('figure.opacity'));
+    const partes = [];
+    if (varias && nombre) partes.push(nombre);
+    partes.push(String(s.get('figure.variant')));
+    if (opacity < 0.999) partes.push(`${Math.round(opacity * 100)}%`);
+    this.figure.set(partes.join(' · '));
+    this.figure.root.title = varias
+      ? `Posando «${nombre}» de ${figuras.count} figuras · malla visible`
+      : 'Malla visible';
   }
 
   /**

@@ -68,9 +68,35 @@ const viewport = {
 
 let bloqueado = false;
 let elegidos = [];
+
+// ---------------------------------------------------------- figuras falsas ---
+// `FigureSet` simulado: el editor solo le pide la lista, el `root` del
+// personaje y a quien pasar la captura. El personaje es una caja del tamano de
+// una persona, que es justo lo que se apunta con el raton.
+const figRoot = new THREE.Object3D();
+figRoot.name = 'Figura 1';
+figRoot.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.7, 0.35)));
+const personaje = { loaded: true, root: figRoot };
+const figures = {
+  bajas: [],
+  copias: [],
+  get defs() { return settings.get('scene.figures') ?? []; },
+  get activeId() { return settings.get('figure.active') ?? ''; },
+  locate(id) {
+    const i = this.defs.findIndex((d) => d.id === id);
+    return i < 0 ? null : { branch: 'figures', index: i, def: this.defs[i] };
+  },
+  get(id) { return this.locate(id) ? personaje : null; },
+  list() { return this.defs.map((d) => ({ id: d.id, label: d.name, icon: 'user', kind: 'figura' })); },
+  setActive(id) { if (this.locate(id)) settings.set('figure.active', id); },
+  remove(id) { this.bajas.push(id); },
+  duplicate(id) { this.copias.push(id); return 'copia'; },
+};
+
 const editor = new SceneEditor({
   settings,
   viewport,
+  figures,
   blocked: () => bloqueado,
   onPick: (id) => elegidos.push(id),
 });
@@ -171,6 +197,84 @@ check('la luz vuelve a marcarse al pasar por encima', editor.hovered === luz, ed
 editor.clearAll();
 check('al borrar el elemento el contorno desaparece',
   editor.hovered === '' && editor.outline.visible === false, editor.hovered || '(nada)');
+
+// ---------------------------------------------------------------- figuras ---
+// Una figura se selecciona y se recoloca como cualquier otro elemento, pero es
+// de FigureSet: el editor le presta el gizmo y le pasa la captura, sin crearla
+// ni destruirla.
+elegidos = [];
+viewport.add(figRoot);
+settings.batch({
+  'scene.figures': [{
+    id: 'fig1', name: 'Figura 1', model: 'character', visible: true,
+    position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 },
+    height: 1.75, anchor: 'suelo', pose: null,
+  }],
+  'figure.active': 'fig1',
+  'scene.selected': '',
+});
+check('la figura entra en el editor sin construirla', editor.items.get('fig1')?.object === figRoot);
+
+// Se apunta por su caja envolvente: la anatomia no se raycastea en cada movida.
+puntero('pointermove', ...centro());
+check('la figura se marca al pasar por encima', editor.hovered === 'fig1', editor.hovered || '(nada)');
+
+settings.set('figure.active', '');
+clic(...centro());
+check('pinchar la caja de una figura la selecciona',
+  settings.get('scene.selected') === 'fig1', settings.get('scene.selected') || '(nada)');
+check('y de paso la hace la figura que posa',
+  settings.get('figure.active') === 'fig1', settings.get('figure.active') || '(ninguna)');
+check('la interfaz recibe el aviso, como con un solido',
+  elegidos.length === 1 && elegidos[0] === 'fig1', elegidos.join(','));
+
+// La altura tiene su propio deslizador: escalar el root deformaria la figura.
+settings.set('scene.tool', 'scale');
+check('con una figura seleccionada el gizmo no ofrece escala',
+  editor.gizmo.mode === 'translate', editor.gizmo.mode);
+settings.set('scene.tool', 'rotate');
+check('girar si se puede', editor.gizmo.mode === 'rotate', editor.gizmo.mode);
+settings.set('scene.tool', 'translate');
+
+// Arrastre del gizmo: al soltar, el Object3D manda y el almacen se pone al dia.
+figRoot.position.set(0.42, 0, -0.75);
+figRoot.rotation.set(0, 45 * Math.PI / 180, 0);
+editor.gizmo.dispatchEvent({ type: 'dragging-changed', value: true });
+editor.gizmo.dispatchEvent({ type: 'dragging-changed', value: false });
+check('al soltar el gizmo se escribe la posicion de la figura',
+  settings.get('scene.figures.0.position.x') === 0.42
+  && settings.get('scene.figures.0.position.z') === -0.75,
+  settings.get('scene.figures.0.position.x') + ' / ' + settings.get('scene.figures.0.position.z'));
+check('y el giro en grados', Math.abs(settings.get('scene.figures.0.rotation.y') - 45) < 0.2,
+  String(settings.get('scene.figures.0.rotation.y')));
+check('la figura nunca guarda escala',
+  settings.get('scene.figures.0.scale') === undefined, JSON.stringify(settings.get('scene.figures.0.scale')));
+
+// La figura activa es pegajosa: el gizmo salta al cubo, la captura no.
+figRoot.position.set(-1.8, 0, 0);
+const cubo2 = editor.addObject('cubo');
+alOrigen('objects', 0);
+settings.set('scene.selected', '');
+clic(...centro());
+check('pinchar un solido despues no cambia la figura que posa',
+  settings.get('scene.selected') === cubo2 && settings.get('figure.active') === 'fig1',
+  settings.get('scene.selected') + ' · activa=' + settings.get('figure.active'));
+settings.set('scene.tool', 'scale');
+check('un solido si se escala', editor.gizmo.mode === 'scale', editor.gizmo.mode);
+settings.set('scene.tool', 'translate');
+
+// Alta, baja y copia de figuras son de FigureSet; el editor solo delega.
+editor.remove('fig1');
+editor.duplicate('fig1');
+check('borrar y duplicar una figura se delegan en FigureSet',
+  figures.bajas.join() === 'fig1' && figures.copias.join() === 'fig1',
+  'bajas=' + figures.bajas.join() + ' copias=' + figures.copias.join());
+check('la figura sigue en el almacen: la baja la hace FigureSet',
+  (settings.get('scene.figures') ?? []).length === 1);
+editor.clearAll();
+check('vaciar la escena no se lleva las figuras',
+  editor.items.has('fig1') && (settings.get('scene.figures') ?? []).length === 1,
+  editor.items.size + ' elementos');
 
 console.log('\n' + oks.length + ' correctas / ' + fails.length + ' fallos');
 if (fails.length) {

@@ -15,6 +15,7 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { resolveBones, BONE_LABELS, POSABLE_BONES, POSABLE_FINGERS } from './boneMap.js';
 import { buildVariantGeometry, makeVariantMesh, PROFILES } from './variants.js';
 import {
@@ -56,6 +57,16 @@ export class Character {
     this.holder.name = 'Ajuste';
     this.root.add(this.holder);
 
+    /**
+     * Colocacion propia de esta figura: la empuja `FigureSet` desde su
+     * definicion en `scene.figures`. El sitio y el giro van en el `root` (los
+     * escribe el gizmo); aqui solo queda lo que deforma el contenido.
+     */
+    this.placement = {
+      height: settings.get('figure.height') ?? 1.75,
+      anchor: settings.get('figure.anchor') ?? 'suelo',
+    };
+
     // variante -> mallas de esa variante (un archivo puede traer varias).
     this.meshes = { anatomia: [], maniqui: [], esqueleto: [] };
     this.baseMaterials = new Map(); // malla -> material original del archivo
@@ -76,14 +87,33 @@ export class Character {
 
   #bind() {
     const s = this.settings;
-    s.on('figure.variant', (v) => this.cambiarGeometria(v));
-    s.on(['figure.shading', 'figure.clayColor'], () => this.applyShading());
-    // Cada variante tiene su propia ranura de material: anatomia incluida.
-    s.on('materials.*', () => this.applyShading());
-    s.on('figure.opacity', () => this.applyOpacity());
-    s.on(['figure.showGhost', 'figure.ghostOpacity'], () => this.applyGhost());
-    s.on('figure.showSkeletonHelper', () => this.applyHelper());
-    s.on(['figure.height', 'figure.turn', 'figure.anchor'], () => this.applyTransform());
+    // El aspecto es comun a todas las figuras de la escena, asi que se lee del
+    // almacen: cambiar la malla visible o el sombreado las cambia a la vez.
+    // Las suscripciones se guardan porque una figura se puede eliminar y no
+    // debe seguir escuchando (ver `dispose`).
+    this.offs = [
+      s.on('figure.variant', (v) => this.cambiarGeometria(v)),
+      s.on(['figure.shading', 'figure.clayColor'], () => this.applyShading()),
+      // Cada variante tiene su propia ranura de material: anatomia incluida.
+      s.on('materials.*', () => this.applyShading()),
+      s.on('figure.opacity', () => this.applyOpacity()),
+      s.on(['figure.showGhost', 'figure.ghostOpacity'], () => this.applyGhost()),
+      s.on('figure.showSkeletonHelper', () => this.applyHelper()),
+    ];
+    // La altura y el anclaje no se leen del almacen: son propios de cada figura
+    // y llegan por `setPlacement` (ver FigureSet).
+  }
+
+  /**
+   * Altura y anclaje de esta figura. Se llama al crearla y cada vez que cambia
+   * su definicion en `scene.figures`.
+   * @param {{height?: number, anchor?: string}} placement
+   */
+  setPlacement({ height, anchor } = {}) {
+    if (Number.isFinite(height)) this.placement.height = height;
+    if (anchor) this.placement.anchor = anchor;
+    this.applyTransform();
+    return this;
   }
 
   // ---------------------------------------------------------------- carga ---
@@ -112,6 +142,25 @@ export class Character {
 
     this.#adopt(object);
     return this;
+  }
+
+  /**
+   * Adopta un modelo ya cargado (o clonado). Es la puerta que usa `FigureSet`
+   * para duplicar una figura sin volver a leer el archivo.
+   */
+  adopt(object) {
+    this.#adopt(object);
+    return this;
+  }
+
+  /**
+   * Copia de otra figura: mismo modelo, misma pose. Se clona el contenido del
+   * archivo con `SkeletonUtils.clone`, que reengancha las mallas al esqueleto
+   * nuevo; las variantes maniqui/esqueleto se vuelven a generar por codigo.
+   */
+  cloneFrom(other) {
+    if (!other?.loaded || !other.source) throw new Error('La figura de origen no esta cargada.');
+    return this.adopt(SkeletonUtils.clone(other.source));
   }
 
   #adopt(object) {
@@ -262,10 +311,9 @@ export class Character {
 
   // ------------------------------------------------------- transformaciones ---
 
-  /** Normaliza altura, giro y anclaje al suelo. */
+  /** Normaliza la altura y ancla la figura al suelo (o la centra). */
   applyTransform() {
     if (!this.loaded) return;
-    const s = this.settings;
     this.holder.scale.setScalar(1);
     this.holder.rotation.set(0, 0, 0);
     this.holder.position.set(0, 0, 0);
@@ -275,12 +323,11 @@ export class Character {
     // el mismo esqueleto y podrian tener extremos ligeramente distintos.
     const raw = new THREE.Box3().setFromObject(this.source);
     const h = Math.max(0.01, raw.max.y - raw.min.y);
-    const k = s.get('figure.height') / h;
+    const k = this.placement.height / h;
 
     this.holder.scale.setScalar(k);
-    this.holder.rotation.y = THREE.MathUtils.degToRad(s.get('figure.turn'));
     // "suelo": plantas de los pies en y=0. "centro": figura centrada en el origen.
-    this.holder.position.y = s.get('figure.anchor') === 'centro'
+    this.holder.position.y = this.placement.anchor === 'centro'
       ? -((raw.min.y + raw.max.y) / 2) * k
       : -raw.min.y * k;
     this.holder.updateMatrixWorld(true);
@@ -535,6 +582,8 @@ export class Character {
   }
 
   dispose() {
+    for (const off of this.offs ?? []) off?.();
+    this.offs = [];
     this.clear();
     this.ghostMat?.dispose();
     this.root.parent?.remove(this.root);

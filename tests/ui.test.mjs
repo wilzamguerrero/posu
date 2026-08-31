@@ -37,14 +37,45 @@ initToasts(document.getElementById('toasts'));
 const called = [];
 const act = (name) => (...a) => { called.push(name); return true; };
 const frameCbs = new Set();
+const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
+
+// Dos figuras en la escena, para que los controles de figura se pinten de
+// verdad: el panel de Figura edita la activa y la lista de escena la elegida.
+const figDefs = [
+  { id: 'f0', name: 'Figura 1', model: 'character', visible: true,
+    position: vec(), rotation: vec(), height: 1.75, anchor: 'suelo', pose: null },
+  { id: 'f1', name: 'Figura 2', model: 'xbot', visible: true,
+    position: vec(0.7, 0, 0), rotation: vec(0, 30, 0), height: 1.62, anchor: 'suelo', pose: null },
+];
+
 const app = {
   settings,
   viewport: { stats: { fps: 60, ms: 4.2, triangles: 120000, calls: 12 }, onFrame: (cb) => (frameCbs.add(cb), () => frameCbs.delete(cb)) },
   source: { listDevices: async () => [{ id: 'abc', label: 'Camara falsa' }] },
   library: { list: () => [{ id: 'p1', name: 'Pose de prueba', created: Date.now() }] },
+  // `FigureSet` simulado: solo el papeleo que consulta la interfaz.
+  figures: {
+    get defs() { return settings.get('scene.figures') ?? []; },
+    get count() { return this.defs.length; },
+    get activeId() { return settings.get('figure.active') ?? ''; },
+    get activeDef() { return this.defs.find((d) => d.id === this.activeId) ?? null; },
+    locate(id) {
+      const i = this.defs.findIndex((d) => d.id === id);
+      return i < 0 ? null : { branch: 'figures', index: i, def: this.defs[i] };
+    },
+    pathOf(id) { const at = this.locate(id); return at ? 'scene.figures.' + at.index : ''; },
+    list() {
+      return this.defs.map((d) => ({
+        id: d.id, label: d.name, icon: 'user', kind: 'figura',
+        meta: d.id === this.activeId ? 'posando' : '',
+      }));
+    },
+  },
   hooks: {},
   actions: new Proxy({}, { get: (_, name) => act(name) }),
 };
+settings.batch({ 'scene.figures': figDefs, 'figure.active': 'f0' });
+
 const ui = new UI(app);
 app.ui = ui;
 const sb = new StatusBar(document.getElementById('statusbar'), app);
@@ -102,7 +133,6 @@ const { PRIMITIVES } = await import('../src/scene/primitives.js');
 const { LIGHT_TYPES, lightDefaults } = await import('../src/scene/lights.js');
 const { materialDefaults } = await import('../src/model/MaterialLibrary.js');
 
-const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const objDefs = PRIMITIVES.map((p, i) => ({
   id: 'o' + i, type: p.id, name: p.label, visible: true,
   position: vec(0, 0.4, 0), rotation: vec(), scale: vec(1, 1, 1),
@@ -114,16 +144,18 @@ const luzDefs = LIGHT_TYPES.map((l, i) => ({
   position: vec(0, 1.9, 0), ...lightDefaults(l.id),
 }));
 
-// Un editor de escena simulado que lee de los ajustes, como el de verdad.
+// Un editor de escena simulado que lee de los ajustes, como el de verdad. Las
+// figuras van primero en la lista, igual que en SceneEditor.
 app.scene = {
   locate(id) {
     let i = (settings.get('scene.objects') ?? []).findIndex((d) => d.id === id);
     if (i >= 0) return { branch: 'objects', index: i, def: settings.get('scene.objects')[i] };
     i = (settings.get('scene.lights') ?? []).findIndex((d) => d.id === id);
     if (i >= 0) return { branch: 'lights', index: i, def: settings.get('scene.lights')[i] };
-    return null;
+    return app.figures.locate(id);
   },
   list: () => [
+    ...app.figures.list(),
     ...(settings.get('scene.objects') ?? []).map((d) => ({ id: d.id, label: d.name, icon: 'box', kind: 'objeto' })),
     ...(settings.get('scene.lights') ?? []).map((d) => ({ id: d.id, label: d.name, icon: 'lightbulb', kind: 'luz' })),
   ],
@@ -146,15 +178,31 @@ const cuenta = (id) => {
 };
 
 let minimo = Infinity, fallos = 0;
-for (const d of [...objDefs, ...luzDefs]) {
+for (const d of [...figDefs, ...objDefs, ...luzDefs]) {
   const { controles, rangos } = cuenta(d.id);
   // Todo elemento trae al menos nombre, visibilidad, posicion (3 rangos) y los
   // dos botones del pie; si sale por debajo de eso, algo no se ha pintado.
-  if (controles < 6 || rangos < 3) { console.log('  POCO: ' + d.type + ' -> ' + controles + ' controles, ' + rangos + ' rangos'); fallos++; }
+  if (controles < 6 || rangos < 3) { console.log('  POCO: ' + (d.type ?? d.name) + ' -> ' + controles + ' controles, ' + rangos + ' rangos'); fallos++; }
   minimo = Math.min(minimo, controles);
 }
-console.log('tipos de elemento revisados:', objDefs.length + luzDefs.length,
+console.log('tipos de elemento revisados:', figDefs.length + objDefs.length + luzDefs.length,
   '· minimo de controles:', minimo, '·', fallos === 0 ? 'todos pintan' : fallos + ' incompletos');
+
+// La figura seleccionada que no es la activa ofrece pasarle la captura.
+settings.set('scene.selected', 'f1');
+const botones = [...(cuerpo?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim());
+console.log('figura no activa:', botones.some((t) => t.includes('Posar con la camara')) ? 'ofrece posar con la camara' : 'FALTA el boton de posar');
+settings.set('scene.selected', 'f0');
+console.log('figura activa:', [...(cuerpo?.querySelectorAll('button') ?? [])]
+  .some((b) => b.textContent.includes('Posar con la camara')) ? 'SOBRA el boton de posar' : 'sin boton redundante');
+
+// El grupo "Colocacion" del panel de Figura edita la figura activa.
+const coloc = grupoPorTitulo('Colocacion');
+const rangosColoc = coloc?.querySelectorAll('input[type="range"]').length ?? 0;
+settings.set('scene.figures.0.height', 1.9);
+settings.set('scene.figures.0.position.x', 0.5);
+console.log('colocacion de la activa:', rangosColoc, 'rangos · altura:', settings.get('scene.figures.0.height'),
+  '· lista de figuras:', grupoPorTitulo('Figuras en la escena')?.querySelectorAll('.list-row').length, 'filas');
 
 // La seleccion vacia vuelve al aviso, sin dejar controles colgando.
 settings.set('scene.selected', '');

@@ -23,6 +23,7 @@ import { PRIMITIVES, PARAM_RANGE } from '../scene/primitives.js';
 import { PERSPECTIVE_MODES, PERSPECTIVE_BY_ID } from '../guides/Perspective.js';
 import { LIGHT_TYPES, LIGHT_BY_ID, LIGHT_RANGE } from '../scene/lights.js';
 import { HAND_PRESETS } from '../model/HandRig.js';
+import { MAX_FIGURAS } from '../model/FigureSet.js';
 import { FINGERS, FINGER_LABELS } from '../model/boneMap.js';
 
 /** Abre el selector de archivos del sistema y resuelve con el archivo elegido. */
@@ -43,8 +44,35 @@ const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /* ── 1 · Figura ────────────────────────────────────────────────────────── */
 
 function figurePanel(app) {
-  const { actions } = app;
+  const { settings, actions } = app;
+
+  // Lista de figuras: la activa lleva la marca «posando» y es la que reciben la
+  // captura, las poses y el posado manual.
+  const listaFiguras = listView({
+    empty: 'Sin figuras.',
+    onSelect: (item) => actions.setActiveFigure?.(item.id),
+    onDelete: (item) => actions.removeFigure?.(item.id),
+  });
+  const pintarFiguras = () =>
+    listaFiguras.render(app.figures?.list?.() ?? [], app.figures?.activeId ?? '');
+  // main.js lo llama cuando cambia la figura activa o acaba de cargar una.
+  app.hooks.refreshFigures = pintarFiguras;
+  settings.on(['scene.figures', 'figure.active'], pintarFiguras);
+  pintarFiguras();
+
   return [
+    group({ id: 'fig-lista', title: 'Figuras en la escena', icon: 'user' }, [
+      listaFiguras,
+      buttons([
+        { label: 'Anadir', icon: 'plus', title: `Nueva figura (hasta ${MAX_FIGURAS})`,
+          onClick: () => actions.addFigure?.() },
+        { label: 'Duplicar', icon: 'copy', title: 'Copia la figura activa con su pose',
+          onClick: () => actions.duplicateFigure?.() },
+        { label: 'Eliminar', icon: 'trash-2', title: 'Quita la figura activa',
+          onClick: () => actions.removeFigure?.() },
+      ], { cols: 3, compact: true }),
+      notice('info', 'La figura marcada <b>posando</b> es la que recibe la captura por camara, las poses y el posado manual. Pinchar un solido o una luz no la cambia.'),
+    ]),
     group({ id: 'fig-variant', title: 'Malla visible', icon: 'layers' }, [
       segmented({
         path: 'figure.variant',
@@ -53,7 +81,7 @@ function figurePanel(app) {
           { value: 'maniqui', label: 'Maniqui', icon: 'box', title: 'Volumenes de madera' },
           { value: 'esqueleto', label: 'Esqueleto', icon: 'bone', title: 'Estructura osea' },
         ],
-        hint: 'Las tres mallas comparten el mismo esqueleto: la pose no se pierde al cambiar.',
+        hint: 'Las tres mallas comparten el mismo esqueleto: la pose no se pierde al cambiar. El aspecto es comun a todas las figuras de la escena.',
       }),
       select({
         label: 'Sombreado', path: 'figure.shading',
@@ -90,15 +118,10 @@ function figurePanel(app) {
       notice('info', 'El <b>sombreado</b> de arriba (arcilla, rayos X…) manda sobre estos materiales mientras este activo.'),
     ]),
     group({ id: 'fig-transform', title: 'Colocacion', icon: 'move' }, [
-      slider({ label: 'Altura', path: 'figure.height', min: 1.2, max: 2.2, step: 0.01, unit: ' m' }),
-      slider({ label: 'Giro', path: 'figure.turn', min: -180, max: 180, step: 1, unit: '°' }),
-      segmented({
-        label: 'Anclaje', path: 'figure.anchor',
-        options: [
-          { value: 'suelo', label: 'Al suelo' },
-          { value: 'centro', label: 'Centrado' },
-        ],
-      }),
+      // La colocacion es propia de cada figura: se edita la activa y se
+      // reconstruye al cambiar de figura o al renombrarla.
+      reactive(['scene.figures', 'figure.active'],
+        () => figureControls(app, app.figures?.activeId ?? '')),
     ]),
     group({ id: 'fig-manos', title: 'Manos y dedos', icon: 'hand' }, [
       segmented({
@@ -126,7 +149,7 @@ function figurePanel(app) {
         path: 'figure.model', cols: 2,
         options: MODEL_LIBRARY.map((m) => ({ value: m.id, label: m.label, icon: 'user', title: m.note })),
         onPick: (id) => actions.loadLibraryModel(id),
-        hint: 'Todas comparten el esqueleto de Mixamo: la pose se conserva al cambiar de figura.',
+        hint: 'El modelo se carga en la figura activa. Todas comparten el esqueleto de Mixamo: la pose se conserva al cambiar de figura.',
       }),
       buttons([
         { label: 'Cargar .glb / .fbx', icon: 'upload', onClick: () => actions.loadModelFile() },
@@ -135,6 +158,51 @@ function figurePanel(app) {
       notice('info', 'Tambien puedes <b>arrastrar</b> el archivo sobre el visor. Se admite el esqueleto estandar de Mixamo (<code>mixamorig…</code>).'),
     ]),
   ];
+}
+
+/**
+ * Colocacion (y modelo) de una figura concreta: edita `scene.figures.N`. Lo
+ * comparten el panel de Figura, que trabaja siempre sobre la activa, y la lista
+ * de escena, que trabaja sobre la seleccionada; son las mismas rutas.
+ *
+ * Una figura no se escala: su tamano es el deslizador de Altura, que estira el
+ * personaje conservando las proporciones del modelo.
+ */
+function figureControls(app, id, { modelo = false, posar = false } = {}) {
+  const store = app.settings;
+  const base = app.figures?.pathOf?.(id) ?? '';
+  if (!base) return [notice('info', 'No hay ninguna figura seleccionada.')];
+  const activa = id === app.figures?.activeId;
+  const out = [
+    textField(store, base + '.name', 'Nombre'),
+    toggle({ path: base + '.visible', label: 'Visible' }),
+    vector3({ label: 'Posicion', path: base + '.position', min: -8, max: 8, step: 0.01, unit: ' m' }),
+    vector3({ label: 'Rotacion', path: base + '.rotation', min: -180, max: 180, step: 1, unit: '°' }),
+    slider({ label: 'Altura', path: base + '.height', min: 1.2, max: 2.2, step: 0.01, unit: ' m' }),
+    segmented({
+      label: 'Anclaje', path: base + '.anchor',
+      options: [
+        { value: 'suelo', label: 'Al suelo' },
+        { value: 'centro', label: 'Centrado' },
+      ],
+    }),
+  ];
+  if (modelo) {
+    // Escribir la ruta basta: `FigureSet` recarga esa figura al verla cambiar.
+    out.push(presetGrid({
+      label: 'Modelo', path: base + '.model', cols: 2,
+      options: MODEL_LIBRARY.map((m) => ({ value: m.id, label: m.label, icon: 'user', title: m.note })),
+      hint: 'Se sustituye el modelo de esta figura y se conserva su pose.',
+    }));
+  }
+  if (posar && !activa) {
+    out.push(buttons([
+      { label: 'Posar con la camara', icon: 'video',
+        title: 'Pasa a esta figura la captura, las poses y el posado manual',
+        onClick: () => app.actions.setActiveFigure?.(id) },
+    ], { cols: 1, compact: true }));
+  }
+  return out;
 }
 
 /**
@@ -221,7 +289,7 @@ function materialSlotControls(app) {
   ];
 }
 
-/* ── 1c · Escena: solidos y luces insertados ───────────────────────────── */
+/* ── 1c · Escena: figuras, solidos y luces ─────────────────────────────── */
 
 const LIGHT_LABEL = {
   intensity: 'Intensidad', distance: 'Alcance', decay: 'Caida',
@@ -255,7 +323,19 @@ function itemControls(app) {
   const at = app.scene?.locate?.(id);
   if (!at) {
     return [notice('info',
-      'Nada seleccionado. Pincha un solido o una luz en el visor, o eligelo en la lista de arriba.')];
+      'Nada seleccionado. Pincha una figura, un solido o una luz en el visor, o eligelo en la lista de arriba.')];
+  }
+  // Las figuras se editan con los mismos controles que en el panel de Figura,
+  // pero aqui sobre la seleccionada, que no tiene que ser la que se posa.
+  if (at.branch === 'figures') {
+    return [
+      ...figureControls(app, id, { modelo: true, posar: true }),
+      buttons([
+        { label: 'Duplicar', icon: 'copy', title: 'Copia esta figura con su pose',
+          onClick: () => app.actions.duplicateFigure?.(id) },
+        { label: 'Eliminar', icon: 'trash-2', onClick: () => app.actions.removeFigure?.(id) },
+      ], { cols: 2, compact: true }),
+    ];
   }
   const base = 'scene.' + at.branch + '.' + at.index;
   const def = at.def;
@@ -324,19 +404,19 @@ function itemControls(app) {
   return out;
 }
 
-/** Panel de escena: insertar solidos y luces, manipularlos y listarlos. */
+/** Panel de escena: insertar solidos y luces, manipularlos y listarlos junto a las figuras. */
 function scenePanel(app) {
   const { settings, actions } = app;
 
   const lista = listView({
-    empty: 'Solo esta la figura. Inserta un solido o una luz para empezar.',
+    empty: 'La escena esta vacia.',
     onSelect: (item) => actions.selectItem?.(item.id),
     onDelete: (item) => actions.removeItem?.(item.id),
   });
   const pintarLista = () => lista.render(app.scene?.list?.() ?? [], settings.get('scene.selected'));
   // main.js llama a este gancho cuando la seleccion cambia desde el visor.
   app.hooks.refreshScene = pintarLista;
-  settings.on(['scene.objects', 'scene.lights', 'scene.selected'], pintarLista);
+  settings.on(['scene.objects', 'scene.lights', 'scene.figures', 'figure.active', 'scene.selected'], pintarLista);
   pintarLista();
 
   return [
@@ -364,7 +444,7 @@ function scenePanel(app) {
           { value: 'rotate', label: 'Girar', icon: 'rotate-3d' },
           { value: 'scale', label: 'Escalar', icon: 'scaling' },
         ],
-        hint: 'Atajos: W mover, E girar, R escalar, Supr eliminar, Esc deseleccionar.',
+        hint: 'Atajos: W mover, E girar, R escalar, Supr eliminar, Esc deseleccionar. Las figuras se mueven y se giran; su tamano es el deslizador de Altura.',
       }),
       segmented({
         label: 'Ejes', path: 'scene.space',
@@ -387,12 +467,16 @@ function scenePanel(app) {
     group({ id: 'esc-lista', title: 'Elementos de la escena', icon: 'list' }, [
       lista,
       buttons([
+        { label: 'Anadir figura', icon: 'plus', title: `Nueva figura (hasta ${MAX_FIGURAS})`,
+          onClick: () => actions.addFigure?.() },
         { label: 'Duplicar', icon: 'copy', onClick: () => actions.duplicateItem?.(settings.get('scene.selected')) },
-        { label: 'Vaciar escena', icon: 'trash-2', onClick: () => actions.clearScene?.() },
-      ], { cols: 2, compact: true }),
+        { label: 'Vaciar escena', icon: 'trash-2', title: 'Quita solidos y luces; las figuras se quedan',
+          onClick: () => actions.clearScene?.() },
+      ], { cols: 3, compact: true }),
     ]),
     group({ id: 'esc-item', title: 'Elemento seleccionado', icon: 'sliders-horizontal' }, [
-      reactive(['scene.selected', 'scene.objects', 'scene.lights'], () => itemControls(app)),
+      reactive(['scene.selected', 'scene.objects', 'scene.lights', 'scene.figures', 'figure.active'],
+        () => itemControls(app)),
     ]),
   ];
 }

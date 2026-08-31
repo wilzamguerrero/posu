@@ -2,15 +2,18 @@
  * POSU · Editor de escena
  * ---------------------------------------------------------------------------
  * Añade, selecciona y transforma los elementos que el usuario mete en la
- * escena: primitivas geometricas y luces. Todo el estado vive en el almacen de
- * ajustes (`scene.objects` y `scene.lights`), de modo que la escena montada se
- * conserva al recargar la pagina y se puede exportar con el resto de ajustes.
+ * escena: figuras, primitivas geometricas y luces. Todo el estado vive en el
+ * almacen de ajustes (`scene.figures`, `scene.objects` y `scene.lights`), de
+ * modo que la escena montada se conserva al recargar la pagina y se puede
+ * exportar con el resto de ajustes.
  *
  * Reparto de responsabilidades:
  *   - El almacen manda: cada propiedad editable se escribe en su ruta
  *     (`scene.objects.2.material.color`) y este modulo la aplica al Object3D.
  *   - El gizmo (TransformControls) es la excepcion: mientras se arrastra, el
  *     Object3D va por delante y el almacen se actualiza al soltar.
+ *   - Las figuras no las construye este modulo: son de `FigureSet`. Aqui solo
+ *     se seleccionan y se mueven, tomando prestado su `root`.
  *   - W / E / R cambian de herramienta (mover, girar, escalar), como en
  *     cualquier programa 3D.
  */
@@ -19,27 +22,29 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { buildGeometry, PRIMITIVE_BY_ID, PRIMITIVES } from './primitives.js';
 import { LIGHT_BY_ID, LIGHT_TYPES, lightDefaults } from './lights.js';
 import { crearMaterial, aplicarParametros, materialDefaults, proyectaSombra } from '../model/MaterialLibrary.js';
+import { nuevoId } from '../core/ids.js';
 
 const DEG = Math.PI / 180;
 const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
-/** Contador para los nombres visibles: "Cubo 2", "Foco 3"… */
-let contador = 0;
-const nuevoId = () => `it${Date.now().toString(36)}${(contador++).toString(36)}`;
+const _p = new THREE.Vector3();
 
 export class SceneEditor {
   /**
    * @param {object} deps
    * @param {import('../core/Settings.js').Settings} deps.settings
    * @param {import('../core/Viewport.js').Viewport} deps.viewport
+   * @param {import('../model/FigureSet.js').FigureSet} [deps.figures] Dueno de
+   *   las figuras: este modulo las selecciona y las mueve, pero no las crea.
    * @param {(event?: PointerEvent) => boolean} [deps.blocked] Devuelve true si
    *   otro modulo manda sobre ese clic (por ejemplo un manejador de pose).
    * @param {(id: string) => void} [deps.onSelect]
    * @param {(id: string) => void} [deps.onPick] Seleccion hecha en el visor, no
    *   en la lista: la interfaz aprovecha para mostrar la seccion de escena.
    */
-  constructor({ settings, viewport, blocked, onSelect, onPick } = {}) {
+  constructor({ settings, viewport, figures, blocked, onSelect, onPick } = {}) {
     this.settings = settings;
     this.viewport = viewport;
+    this.figures = figures ?? null;
     this.blocked = blocked ?? (() => false);
     this.onSelect = onSelect ?? null;
     this.onPick = onPick ?? null;
@@ -97,7 +102,7 @@ export class SceneEditor {
 
   #bind() {
     const s = this.settings;
-    s.on('scene.tool', (v) => this.gizmo.setMode(v));
+    s.on('scene.tool', () => this.#applyTool());
     s.on('scene.space', (v) => this.gizmo.setSpace(v));
     s.on('scene.snap', (v) => this.#applySnap(v));
     s.on('scene.selected', (id) => this.#attach(id));
@@ -105,6 +110,7 @@ export class SceneEditor {
     // Alta y baja de elementos: llegan como sustitucion completa de la lista.
     s.on('scene.objects', () => this.rebuild());
     s.on('scene.lights', () => this.rebuild());
+    s.on('scene.figures', () => this.rebuild());
     // Edicion de una propiedad concreta: "scene.lights.1.intensity".
     s.on('scene.*', (_v, _p, path) => this.#onPath(path));
     this.#applySnap(s.get('scene.snap'));
@@ -121,6 +127,7 @@ export class SceneEditor {
 
   get objectDefs() { return this.settings.get('scene.objects') ?? []; }
   get lightDefs() { return this.settings.get('scene.lights') ?? []; }
+  get figureDefs() { return this.settings.get('scene.figures') ?? []; }
 
   /** Indice y rama de un id, para poder componer rutas de ajustes. */
   locate(id) {
@@ -128,6 +135,8 @@ export class SceneEditor {
     if (i >= 0) return { branch: 'objects', index: i, def: this.objectDefs[i] };
     i = this.lightDefs.findIndex((d) => d.id === id);
     if (i >= 0) return { branch: 'lights', index: i, def: this.lightDefs[i] };
+    i = this.figureDefs.findIndex((d) => d.id === id);
+    if (i >= 0) return { branch: 'figures', index: i, def: this.figureDefs[i] };
     return null;
   }
 
@@ -137,9 +146,10 @@ export class SceneEditor {
     return at ? `scene.${at.branch}.${at.index}` : null;
   }
 
-  /** Elementos para la lista de la interfaz. */
+  /** Elementos para la lista de la interfaz. Las figuras van primero. */
   list() {
     return [
+      ...(this.figures?.list() ?? []),
       ...this.objectDefs.map((d) => ({
         id: d.id, label: d.name, icon: PRIMITIVE_BY_ID[d.type]?.icon ?? 'box',
         meta: d.visible === false ? 'oculto' : '', kind: 'objeto',
@@ -155,7 +165,7 @@ export class SceneEditor {
 
   /** Nombre libre del tipo: "Cubo", "Cubo 2"… */
   #nombre(base) {
-    const usados = new Set([...this.objectDefs, ...this.lightDefs].map((d) => d.name));
+    const usados = new Set([...this.objectDefs, ...this.lightDefs, ...this.figureDefs].map((d) => d.name));
     if (!usados.has(base)) return base;
     for (let n = 2; n < 999; n++) if (!usados.has(`${base} ${n}`)) return `${base} ${n}`;
     return base;
@@ -218,6 +228,8 @@ export class SceneEditor {
   duplicate(id) {
     const at = this.locate(id);
     if (!at) return null;
+    // Las figuras se clonan con su esqueleto y su pose: es cosa de FigureSet.
+    if (at.branch === 'figures') return this.figures?.duplicate(id) ?? null;
     const def = structuredClone(at.def);
     def.id = nuevoId();
     def.name = this.#nombre(def.name.replace(/ \d+$/, ''));
@@ -231,11 +243,13 @@ export class SceneEditor {
   remove(id) {
     const at = this.locate(id);
     if (!at) return;
+    if (at.branch === 'figures') { this.figures?.remove(id); return; }
     const branch = `scene.${at.branch}`;
     this.settings.set(branch, (this.settings.get(branch) ?? []).filter((d) => d.id !== id));
     if (this.settings.get('scene.selected') === id) this.select('');
   }
 
+  /** Vacia lo que el usuario ha insertado. Las figuras no se tocan. */
   clearAll() {
     this.settings.batch({ 'scene.objects': [], 'scene.lights': [], 'scene.selected': '' });
   }
@@ -253,10 +267,11 @@ export class SceneEditor {
 
   /** Reconstruye todos los Object3D a partir de las definiciones guardadas. */
   rebuild() {
-    const vivos = new Set([...this.objectDefs, ...this.lightDefs].map((d) => d.id));
+    const vivos = new Set([...this.objectDefs, ...this.lightDefs, ...this.figureDefs].map((d) => d.id));
     for (const [id, item] of this.items) {
       if (!vivos.has(id)) { this.#destroy(item); this.items.delete(id); }
     }
+    for (const def of this.figureDefs) this.#ensureFigure(def);
     for (const def of this.objectDefs) this.#ensureObject(def);
     for (const def of this.lightDefs) this.#ensureLight(def);
     if (this.hovered && !this.items.has(this.hovered)) this.#setHover('');
@@ -265,6 +280,8 @@ export class SceneEditor {
   }
 
   #destroy(item) {
+    // Una figura es de FigureSet: aqui solo se olvida la ficha.
+    if (item.kind === 'figura') return;
     item.object.parent?.remove(item.object);
     item.helper?.parent?.remove(item.helper);
     item.helper?.dispose?.();
@@ -272,6 +289,24 @@ export class SceneEditor {
     item.object.geometry?.dispose?.();
     item.material?.dispose?.();
     item.pick?.geometry?.dispose?.();
+  }
+
+  /**
+   * Ficha de una figura: toma prestado el `root` que ya tiene su `Character`.
+   * Mientras el modelo se esta cargando no hay nada que seleccionar; FigureSet
+   * avisa al terminar y se vuelve a construir.
+   */
+  #ensureFigure(def) {
+    const character = this.figures?.get(def.id) ?? null;
+    if (!character?.loaded) { this.items.delete(def.id); return null; }
+    let item = this.items.get(def.id);
+    if (!item || item.object !== character.root) {
+      item = { def, object: character.root, character, kind: 'figura', box: new THREE.Box3() };
+      this.items.set(def.id, item);
+    }
+    item.def = def;
+    item.character = character;
+    return item;
   }
 
   /** Crea o actualiza la malla de una primitiva. */
@@ -420,7 +455,7 @@ export class SceneEditor {
    * y aplica solo lo necesario, sin reconstruir la escena entera.
    */
   #onPath(path) {
-    const m = /^scene\.(objects|lights)\.(\d+)\.(.+)$/.exec(path ?? '');
+    const m = /^scene\.(objects|lights|figures)\.(\d+)\.(.+)$/.exec(path ?? '');
     if (!m) return;
     const [, branch, idx, resto] = m;
     const def = (this.settings.get(`scene.${branch}`) ?? [])[Number(idx)];
@@ -428,7 +463,9 @@ export class SceneEditor {
     const item = this.items.get(def.id);
     if (!item) { this.rebuild(); return; }
     item.def = def;
-    if (branch === 'objects') {
+    if (branch === 'figures') {
+      // La colocacion de una figura la aplica FigureSet, dueno del personaje.
+    } else if (branch === 'objects') {
       if (resto.startsWith('params')) this.#rebuildGeometry(item);
       this.#applyObject(item);
     } else {
@@ -453,12 +490,32 @@ export class SceneEditor {
     this.gizmo.attach(item.object);
     // El contorno de aviso sobra sobre lo ya seleccionado: manda el gizmo.
     if (this.hovered === id) this.#setHover('');
-    // Girar o escalar una luz puntual no significa nada: solo se mueve.
-    const soloMover = item.object.isLight && !item.object.isRectAreaLight;
     this.gizmo.showX = this.gizmo.showY = this.gizmo.showZ = true;
-    this.gizmo.setMode(soloMover ? 'translate' : (this.settings.get('scene.tool') ?? 'translate'));
+    this.gizmo.setMode(this.#modeFor(item));
     this.gizmoHelper.visible = true;
+    // Seleccionar una figura tambien la hace la activa (la que recibe camara,
+    // poses y manos). Al contrario no: pinchar un cubo no cambia la activa.
+    if (item.kind === 'figura') this.figures?.setActive(id);
     this.onSelect?.(id);
+  }
+
+  /**
+   * Modo del gizmo para lo que hay seleccionado: no todo se gira o se escala.
+   * Se consulta tambien al cambiar de herramienta, para que elegir "escalar"
+   * con una figura delante no la deforme.
+   */
+  #modeFor(item) {
+    const modo = this.settings.get('scene.tool') ?? 'translate';
+    // Girar o escalar una luz puntual no significa nada: solo se mueve.
+    if (item?.object?.isLight && !item.object.isRectAreaLight) return 'translate';
+    // Una figura no se escala: su tamano es el deslizador de Altura.
+    if (item?.kind === 'figura' && modo === 'scale') return 'translate';
+    return modo;
+  }
+
+  /** Herramienta nueva: la seleccion actual puede no admitirla. */
+  #applyTool() {
+    this.gizmo.setMode(this.#modeFor(this.items.get(this.settings.get('scene.selected'))));
   }
 
   /** Al soltar el gizmo: el Object3D manda y el almacen se pone al dia. */
@@ -478,9 +535,12 @@ export class SceneEditor {
       cambios[`${base}.rotation.x`] = round(o.rotation.x / DEG, 1);
       cambios[`${base}.rotation.y`] = round(o.rotation.y / DEG, 1);
       cambios[`${base}.rotation.z`] = round(o.rotation.z / DEG, 1);
-      cambios[`${base}.scale.x`] = round(o.scale.x);
-      cambios[`${base}.scale.y`] = round(o.scale.y);
-      cambios[`${base}.scale.z`] = round(o.scale.z);
+      // Las figuras no guardan escala: la altura es su deslizador.
+      if (at.branch !== 'figures') {
+        cambios[`${base}.scale.x`] = round(o.scale.x);
+        cambios[`${base}.scale.y`] = round(o.scale.y);
+        cambios[`${base}.scale.z`] = round(o.scale.z);
+      }
     }
     this.settings.batch(cambios);
   }
@@ -495,20 +555,38 @@ export class SceneEditor {
   #pickables() {
     const lista = [];
     for (const item of this.items.values()) {
-      if (!item.object.visible) continue;
+      if (item.kind === 'figura' || !item.object.visible) continue;
       if (item.object.isLight) { if (item.pick?.visible) lista.push(item.pick); }
       else lista.push(item.object);
     }
     return lista;
   }
 
-  /** Id del elemento que hay bajo el puntero, o '' si no hay ninguno. */
+  /**
+   * Id del elemento que hay bajo el puntero, o '' si no hay ninguno.
+   *
+   * Las figuras se apuntan por su caja envolvente, no por su malla: la anatomia
+   * son decenas de miles de triangulos con esqueleto y esto se llama en cada
+   * movimiento del raton. Es lo mismo que dibuja el contorno azul, asi que se
+   * selecciona exactamente lo que se resalta.
+   */
   #pickAt(event) {
+    const cam = this.viewport.cameras.active;
+    this.raycaster.setFromCamera(this.#pointerTo(event), cam);
     const objetos = this.#pickables();
-    if (!objetos.length) return '';
-    this.raycaster.setFromCamera(this.#pointerTo(event), this.viewport.cameras.active);
-    const hits = this.raycaster.intersectObjects(objetos, false);
-    return hits[0]?.object?.userData?.itemId ?? '';
+    const hits = objetos.length ? this.raycaster.intersectObjects(objetos, false) : [];
+    let mejor = hits[0]?.object?.userData?.itemId ?? '';
+    let cerca = hits[0]?.distance ?? Infinity;
+
+    for (const item of this.items.values()) {
+      if (item.kind !== 'figura' || !item.object.visible) continue;
+      const caja = item.box.setFromObject(item.object);
+      if (caja.isEmpty()) continue;
+      if (!this.raycaster.ray.intersectBox(caja, _p)) continue;
+      const d = this.raycaster.ray.origin.distanceTo(_p);
+      if (d < cerca) { cerca = d; mejor = item.def.id; }
+    }
+    return mejor;
   }
 
   /**

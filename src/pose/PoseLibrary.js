@@ -34,6 +34,12 @@ export class PoseLibrary {
     this.items = this.#read();
   }
 
+  /** Cambia la figura sobre la que se captura y se aplican las poses. */
+  setCharacter(character) {
+    this.character = character;
+    return this;
+  }
+
   #read() {
     try {
       const raw = localStorage.getItem(STORE_KEY);

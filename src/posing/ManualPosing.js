@@ -109,6 +109,18 @@ export class ManualPosing {
     }
   }
 
+  /**
+   * Cambia la figura que se posa a mano. El historial de deshacer se vacia: sus
+   * poses son de otro esqueleto.
+   */
+  setCharacter(character) {
+    if (this.character === character) return this;
+    this.character = character;
+    this.clearHistory();
+    this.rebuild();
+    return this;
+  }
+
   setEnabled(on) {
     this.enabled = !!on;
     this.handles.visible = this.enabled;
@@ -166,7 +178,8 @@ export class ManualPosing {
     const cam = this.viewport.cameras.active;
     if (this.gizmo.camera !== cam) this.gizmo.camera = cam;
 
-    const height = Math.max(0.4, this.settings.get('figure.height') ?? 1.75);
+    // La altura es propia de cada figura, no un ajuste global.
+    const height = Math.max(0.4, this.character?.placement?.height ?? 1.75);
     const base = height * 0.013;
     for (const entry of this.entries) {
       entry.bone.updateWorldMatrix(true, false);
@@ -252,6 +265,11 @@ export class ManualPosing {
   /** Guarda el estado actual antes de un cambio externo (poses, presets). */
   mark() {
     this.#pushHistory();
+  }
+
+  /** Olvida el historial: las poses guardadas son de otro esqueleto. */
+  clearHistory() {
+    this.history.length = 0;
   }
 
   undo() {

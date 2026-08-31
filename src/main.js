@@ -11,10 +11,10 @@
 import './styles/theme.css';
 import './styles/app.css';
 
-import { DEFAULTS, STORAGE_KEY, DEFAULT_MODEL_URL, MODEL_LIBRARY } from './config.js';
+import { DEFAULTS, STORAGE_KEY, MODEL_LIBRARY } from './config.js';
 import { Settings } from './core/Settings.js';
 import { Viewport } from './core/Viewport.js';
-import { Character } from './model/Character.js';
+import { FigureSet, MAX_FIGURAS, libraryUrl } from './model/FigureSet.js';
 import { PoseEngine } from './pose/PoseEngine.js';
 import { PoseLibrary } from './pose/PoseLibrary.js';
 import { PoseDetector } from './mocap/PoseDetector.js';
@@ -79,9 +79,6 @@ function download(blob, filename) {
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 const isModelFile = (name) => /\.(glb|gltf|fbx)$/i.test(name);
 
-/** Url del modelo de la biblioteca, con vuelta al de siempre si el id no existe. */
-const libraryUrl = (id) => MODEL_LIBRARY.find((entry) => entry.id === id)?.url ?? DEFAULT_MODEL_URL;
-
 async function main() {
   hydrateIcons(document);
   initToasts(document.getElementById('toasts'));
@@ -145,20 +142,51 @@ async function main() {
   // solo surte efecto al recargar.
   settings.on('quality.compat', () => toast('Recarga la pagina para aplicar el modo compatible', 'warn'));
 
-  const character = new Character(settings);
-  viewport.add(character.root);
-  // El autofoco pregunta al personaje donde esta la cabeza, las manos, etc.
-  viewport.cameras.focusProvider = (target, out) => (character.loaded ? character.focusPoint(target, out) : null);
+  /* ── Figuras ────────────────────────────────────────────────────────── */
 
-  const engine = new PoseEngine(settings, character);
+  // `FigureSet` es el dueno de los personajes vivos: crea, carga, clona y
+  // destruye. El resto del programa solo pregunta por la figura activa, que es
+  // la que recibe la captura por camara, las poses, el posado manual y las
+  // manos. Los avisos llegan por estas devoluciones de llamada, que se disparan
+  // siempre despues de montar `app` y la interfaz.
+  const figures = new FigureSet({
+    settings,
+    viewport,
+    onProgress: (texto) => { boot(0.4, texto); app.ui?.setStatus?.(texto); },
+    onLoaded: (id, ch) => onFigureLoaded(id, ch),
+    onError: (id, err) => {
+      app.ui?.setStatus?.('No se pudo cargar el modelo', 'err');
+      toast(`No se pudo cargar el modelo: ${errorText(err)}`, 'err');
+    },
+    onChange: () => {
+      app.scene?.rebuild();
+      app.hooks.refreshScene?.();
+      app.hooks.refreshFigures?.();
+      app.statusbar?.setFigure?.();
+    },
+  });
+  // Sesion nueva (o anterior a las figuras multiples): se siembra una figura con
+  // los ajustes heredados, asi que la escena nunca esta vacia.
+  figures.seed();
+
+  // El autofoco pregunta a la figura activa donde esta la cabeza, las manos, etc.
+  viewport.cameras.focusProvider = (target, out) => {
+    const ch = figures.active;
+    return ch?.loaded ? ch.focusPoint(target, out) : null;
+  };
+
+  const engine = new PoseEngine(settings, null);
   const detector = new PoseDetector(settings);
   const overlay = new Overlay2D(document.getElementById('mocap-overlay'), settings);
   const guides = new Guides(document.getElementById('guide-canvas'), settings, viewport);
 
   const app = {
-    settings, viewport, character, engine, detector, overlay, guides,
+    settings, viewport, figures, engine, detector, overlay, guides,
     hooks: {}, actions: {},
   };
+  // Compatibilidad y comodidad en consola: `posu.character` es la figura activa.
+  Object.defineProperty(app, 'character', { get: () => figures.active, enumerable: true });
+
 
   detector.onFallback = (aviso) => {
     toast(aviso, 'warn');
@@ -172,11 +200,11 @@ async function main() {
   });
   app.source = source;
 
-  const library = new PoseLibrary(character, { onChange: () => app.hooks.refreshPoses?.() });
+  const library = new PoseLibrary(null, { onChange: () => app.hooks.refreshPoses?.() });
   app.library = library;
 
   const posing = new ManualPosing({
-    settings, viewport, character,
+    settings, viewport, character: null,
     onSelect: (entry) => settings.set('ui.selectedBone', entry?.label ?? entry?.key ?? ''),
   });
   app.posing = posing;
@@ -184,7 +212,7 @@ async function main() {
   // Rig de manos: deduce los ejes de flexion del propio esqueleto y aplica los
   // valores de `hands.*`. El guardia evita que copiar una mano en la otra
   // vuelva a entrar en el mismo suscriptor.
-  const hands = new HandRig(character, settings);
+  const hands = new HandRig(null, settings);
   app.hands = hands;
   // Rastreador de dedos por camara: usa su propio modelo de MediaPipe y
   // escribe sobre el mismo rig, asi que se carga solo si se pide.
@@ -224,6 +252,60 @@ async function main() {
     });
   });
 
+  /* ── Figura activa ──────────────────────────────────────────────────── */
+
+  /**
+   * Reparte la figura activa entre los modulos que trabajan sobre un personaje.
+   * `rehacer` es para cuando el esqueleto es nuevo (se ha cargado o cambiado el
+   * modelo) aunque el objeto `Character` sea el mismo.
+   */
+  function repartirActiva({ rehacer = false } = {}) {
+    const ch = figures.active;
+    engine.setCharacter(ch);
+    library.setCharacter(ch);
+    posing.setCharacter(ch);
+    hands.setCharacter(ch);
+    guides.setCharacter(ch);
+
+    if (rehacer) {
+      engine.reset();
+      posing.clearHistory();
+      posing.rebuild();
+      if (ch?.loaded) hands.rebuild();
+    }
+    posing.setEnabled(settings.get('ui.manualPosing') === true);
+    if (hands.ready) hands.apply();
+
+    // La rejilla de modelos del panel Figura senala el de la figura activa.
+    const def = figures.activeDef;
+    if (def?.model) settings.set('figure.model', def.model);
+
+    app.hooks.refreshScene?.();
+    app.hooks.refreshFigures?.();
+    app.statusbar?.setFigure?.();
+    viewport.invalidateShadows();
+  }
+
+  /** Avisa de los huesos que faltan, solo de los que la aplicacion necesita. */
+  function avisaHuesos(ch) {
+    if (ch?.missingRequired?.length) {
+      console.warn('[Modelo] huesos sin correspondencia:', ch.missingRequired);
+      toast(`Faltan ${ch.missingRequired.length} huesos del esqueleto estandar`, 'warn');
+    } else if (ch?.missing?.length) {
+      console.info('[Modelo] huesos opcionales ausentes:', ch.missing);
+    }
+  }
+
+  /** Una figura ha terminado de cargar (alta, duplicado o cambio de modelo). */
+  function onFigureLoaded(id, ch) {
+    app.scene?.rebuild();           // su caja ya se puede pinchar en el visor
+    if (id !== figures.activeId) { viewport.invalidateShadows(); return; }
+    repartirActiva({ rehacer: true });
+    avisaHuesos(ch);
+  }
+
+  settings.on('figure.active', () => repartirActiva({ rehacer: true }));
+
   /* ── Acciones de la interfaz ────────────────────────────────────────── */
 
   const actions = app.actions;
@@ -235,6 +317,8 @@ async function main() {
   actions.loadLibraryModel = async (id) => {
     const entry = MODEL_LIBRARY.find((e) => e.id === id);
     if (!entry) return false;
+    // `figure.model` es la plantilla de las figuras nuevas y lo que marca la
+    // rejilla del panel; el modelo real de la figura lo escribe `loadInto`.
     settings.set('figure.model', entry.id);
     const ok = await loadCharacter(entry.url);
     if (ok) toast('Figura: ' + entry.label, 'ok');
@@ -242,7 +326,7 @@ async function main() {
   };
   actions.resetModel = () => {
     settings.set('figure.model', 'character');
-    return loadCharacter(DEFAULT_MODEL_URL);
+    return loadCharacter(libraryUrl('character'));
   };
 
   actions.handleDroppedFile = async (file) => {
@@ -278,9 +362,10 @@ async function main() {
   };
 
   actions.frameFigure = () => {
-    if (!character.loaded) return;
-    character.refreshBounds();
-    viewport.frame(character.box);
+    const ch = figures.active;
+    if (!ch?.loaded) return;
+    ch.refreshBounds();
+    viewport.frame(ch.box);
   };
   actions.resetCamera = () => {
     settings.reset('camera');
@@ -329,12 +414,14 @@ async function main() {
       toast('Todavia no hay un modelo cargado', 'warn');
       return;
     }
+    figures.snapshotPoses();
     app.hooks.refreshPoses?.();
     toast(`Guardada «${item.name}»`, 'ok');
   };
   actions.applyPose = (id) => {
     settings.set('mocap.frozen', true);
     if (library.apply(id)) {
+      figures.snapshotPoses();
       viewport.invalidateShadows();
       toast('Pose aplicada');
     }
@@ -377,22 +464,26 @@ async function main() {
       toast('El navegador no permite copiar al portapapeles', 'warn');
     }
   };
-  actions.resetAll = () => {
+  actions.resetAll = async () => {
     stopCapture();
     settings.reset();
+    // `reset` deja `scene.figures` vacio: se vuelve a sembrar una figura.
+    figures.seed();
+    await figures.sync();
     engine.release();
     toast('Ajustes restablecidos');
   };
 
-  /* ── Escena del usuario: solidos y luces ────────────────────────────── */
+  /* ── Escena del usuario: figuras, solidos y luces ───────────────────── */
 
   // Se crea antes de la interfaz porque los paneles preguntan por app.scene.
   const sceneEditor = new SceneEditor({
     settings,
     viewport,
+    figures,
     // El posado manual solo se queda el clic si hay un manejador de
     // articulacion debajo; en el resto del visor se puede seguir eligiendo
-    // solidos y luces con el raton.
+    // figuras, solidos y luces con el raton.
     blocked: (event) => settings.get('ui.manualPosing') === true && !!event && posing.picks(event),
     onSelect: () => app.hooks.refreshScene?.(),
     // Al elegir un elemento pinchandolo en el visor se abre su panel: si no, la
@@ -409,6 +500,52 @@ async function main() {
     sceneEditor.addLight(type);
     toast('Luz insertada. Colocala con el gizmo (W)');
   };
+
+  /* ── Varias figuras ─────────────────────────────────────────────────── */
+
+  actions.addFigure = async () => {
+    if (figures.count >= MAX_FIGURAS) {
+      toast(`No se pueden tener mas de ${MAX_FIGURAS} figuras en la escena`, 'warn');
+      return null;
+    }
+    const id = await figures.add({});
+    if (!id) return null;
+    sceneEditor.select(id);
+    toast('Figura anadida. W mover · E girar');
+    return id;
+  };
+  actions.duplicateFigure = async (id) => {
+    const origen = id || figures.activeId;
+    if (figures.count >= MAX_FIGURAS) {
+      toast(`No se pueden tener mas de ${MAX_FIGURAS} figuras en la escena`, 'warn');
+      return null;
+    }
+    const nuevo = await figures.duplicate(origen);
+    if (!nuevo) {
+      toast('La figura todavia no esta cargada', 'warn');
+      return null;
+    }
+    sceneEditor.select(nuevo);
+    toast('Figura duplicada con su pose', 'ok');
+    return nuevo;
+  };
+  actions.removeFigure = (id) => {
+    const objetivo = id || figures.activeId;
+    if (!figures.remove(objetivo)) {
+      toast('La escena necesita al menos una figura', 'warn');
+      return false;
+    }
+    toast('Figura eliminada');
+    return true;
+  };
+  /** Elige la figura que recibe camara, poses, posado manual y manos. */
+  actions.setActiveFigure = (id) => {
+    if (!id) return false;
+    figures.setActive(id);
+    sceneEditor.select(id);
+    return true;
+  };
+
   actions.selectItem = (id) => sceneEditor.select(id);
   actions.alignPerspective = () => {
     if (!guides.perspective.active) { toast('Elige antes un modo de perspectiva'); return; }
@@ -418,9 +555,11 @@ async function main() {
   actions.duplicateItem = (id) => { if (id) sceneEditor.duplicate(id); };
   actions.removeItem = (id) => { if (id) sceneEditor.remove(id); };
   actions.clearScene = () => {
-    if (!sceneEditor.list().length) return;
+    // Las figuras no se borran: la escena siempre tiene al menos una.
+    const n = (settings.get('scene.objects')?.length ?? 0) + (settings.get('scene.lights')?.length ?? 0);
+    if (!n) return;
     sceneEditor.clearAll();
-    toast('Escena vaciada');
+    toast('Solidos y luces eliminados');
   };
 
   /* ── Interfaz ───────────────────────────────────────────────────────── */
@@ -609,11 +748,18 @@ async function main() {
 
   /* ── Carga del personaje ────────────────────────────────────────────── */
 
+  /**
+   * Carga un modelo en la figura activa: una URL de la biblioteca o un archivo
+   * soltado en la ventana. El reparto a los modulos y el aviso de huesos los
+   * hace `onFigureLoaded`, que tambien salta al cargar las figuras al arrancar.
+   */
   async function loadCharacter(src) {
+    const id = figures.activeId;
+    if (!id) return false;
     const label = typeof src === 'string' ? 'modelo incluido' : src.name;
     ui.setStatus(`Cargando ${label}…`);
     try {
-      await character.load(src, {
+      await figures.loadInto(id, src, {
         onProgress: (ev) => {
           if (ev?.total) boot(0.3 + 0.6 * (ev.loaded / ev.total), 'Cargando la figura…');
         },
@@ -624,24 +770,7 @@ async function main() {
       toast(`No se pudo cargar el modelo: ${errorText(err)}`, 'err');
       return false;
     }
-
-    guides.setCharacter(character);
-    if (hands.rebuild()) hands.apply();   // ejes de los dedos del nuevo esqueleto
-    posing.rebuild();
-    posing.setEnabled(settings.get('ui.manualPosing') === true);
-    engine.reset();
-    character.refreshBounds();
-    viewport.frame(character.box);
-    viewport.invalidateShadows();
-
-    // Solo se avisa de los huesos que la aplicacion necesita: faltar la
-    // coronilla o los dedos de los pies es normal y no cambia nada visible.
-    if (character.missingRequired?.length) {
-      console.warn('[Modelo] huesos sin correspondencia:', character.missingRequired);
-      toast(`Faltan ${character.missingRequired.length} huesos del esqueleto estandar`, 'warn');
-    } else if (character.missing?.length) {
-      console.info('[Modelo] huesos opcionales ausentes:', character.missing);
-    }
+    actions.frameFigure();
     ui.setStatus(typeof src === 'string' ? 'Listo' : `Figura cargada: ${label}`, 'ok');
     return true;
   }
@@ -649,7 +778,8 @@ async function main() {
   /* ── Secuencia de arranque ──────────────────────────────────────────── */
 
   boot(0.3, 'Cargando la figura…');
-  await loadCharacter(libraryUrl(settings.get('figure.model')));
+  await figures.sync();
+  actions.frameFigure();
 
   boot(0.95, 'Ultimos ajustes…');
   viewport.start();
@@ -659,9 +789,10 @@ async function main() {
     startCapture();
   }
 
-  // Libera la camara al cerrar la pestana.
+  // Libera la camara al cerrar la pestana y guarda la pose de cada figura.
   window.addEventListener('beforeunload', () => {
     source.dispose();
+    figures.snapshotPoses();
     settings.save();
   });
 

@@ -119,6 +119,15 @@ export class HandRig {
     return this.ready;
   }
 
+  /** Cambia la figura cuyos dedos manejan los deslizadores de `hands.*`. */
+  setCharacter(character) {
+    if (this.character === character) return this;
+    this.character = character;
+    if (character?.loaded) this.rebuild();
+    else this.clear();
+    return this;
+  }
+
   /** Olvida los ejes (al descargar el personaje). */
   clear() { this.sides = { left: null, right: null }; }
 

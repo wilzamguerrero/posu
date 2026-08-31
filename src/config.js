@@ -44,7 +44,15 @@ export const MODEL_LIBRARY = [
 export const FOCUS_TARGETS = ['figura', 'cabeza', 'torso', 'manos', 'pies'];
 
 export const DEFAULTS = {
+  /**
+   * Aspecto de las figuras. Estos ajustes son comunes a todas las que haya en la
+   * escena: cambiar la malla visible o el sombreado las cambia a la vez. Lo
+   * propio de cada figura (modelo, sitio, altura y pose) vive en `scene.figures`.
+   * `model`, `height`, `turn` y `anchor` se quedan aqui como plantilla del alta
+   * de una figura nueva.
+   */
   figure: {
+    active: '',                 // id de la figura que recibe camara, poses y manos
     model: 'character',         // id de MODEL_LIBRARY
     variant: 'anatomia',        // anatomia | maniqui | esqueleto
     shading: 'textura',         // textura | arcilla | wireframe | rayosx | toon
@@ -83,8 +91,14 @@ export const DEFAULTS = {
     objeto:    { preset: 'yeso',     color: '#d8d4cc', roughness: 0.70, metalness: 0.00, opacity: 1, flat: false },
   },
 
-  /** Editor de escena: solidos y luces insertados por el usuario. */
+  /** Editor de escena: figuras, solidos y luces que el usuario coloca. */
   scene: {
+    /**
+     * Figuras de la escena. Cada una: { id, name, model, visible, position,
+     * rotation (grados), height, anchor, pose }. Se siembra al arrancar desde
+     * los valores de `figure`, asi que nunca esta vacia en marcha.
+     */
+    figures: [],
     objects: [],
     lights: [],
     selected: '',

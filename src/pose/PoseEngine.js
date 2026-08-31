@@ -87,6 +87,17 @@ export class PoseEngine {
     this.active = false;
   }
 
+  /**
+   * Cambia la figura que recibe la captura. Los filtros y las cachas de
+   * retargeting se limpian: los huesos del personaje nuevo son otros.
+   */
+  setCharacter(character) {
+    if (this.character === character) return this;
+    this.character = character;
+    this.reset();
+    return this;
+  }
+
   /** Suaviza las posiciones de los puntos antes de resolver la pose. */
   #smoothPoints(source, store, filter, dt) {
     if (!source?.length) return null;
