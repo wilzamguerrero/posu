@@ -1,5 +1,5 @@
 /**
- * POSU · Guias de perspectiva
+ * ATOM · Guias de perspectiva
  * ---------------------------------------------------------------------------
  * Retícula de fugas dibujada sobre el visor. A diferencia de las herramientas
  * de perspectiva al uso, aqui los puntos de fuga no se colocan a mano: se

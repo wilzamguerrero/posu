@@ -1,5 +1,5 @@
 /**
- * POSU · Punto de entrada
+ * ATOM · Punto de entrada
  * ---------------------------------------------------------------------------
  * Arranca los modulos en el orden en que se necesitan (visor 3D → personaje →
  * captura → interfaz), los conecta mediante el objeto `app` y expone las
@@ -22,11 +22,13 @@ import { HandTracker } from './mocap/HandTracker.js';
 import { MocapSource } from './mocap/MocapSource.js';
 import { Overlay2D } from './mocap/Overlay2D.js';
 import { ManualPosing } from './posing/ManualPosing.js';
+import { boneForLandmark } from './pose/landmarks.js';
+import { BONE_LABELS } from './model/boneMap.js';
 import { HandRig, HAND_PRESET_BY_ID } from './model/HandRig.js';
 import { Guides } from './guides/Guides.js';
 import { SceneEditor } from './scene/SceneEditor.js';
 import { UI } from './ui/UI.js';
-import { StatusBar } from './ui/StatusBar.js';
+import { Readout } from './ui/Readout.js';
 import { pickFile } from './ui/panels.js';
 import { initToasts, toast } from './ui/Toast.js';
 import { errorText } from './core/errors.js';
@@ -58,7 +60,7 @@ const bootDone = () => {
 
 /** Mensaje de error definitivo, en la pantalla de arranque si sigue visible. */
 const bootError = (text) => {
-  console.error('[POSU]', text);
+  console.error('[ATOM]', text);
   const msg = document.getElementById('boot-msg');
   if (!msg) return;
   msg.textContent = text;
@@ -162,7 +164,7 @@ async function main() {
       app.scene?.rebuild();
       app.hooks.refreshScene?.();
       app.hooks.refreshFigures?.();
-      app.statusbar?.setFigure?.();
+      app.readout?.setFigure?.();
     },
   });
   // Sesion nueva (o anterior a las figuras multiples): se siembra una figura con
@@ -184,7 +186,7 @@ async function main() {
     settings, viewport, figures, engine, detector, overlay, guides,
     hooks: {}, actions: {},
   };
-  // Compatibilidad y comodidad en consola: `posu.character` es la figura activa.
+  // Compatibilidad y comodidad en consola: `atom.character` es la figura activa.
   Object.defineProperty(app, 'character', { get: () => figures.active, enumerable: true });
 
 
@@ -205,7 +207,12 @@ async function main() {
 
   const posing = new ManualPosing({
     settings, viewport, character: null,
-    onSelect: (entry) => settings.set('ui.selectedBone', entry?.label ?? entry?.key ?? ''),
+    // Se guardan etiqueta y clave: la primera se lee en la interfaz, la segunda
+    // la usa el monitor de captura para marcar el punto correspondiente.
+    onSelect: (entry) => settings.batch({
+      'ui.selectedBone': entry?.label ?? entry?.key ?? '',
+      'ui.selectedBoneKey': entry?.key ?? '',
+    }),
   });
   app.posing = posing;
   settings.on('ui.manualPosing', (v) => posing.setEnabled(v === true));
@@ -282,7 +289,7 @@ async function main() {
 
     app.hooks.refreshScene?.();
     app.hooks.refreshFigures?.();
-    app.statusbar?.setFigure?.();
+    app.readout?.setFigure?.();
     viewport.invalidateShadows();
   }
 
@@ -376,6 +383,25 @@ async function main() {
     viewport.cameras.setView(name);
   };
 
+  /**
+   * Selecciona el control del personaje a partir de un punto pulsado en el
+   * monitor de captura. Activa la pose manual si hacia falta: sin ella no hay
+   * manejadores que seleccionar.
+   */
+  actions.selectJointFromCapture = (lmIndex) => {
+    const key = boneForLandmark(lmIndex, settings.get('mocap.mirror') === true);
+    const ch = figures.active;
+    if (!key || !ch?.loaded || !ch.bones[key]) {
+      toast('Ese punto no tiene un control equivalente en la figura', 'warn');
+      return false;
+    }
+    if (settings.get('ui.manualPosing') !== true) settings.set('ui.manualPosing', true);
+    if (!posing.entries.length) posing.rebuild();
+    posing.select(key);
+    toast('Control: ' + (BONE_LABELS[key] ?? key));
+    return true;
+  };
+
   actions.resetPose = () => {
     posing.mark?.();
     engine.release();
@@ -435,7 +461,7 @@ async function main() {
       toast('No hay poses que exportar', 'warn');
       return;
     }
-    download(new Blob([library.exportJSON()], { type: 'application/json' }), `posu-poses-${stamp()}.json`);
+    download(new Blob([library.exportJSON()], { type: 'application/json' }), `atom-poses-${stamp()}.json`);
   };
   actions.importPoses = async () => {
     const file = await pickFile('.json,application/json');
@@ -449,7 +475,7 @@ async function main() {
     try {
       const blob = await viewport.screenshot({ scale: 2, transparent });
       if (!blob) throw new Error('sin datos');
-      download(blob, `posu-${stamp()}.png`);
+      download(blob, `atom-${stamp()}.png`);
       toast('Captura guardada', 'ok');
     } catch (err) {
       console.error('[Captura de pantalla]', err);
@@ -567,8 +593,8 @@ async function main() {
   boot(0.2, 'Montando la interfaz…');
   const ui = new UI(app);
   app.ui = ui;
-  const statusbar = new StatusBar(document.getElementById('statusbar'), app);
-  app.statusbar = statusbar;
+  const readout = new Readout(document.getElementById('viewport-readout'), app);
+  app.readout = readout;
 
   /** Refleja en la interfaz el estado real de la fuente de captura. */
   function onSourceStatus(st) {
@@ -576,13 +602,13 @@ async function main() {
     app.hooks.captureState?.(live);
     if (st.error) {
       ui.setStatus(st.error, 'err');
-      statusbar.setCapture('error', 'err');
+      readout.setCapture('error', 'err');
       toast(st.error, 'err');
       return;
     }
     if (!live) {
       ui.setStatus('Captura detenida');
-      statusbar.setCapture('inactiva');
+      readout.setCapture('inactiva');
       overlay.clear();
       ui.setMocapFps(0);
       return;
@@ -590,7 +616,7 @@ async function main() {
     const size = st.size?.width ? ` · ${st.size.width}×${st.size.height}` : '';
     const label = st.kind === 'webcam' ? (st.label || 'Camara') : st.label || st.kind;
     ui.setStatus(`${st.kind === 'imagen' ? 'Imagen' : st.kind === 'video' ? 'Video' : 'Camara'}: ${label}${size}`, 'ok');
-    statusbar.setCapture(st.kind === 'webcam' ? 'camara en directo' : st.kind, 'ok');
+    readout.setCapture(st.kind === 'webcam' ? 'camara en directo' : st.kind, 'ok');
   }
 
   /* ── Bucle de captura ───────────────────────────────────────────────── */
@@ -610,7 +636,7 @@ async function main() {
 
     if (source.kind === 'imagen') {
       overlay.draw(source, source.still);
-      statusbar.setConfidence(engine.confidence);
+      readout.setConfidence(engine.confidence);
       return;
     }
 
@@ -624,7 +650,7 @@ async function main() {
         detCount++;
       } else if (lastFrame && !detector.throttled && detector.lastError) {
         // Un fallo persistente no debe dejar la figura congelada sin aviso.
-        statusbar.setConfidence(engine.confidence);
+        readout.setConfidence(engine.confidence);
       }
       // Los dedos van por su cuenta: aunque el cuerpo no se detecte en este
       // fotograma, las manos siguen mandando (y con su propio limitador).
@@ -639,7 +665,7 @@ async function main() {
       }
     }
     overlay.draw(source, lastFrame, tracker.hands);
-    statusbar.setConfidence(engine.confidence);
+    readout.setConfidence(engine.confidence);
   });
 
   /* ── Arranque y parada de la captura ────────────────────────────────── */
@@ -686,7 +712,7 @@ async function main() {
     tracker.hands = [];
     overlay.clear();
     ui.setMocapFps(0);
-    statusbar.setConfidence(0);
+    readout.setConfidence(0);
   }
 
   /* ── Recarga de los modelos de deteccion ────────────────────────────── */
@@ -796,14 +822,14 @@ async function main() {
     settings.save();
   });
 
-  // Utilidad de depuracion: `window.posu` permite inspeccionar todo en consola.
-  window.posu = app;
+  // Utilidad de depuracion: `window.atom` permite inspeccionar todo en consola.
+  window.atom = app;
 
   /**
    * Radiografia del estado grafico para pegar en la consola cuando algo se ve
    * mal: dice si el bucle sigue vivo, cuanto hace del ultimo fotograma, que
    * elemento ocupa el centro de la pantalla y si la interfaz esta maquetada.
-   * Se usa escribiendo `posu.diagnostico()`.
+   * Se usa escribiendo `atom.diagnostico()`.
    */
   app.diagnostico = () => {
     const centro = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
@@ -831,7 +857,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[POSU] fallo en el arranque:', err);
+  console.error('[ATOM] fallo en el arranque:', err);
   const msg = document.getElementById('boot-msg');
   if (msg) {
     msg.textContent = `No se pudo iniciar: ${errorText(err)}`;

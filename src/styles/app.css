@@ -1,5 +1,5 @@
 /* ==========================================================================
-   POSU · Layout y componentes
+   ATOM · Layout y componentes
    ========================================================================== */
 *,
 *::before,
@@ -26,7 +26,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* ── Estructura general ──────────────────────────────────────────────── */
 .app {
   display: grid;
-  grid-template-rows: var(--titlebar-h) 1fr var(--statusbar-h);
+  grid-template-rows: var(--titlebar-h) 1fr;
   height: 100vh;
   height: 100dvh;
 }
@@ -43,7 +43,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .titlebar-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .brand-mark { color: var(--link); display: block; }
 .brand-name { font-weight: 700; letter-spacing: 0.06em; color: var(--fg-strong); }
-.brand-sub { color: var(--fg-dim); font-size: 11.5px; white-space: nowrap; }
 .titlebar-center {
   flex: 1;
   display: flex;
@@ -123,38 +122,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .sidebar-scroll { overflow: hidden auto; padding-bottom: 24px; scrollbar-gutter: stable; }
 
-/* ── Barra de estado ─────────────────────────────────────────────────── */
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px;
-  background: var(--bg-app);
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--fg-muted);
-  user-select: none;
-  overflow: hidden;
-}
-.status-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 7px;
-  height: 100%;
-  white-space: nowrap;
-  border-radius: 2px;
-}
-.status-item .svg-icon { width: 13px; height: 13px; }
-.status-item[data-clickable] { cursor: pointer; }
-.status-item[data-clickable]:hover { background: var(--bg-hover); color: var(--fg-strong); }
-.status-item.accent { background: var(--accent); color: var(--accent-fg); }
-.status-item.warn { color: var(--warn); }
-.status-item.err { color: var(--err); }
-.status-item.ok { color: var(--ok); }
-.status-spacer { flex: 1; }
-.status-value { font-family: var(--font-mono); color: var(--fg); }
-
 /* ── Visor ───────────────────────────────────────────────────────────── */
 .viewport {
   position: relative;
@@ -217,17 +184,67 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .viewport-badge b { color: var(--fg-muted); font-weight: 500; }
 
+/* ── Lectura flotante (antes: barra de estado inferior) ──────────────────
+   Vive dentro del visor, con la misma tipografia de `.viewport-badge`, pero
+   anclada abajo y en una sola fila. Al no ocupar una fila del grid, ningun
+   cambio de la interfaz puede desplazar el resto del layout. */
+.viewport-readout {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  user-select: none;
+  z-index: 3;
+  /* El visor manda: solo los elementos accionables capturan el puntero. */
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.viewport-badge,
+.viewport-readout { text-shadow: var(--shadow-text); }
+
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+.status-item .svg-icon { width: 12px; height: 12px; }
+.status-item[data-clickable] { cursor: pointer; pointer-events: auto; }
+.status-item[data-clickable]:hover {
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--fg-strong);
+}
+.status-item.accent { background: var(--accent); color: var(--accent-fg); text-shadow: none; }
+.status-item.warn { color: var(--warn); }
+.status-item.err { color: var(--err); }
+.status-item.ok { color: var(--ok); }
+.status-spacer { flex: 1; min-width: 8px; }
+.status-value { color: var(--fg-muted); }
+
 /* ── Monitor de captura ──────────────────────────────────────────────── */
 .mocap-hud {
   position: absolute;
   left: 12px;
-  bottom: 12px;
-  width: 268px;
+  /* Por defecto se apoya justo encima de la lectura flotante del visor. */
+  bottom: 30px;
+  /* El ancho lo fija el usuario al redimensionar, pero nunca desborda el visor. */
+  width: min(var(--mocap-w, 268px), calc(100% - 24px));
+  max-height: calc(100% - 42px);
+  display: flex;
+  flex-direction: column;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  overflow: hidden;
   z-index: 5;
 }
 .mocap-hud-head {
@@ -237,20 +254,67 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 5px 4px 5px 8px;
   background: var(--bg-widget);
   border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   cursor: move;
   font-size: 11px;
   color: var(--fg-muted);
+  flex: 0 0 auto;
 }
 .mocap-hud-head .svg-icon { width: 13px; height: 13px; }
+/* Por encima del tirador `ne`, para no perder el boton de cerrar. */
+.mocap-hud-head .icon-btn { position: relative; z-index: 2; }
 .mocap-hud-title { flex: 1; text-transform: uppercase; letter-spacing: 0.07em; }
 .mocap-hud-fps { font-family: var(--font-mono); color: var(--syn-cyan); }
-.mocap-hud-body { position: relative; aspect-ratio: 4 / 3; background: #0d0d0d; }
+.mocap-hud-body {
+  position: relative;
+  /* Mientras nadie lo redimensione manda la proporcion 4:3; en cuanto hay una
+     altura explicita (`.is-sized`) el cuerpo se estira para llenar el hueco. */
+  aspect-ratio: 4 / 3;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #0d0d0d;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  overflow: hidden;
+}
+.mocap-hud.is-sized .mocap-hud-body { aspect-ratio: auto; }
 .mocap-hud-body > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .mocap-hud-body video { transform: scaleX(-1); }
 .mocap-hud-body video.no-mirror { transform: none; }
 .mocap-hud-body img { display: none; }
 .mocap-hud-body img.is-active { display: block; }
+.mocap-hud-body canvas { cursor: crosshair; }
+.mocap-hud-body canvas.is-over-point { cursor: pointer; }
 .mocap-hud.is-collapsed .mocap-hud-body { display: none; }
+/* Replegado manda la cabecera, aunque haya un alto fijado a mano. */
+.mocap-hud.is-collapsed { height: auto !important; }
+.mocap-hud.is-collapsed .mocap-hud-head { border-bottom: 0; border-radius: var(--radius-lg); }
+
+/* Tiradores de redimension en las esquinas. */
+.mocap-grip {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 1;
+  touch-action: none;
+}
+.mocap-grip.nw { top: -3px; left: -3px; cursor: nwse-resize; }
+.mocap-grip.ne { top: -3px; right: -3px; cursor: nesw-resize; }
+.mocap-grip.sw { bottom: -3px; left: -3px; cursor: nesw-resize; }
+.mocap-grip.se { bottom: -3px; right: -3px; cursor: nwse-resize; }
+/* Marca visual discreta en la esquina inferior derecha, la mas usada. */
+.mocap-grip.se::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--fg-dim);
+  border-bottom: 1.5px solid var(--fg-dim);
+  opacity: 0.6;
+}
+.mocap-hud.is-collapsed .mocap-grip.sw,
+.mocap-hud.is-collapsed .mocap-grip.se { display: none; }
 
 /* ── Aviso de arrastre ───────────────────────────────────────────────── */
 .drop-hint {
@@ -383,7 +447,11 @@ input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
 input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 
 /* Interruptor */
-.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+/* `position: relative` no es decorativo: sin un ancestro posicionado, el input
+   oculto (`position: absolute`) se coloca respecto al bloque contenedor inicial
+   y no acompana al scroll del panel. Al pulsar la etiqueta, el navegador lo
+   enfoca y desplaza el panel para "revelarlo", y la interfaz daba un salto. */
+.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
 .switch input { position: absolute; opacity: 0; pointer-events: none; }
 .switch-track {
   width: 30px; height: 16px; border-radius: 9px; background: var(--bg-input);
@@ -527,8 +595,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 .boot-card { text-align: center; width: min(340px, 80vw); }
 .boot-logo { color: var(--link); display: grid; place-items: center; margin-bottom: 10px; }
 .boot-logo .svg-icon { width: 46px; height: 46px; }
-.boot-card h1 { margin: 0; font-size: 30px; letter-spacing: 0.2em; color: var(--fg-strong); font-weight: 300; }
-.boot-sub { margin: 2px 0 22px; font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-dim); }
+.boot-card h1 { margin: 0 0 22px; font-size: 30px; letter-spacing: 0.2em; color: var(--fg-strong); font-weight: 300; }
 .boot-bar { height: 2px; background: var(--border-strong); border-radius: 2px; overflow: hidden; }
 .boot-bar i { display: block; height: 100%; width: 8%; background: var(--accent); transition: width 0.35s ease; }
 .boot-msg.is-error { color: var(--err); }
@@ -536,7 +603,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 
 /* ── Avisos flotantes ────────────────────────────────────────────────── */
 .toasts {
-  position: fixed; right: 14px; bottom: calc(var(--statusbar-h) + 14px);
+  position: fixed; right: 14px; bottom: 32px;
   display: grid; gap: 8px; z-index: 60; max-width: 340px;
 }
 .toast {
@@ -563,14 +630,13 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 /* ── Adaptacion a pantallas pequenas ─────────────────────────────────── */
 @media (max-width: 860px) {
   :root { --sidebar-w: 100%; --activitybar-w: 44px; }
-  .brand-sub { display: none; }
-  .sidebar { position: absolute; top: var(--titlebar-h); bottom: var(--statusbar-h); left: var(--activitybar-w);
+  .sidebar { position: absolute; top: var(--titlebar-h); bottom: 0; left: var(--activitybar-w);
     width: min(320px, calc(100% - var(--activitybar-w))); z-index: 30; box-shadow: var(--shadow); }
-  /* Abajo y con los botones mas juntos, para que la fila entera siga cabiendo. */
-  .viewport-toolbar { top: auto; bottom: 10px; gap: 2px; padding: 3px; }
+  /* Abajo y con los botones mas juntos, para que la fila entera siga cabiendo;
+     por encima de la lectura flotante, que ocupa el borde inferior. */
+  .viewport-toolbar { top: auto; bottom: 26px; gap: 2px; padding: 3px; }
   .viewport-toolbar .icon-btn { width: 24px; height: 24px; }
   .viewport-toolbar .toolbar-sep { margin: 0; }
-  .mocap-hud { width: 190px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

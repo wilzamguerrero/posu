@@ -1,5 +1,5 @@
 /**
- * POSU · Iluminacion de estudio
+ * ATOM · Iluminacion de estudio
  * ---------------------------------------------------------------------------
  * Esquema clasico de tres puntos mas ambiente e iluminacion de entorno:
  *

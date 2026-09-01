@@ -1,5 +1,5 @@
 /**
- * POSU · Texto legible para cualquier error
+ * ATOM · Texto legible para cualquier error
  * ---------------------------------------------------------------------------
  * MediaPipe y los cargadores de three rechazan a veces con un `Event` en vez de
  * con un `Error`: interpolarlo da el inutil "[object Event]". Esta funcion

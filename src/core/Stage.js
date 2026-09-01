@@ -1,5 +1,5 @@
 /**
- * POSU · Escenario
+ * ATOM · Escenario
  * ---------------------------------------------------------------------------
  * Fondo, suelo, receptor de sombras y ayudas geometricas. Tres modos de fondo:
  *

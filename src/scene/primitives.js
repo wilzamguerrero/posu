@@ -1,5 +1,5 @@
 /**
- * POSU · Primitivas geometricas
+ * ATOM · Primitivas geometricas
  * ---------------------------------------------------------------------------
  * Catalogo de solidos que el usuario puede insertar en la escena para montar
  * bodegones, cajas de encaje o planos de apoyo. Cada entrada sabe construir su

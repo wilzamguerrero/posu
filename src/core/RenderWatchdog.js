@@ -1,5 +1,5 @@
 /**
- * POSU · Vigilante del bucle de dibujo
+ * ATOM · Vigilante del bucle de dibujo
  * ---------------------------------------------------------------------------
  * Hay equipos (sobre todo Linux con Wayland y GPU hibrida) en los que el
  * navegador deja de pedir fotogramas sin dar ningun error: el visor se queda

@@ -1,5 +1,5 @@
 /**
- * POSU · Registro de iconos (Lucide)
+ * ATOM · Registro de iconos (Lucide)
  * ---------------------------------------------------------------------------
  * Se importa cada icono por su ruta concreta en lugar del paquete completo:
  * asi el bundle final solo incluye los iconos que realmente se usan en vez de

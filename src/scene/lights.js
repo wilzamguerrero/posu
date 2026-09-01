@@ -1,5 +1,5 @@
 /**
- * POSU · Luces insertables
+ * ATOM · Luces insertables
  * ---------------------------------------------------------------------------
  * Catalogo de luces que el usuario puede añadir a la escena, ademas del tripode
  * fijo de estudio (principal, relleno y contra) que gestiona core/Lighting.js.

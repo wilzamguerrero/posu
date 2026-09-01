@@ -1,5 +1,5 @@
 /**
- * POSU · Personaje
+ * ATOM · Personaje
  * ---------------------------------------------------------------------------
  * Carga el modelo, resuelve su esqueleto, genera las variantes de geometria y
  * expone los controles de visualizacion que pide el plan:

@@ -1,15 +1,16 @@
 /**
- * POSU · Barra de estado
+ * ATOM · Lectura flotante del visor
  * ---------------------------------------------------------------------------
- * Resume en una linea el rendimiento del visor y el estado de la captura, con
- * el mismo lenguaje visual que la barra inferior de VS Code. Se actualiza a
- * 5 Hz para no forzar reflows en cada fotograma.
+ * Resume el rendimiento del visor y el estado de la captura en una linea que
+ * flota sobre el borde inferior del visor, con la misma tipografia que el
+ * distintivo de la esquina superior derecha. Se actualiza a 5 Hz para no
+ * forzar reflows en cada fotograma.
  */
 
 import { el } from './widgets.js';
 import { icon } from './icons.js';
 
-/** Crea un elemento de la barra; devuelve {root, set}. */
+/** Crea un elemento de la lectura; devuelve {root, set}. */
 function item({ iconName, title, onClick, mono = true, cls = '' }) {
   const value = el('span', { class: mono ? 'status-value' : '', text: '—' });
   const root = el('div', {
@@ -27,7 +28,7 @@ function item({ iconName, title, onClick, mono = true, cls = '' }) {
   };
 }
 
-export class StatusBar {
+export class Readout {
   /** @param {HTMLElement} host  @param {object} app */
   constructor(host, app) {
     this.app = app;

@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#181818" />
     <meta
       name="description"
-      content="POSU · Estudio 3D de anatomia artistica: captura tu pose con la webcam y transfierela a un maniqui, un esqueleto o una figura anatomica con control total de camara y luz."
+      content="ATOM: captura tu pose con la webcam y transfierela a un maniqui, un esqueleto o una figura anatomica con control total de camara y luz."
     />
-    <title>POSU · Estudio de Anatomia Artistica</title>
+    <title>ATOM</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23181818'/%3E%3Cpath d='M16 6a2.6 2.6 0 1 1 0 5.2A2.6 2.6 0 0 1 16 6Zm-6 7.4h12v2.4h-3.7l1.5 10h-2.6l-1.2-7.4-1.2 7.4h-2.6l1.5-10H10v-2.4Z' fill='%234daafc'/%3E%3C/svg%3E" />
   </head>
   <body>
@@ -17,8 +17,7 @@
       <header class="titlebar">
         <div class="titlebar-brand">
           <span class="brand-mark" data-icon="person-standing"></span>
-          <span class="brand-name">POSU</span>
-          <span class="brand-sub">Estudio de Anatomia Artistica</span>
+          <span class="brand-name">ATOM</span>
         </div>
         <div class="titlebar-center" id="titlebar-status"></div>
         <div class="titlebar-actions" id="titlebar-actions"></div>
@@ -44,6 +43,7 @@
 
           <div class="viewport-toolbar" id="viewport-toolbar"></div>
           <div class="viewport-badge" id="viewport-badge"></div>
+          <div class="viewport-readout" id="viewport-readout"></div>
 
           <!-- Monitor de captura, arrastrable -->
           <section class="mocap-hud hidden" id="mocap-hud" aria-label="Monitor de captura">
@@ -58,6 +58,10 @@
               <img id="mocap-image" alt="" />
               <canvas id="mocap-overlay"></canvas>
             </div>
+            <span class="mocap-grip nw" data-grip="nw" title="Redimensionar (doble clic: tamano por defecto)"></span>
+            <span class="mocap-grip ne" data-grip="ne" title="Redimensionar (doble clic: tamano por defecto)"></span>
+            <span class="mocap-grip sw" data-grip="sw" title="Redimensionar (doble clic: tamano por defecto)"></span>
+            <span class="mocap-grip se" data-grip="se" title="Redimensionar (doble clic: tamano por defecto)"></span>
           </section>
 
           <div class="drop-hint" id="drop-hint">
@@ -67,15 +71,11 @@
         </main>
       </div>
 
-      <!-- ── Barra de estado ───────────────────────────────────────────── -->
-      <footer class="statusbar" id="statusbar"></footer>
-
       <!-- ── Pantalla de carga ─────────────────────────────────────────── -->
       <div class="boot" id="boot">
         <div class="boot-card">
           <div class="boot-logo" data-icon="person-standing"></div>
-          <h1>POSU</h1>
-          <p class="boot-sub">Estudio de Anatomia Artistica</p>
+          <h1>ATOM</h1>
           <div class="boot-bar"><i id="boot-bar-fill"></i></div>
           <p class="boot-msg" id="boot-msg">Iniciando motor 3D…</p>
         </div>

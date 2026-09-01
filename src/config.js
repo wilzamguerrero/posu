@@ -1,5 +1,5 @@
 /**
- * POSU · Configuracion por defecto
+ * ATOM · Configuracion por defecto
  * ---------------------------------------------------------------------------
  * Toda la aplicacion se controla desde este arbol de estado. Los paneles de la
  * interfaz solo leen y escriben rutas de aqui; los modulos 3D reaccionan.
@@ -183,6 +183,9 @@ export const DEFAULTS = {
     confidence: 0.5,            // visibilidad minima por punto
     showOverlay: true,
     showHud: true,
+    /** Tamano del monitor de captura; 0 en la altura = proporcion 4:3 libre. */
+    hudW: 268,
+    hudH: 0,
     parts: { torso: 1, arms: 1, legs: 1, head: 1, hands: 1 },
     followPosition: false,
     positionRange: 0.45,
@@ -249,6 +252,8 @@ export const DEFAULTS = {
     theme: 'oscuro',            // oscuro | claro
     manualPosing: false,
     selectedBone: '',
+    /** Clave canonica del hueso seleccionado (`selectedBone` es la etiqueta). */
+    selectedBoneKey: '',
   },
 };
 

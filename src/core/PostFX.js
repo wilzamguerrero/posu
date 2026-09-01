@@ -1,5 +1,5 @@
 /**
- * POSU · Cadena de post-proceso
+ * ATOM · Cadena de post-proceso
  * ---------------------------------------------------------------------------
  * La cadena se reconstruye solo cuando cambia la combinacion de efectos
  * activos, no en cada fotograma. Si no hay ningun efecto encendido se dibuja

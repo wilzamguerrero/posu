@@ -1,5 +1,5 @@
 /**
- * POSU · Almacen de configuracion reactivo
+ * ATOM · Almacen de configuracion reactivo
  * ---------------------------------------------------------------------------
  * Un unico objeto de estado con acceso por ruta ("camera.focalLength"),
  * suscripciones y persistencia automatica en localStorage.

@@ -1,5 +1,5 @@
 /**
- * POSU · Mallas alternativas generadas por codigo
+ * ATOM · Mallas alternativas generadas por codigo
  * ---------------------------------------------------------------------------
  * El plan pide tres mallas ("anatomica", "maniqui", "esqueleto") compartiendo
  * un mismo esqueleto. El archivo de Mixamo solo trae la piel, asi que aqui se

@@ -1,5 +1,5 @@
 /**
- * POSU · Conjunto de figuras
+ * ATOM · Conjunto de figuras
  * ---------------------------------------------------------------------------
  * Dueno de los `Character` vivos de la escena. Es el unico modulo que crea,
  * carga, clona y destruye figuras; el resto del programa le pregunta.

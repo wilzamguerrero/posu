@@ -1,9 +1,9 @@
 {
-  "name": "posu-anatomy-studio",
+  "name": "atom",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "POSU — Estudio 3D de anatomia artistica con captura de pose por webcam (MediaPipe + Kalidokit + Three.js)",
+  "description": "ATOM — captura de pose por webcam sobre figura 3D (MediaPipe + Kalidokit + Three.js)",
   "scripts": {
     "predev": "node scripts/copy-wasm.mjs",
     "dev": "vite",

@@ -1,5 +1,5 @@
 /**
- * POSU · Paneles del panel lateral
+ * ATOM · Paneles del panel lateral
  * ---------------------------------------------------------------------------
  * Cada seccion se construye una sola vez y se enlaza al almacen de ajustes: los
  * controles no guardan estado, solo leen y escriben rutas. Las acciones que
@@ -765,6 +765,8 @@ function mocapPanel(app) {
       slider({ label: 'Umbral de seguimiento', path: 'mocap.minTracking', min: 0.1, max: 0.95, step: 0.01 }),
       toggle({ path: 'mocap.showHud', label: 'Mostrar la ventana de camara' }),
       toggle({ path: 'mocap.showOverlay', label: 'Dibujar el esqueleto detectado' }),
+      notice('info', 'La ventana de camara se <b>arrastra</b> por su cabecera y se <b>redimensiona</b> desde las esquinas (doble clic en una esquina: tamano por defecto).', 'move'),
+      notice('info', 'Pincha un <b>punto detectado</b> para seleccionar ese control en la figura: activa el posado manual y engancha el giroscopio a ese hueso.', 'mouse-pointer-2'),
       notice('info', 'Todo el analisis se ejecuta en tu equipo: ningun fotograma sale del navegador.', 'circle-check'),
     ]),
   ];
@@ -997,7 +999,7 @@ function settingsPanel(app) {
     ]),
     group({ id: 'st-about', title: 'Acerca de', icon: 'info', open: false }, [
       notice('info',
-        '<b>POSU</b> · estudio de anatomia y dibujo del natural. Three.js + MediaPipe Pose Landmarker + Kalidokit, '
+        '<b>ATOM</b> · Three.js + MediaPipe Pose Landmarker + Kalidokit, '
         + 'ejecutandose por completo en tu navegador.'),
       // Firma del autor: version en config.js para no repetir el numero.
       el('div', { class: 'credit' }, [

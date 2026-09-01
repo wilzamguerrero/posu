@@ -1,5 +1,5 @@
 /**
- * POSU · Capa de interfaz
+ * ATOM · Capa de interfaz
  * ---------------------------------------------------------------------------
  * Toma el marcado estatico de index.html y lo convierte en una interfaz viva:
  * barra de actividad, panel lateral con las secciones, barra de herramientas
@@ -61,6 +61,7 @@ export class UI {
       hudDrag: document.getElementById('mocap-hud-drag'),
       hudClose: document.getElementById('mocap-hud-close'),
       hudFps: document.getElementById('mocap-fps'),
+      hudOverlay: document.getElementById('mocap-overlay'),
       dropHint: document.getElementById('drop-hint'),
     };
 
@@ -333,6 +334,136 @@ export class UI {
     const end = () => { start = null; };
     this.dom.hudDrag.addEventListener('pointerup', end);
     this.dom.hudDrag.addEventListener('pointercancel', end);
+
+    this.#buildHudResize();
+    this.#buildHudPicking();
+  }
+
+  /** Tamano minimo del monitor, en pixeles CSS. */
+  static HUD_MIN = { w: 160, h: 120 };
+
+  /**
+   * Redimension desde las cuatro esquinas. Al empezar se fija el monitor en
+   * coordenadas left/top (como hace el arrastre), porque ajustar `bottom` y
+   * `height` a la vez hace que la caja se escape del cursor. El resultado se
+   * guarda en los ajustes para que sobreviva a un refresco.
+   */
+  #buildHudResize() {
+    const hud = this.dom.hud;
+    const { w: MIN_W, h: MIN_H } = UI.HUD_MIN;
+
+    const applySize = (w, h) => {
+      hud.style.setProperty('--mocap-w', Math.round(w) + 'px');
+      if (h > 0) {
+        hud.style.height = Math.round(h) + 'px';
+        hud.classList.add('is-sized');
+      } else {
+        hud.style.height = '';
+        hud.classList.remove('is-sized');
+      }
+    };
+    const stored = () => ({
+      w: Number(this.settings.get('mocap.hudW')) || 268,
+      h: Number(this.settings.get('mocap.hudH')) || 0,
+    });
+    const initial = stored();
+    applySize(initial.w, initial.h);
+    this.settings.on(['mocap.hudW', 'mocap.hudH'], () => {
+      const s = stored();
+      applySize(s.w, s.h);
+      this.app.overlay?.clear?.();
+    });
+
+    let drag = null;
+    for (const grip of hud.querySelectorAll('.mocap-grip')) {
+      // Doble clic en una esquina: de vuelta al tamano por defecto.
+      grip.addEventListener('dblclick', (ev) => {
+        ev.stopPropagation();
+        this.settings.batch(() => {
+          this.settings.set('mocap.hudW', 268);
+          this.settings.set('mocap.hudH', 0);
+        });
+      });
+      grip.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const box = hud.getBoundingClientRect();
+        const host = this.dom.viewport.getBoundingClientRect();
+        drag = {
+          dir: grip.dataset.grip ?? 'se',
+          x: ev.clientX,
+          y: ev.clientY,
+          left: box.left - host.left,
+          top: box.top - host.top,
+          w: box.width,
+          h: box.height,
+          host,
+        };
+        // Pasamos a left/top: con `bottom`/`right` el redimensionado desde las
+        // esquinas contrarias moveria la caja en el sentido opuesto.
+        hud.style.right = 'auto';
+        hud.style.bottom = 'auto';
+        hud.style.left = drag.left + 'px';
+        hud.style.top = drag.top + 'px';
+        grip.setPointerCapture?.(ev.pointerId);
+      });
+      grip.addEventListener('pointermove', (ev) => {
+        if (!drag) return;
+        const dx = ev.clientX - drag.x;
+        const dy = ev.clientY - drag.y;
+        const east = drag.dir.includes('e');
+        const south = drag.dir.includes('s');
+
+        let w = drag.w + (east ? dx : -dx);
+        let h = drag.h + (south ? dy : -dy);
+        // Sin salirse del visor por el lado que queda fijo.
+        const maxW = east ? drag.host.width - drag.left : drag.left + drag.w;
+        const maxH = south ? drag.host.height - drag.top : drag.top + drag.h;
+        w = Math.max(MIN_W, Math.min(maxW, w));
+        h = Math.max(MIN_H, Math.min(maxH, h));
+
+        if (!east) hud.style.left = (drag.left + drag.w - w) + 'px';
+        if (!south) hud.style.top = (drag.top + drag.h - h) + 'px';
+        applySize(w, h);
+      });
+      const stop = () => {
+        if (!drag) return;
+        drag = null;
+        const box = hud.getBoundingClientRect();
+        // Replegado no hay cuerpo que medir: el alto se deja en automatico.
+        const replegado = hud.classList.contains('is-collapsed');
+        this.settings.batch(() => {
+          this.settings.set('mocap.hudW', Math.round(box.width));
+          this.settings.set('mocap.hudH', replegado ? 0 : Math.round(box.height));
+        });
+        // El lienzo del monitor cambia de tamano: el trazado se recalcula solo
+        // en el siguiente cuadro, pero conviene no dejar el anterior estirado.
+        this.app.overlay?.clear?.();
+      };
+      grip.addEventListener('pointerup', stop);
+      grip.addEventListener('pointercancel', stop);
+    }
+  }
+
+  /**
+   * Seleccion de controles desde el propio monitor: pulsar un punto detectado
+   * elige el hueso que ese punto acciona, sin tener que buscarlo en el visor.
+   */
+  #buildHudPicking() {
+    const canvas = this.dom.hudOverlay;
+    if (!canvas) return;
+    canvas.addEventListener('pointermove', (ev) => {
+      const hit = this.app.overlay?.pick?.(ev.clientX, ev.clientY) ?? -1;
+      canvas.classList.toggle('is-over-point', hit >= 0);
+    });
+    canvas.addEventListener('pointerleave', () => canvas.classList.remove('is-over-point'));
+    canvas.addEventListener('pointerdown', (ev) => {
+      const hit = this.app.overlay?.pick?.(ev.clientX, ev.clientY) ?? -1;
+      if (hit < 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.app.actions.selectJointFromCapture?.(hit);
+    });
   }
 
   /** Fotogramas por segundo del detector, en la cabecera del monitor. */

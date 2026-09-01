@@ -15,12 +15,17 @@
  * Si un punto tiene poca visibilidad se pinta en rojo y translucido: es la pista
  * visual de que ese hueso no se esta moviendo.
  *
+ * Los puntos tambien se pueden pulsar: `pick()` devuelve el landmark mas cercano
+ * al cursor para que la interfaz seleccione el control del personaje que ese
+ * punto acciona. El del hueso seleccionado se rodea con un anillo del mismo
+ * color que el manipulador activo de la pose manual.
+ *
  * Cuando los dedos por camara estan activos se pintan tambien los 21 puntos de
  * cada mano detectada, con el color del lado al que se han asignado: es la unica
  * forma de ver de un vistazo si la mano se esta perdiendo o cambiando de lado.
  */
 
-import { POSE_CONNECTIONS, LM } from '../pose/landmarks.js';
+import { POSE_CONNECTIONS, LM, boneForLandmark } from '../pose/landmarks.js';
 
 const COLOR = {
   torso: '#c586c0',
@@ -29,7 +34,16 @@ const COLOR = {
   cabeza: '#9cdcfe',
   punto: '#f2f2f2',
   bajo: '#f14c4c',
+  /** Igual que `ManualPosing.materialActive`, para que se lean como lo mismo. */
+  activo: '#ffd479',
 };
+
+/**
+ * Puntos que valen como atajo hacia un control: uno por hueso. Los demas
+ * (cara, nudillos, talones) apuntan al mismo hueso y se pueden pulsar, pero no
+ * se rodean con el anillo para no llenar el monitor de circulos.
+ */
+const PICK_PRIMARY = new Set([0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32]);
 
 /** Los indices impares de MediaPipe corresponden al lado izquierdo del sujeto. */
 const LEFT_SET = new Set([1, 2, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]);
@@ -66,6 +80,8 @@ export class Overlay2D {
     this.settings = settings;
     this.ctx = canvas.getContext('2d');
     this.rect = { x: 0, y: 0, w: 0, h: 0 };
+    /** Ultimo cuadro dibujado, para poder resolver pulsaciones sobre el. */
+    this.last = null;
   }
 
   /** Ajusta el buffer del lienzo a su caja CSS y calcula el area del medio. */
@@ -109,12 +125,18 @@ export class Overlay2D {
     ctx.clearRect(0, 0, W, H);
 
     const lms = frame?.landmarks;
-    if (!lms?.length && !manos?.length) return;
+    if (!lms?.length && !manos?.length) {
+      this.last = null;
+      return;
+    }
 
     const mirror = !!this.settings.get('mocap.mirror');
     const minVis = this.settings.get('mocap.confidence');
     const px = (p) => ox + p.x * dw;
     const py = (p) => oy + p.y * dh;
+
+    this.last = lms?.length ? { lms, rect: { x: ox, y: oy, w: dw, h: dh }, mirror } : null;
+    const selKey = this.settings.get('ui.selectedBoneKey') || '';
 
     ctx.save();
     // El monitor voltea el video por CSS cuando el espejo esta activo.
@@ -144,6 +166,15 @@ export class Overlay2D {
       ctx.beginPath();
       ctx.arc(px(p), py(p), (i <= LM.MOUTH_RIGHT ? 1.8 : 2.9) * scale, 0, Math.PI * 2);
       ctx.fill();
+      // Anillo en el punto que corresponde al control seleccionado.
+      if (selKey && PICK_PRIMARY.has(i) && boneForLandmark(i, mirror) === selKey) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = COLOR.activo;
+        ctx.lineWidth = 1.8 * scale;
+        ctx.beginPath();
+        ctx.arc(px(p), py(p), 6.5 * scale, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     // Manos: el trazo es mas fino que el del cuerpo para no tapar los dedos.
     for (const mano of manos ?? []) {
@@ -175,7 +206,46 @@ export class Overlay2D {
     ctx.globalAlpha = 1;
   }
 
+  /**
+   * Landmark dibujado mas cercano a un punto de pantalla, o -1 si no hay
+   * ninguno a tiro. Las coordenadas del ultimo cuadro estan en pixeles de
+   * dispositivo, asi que se reescalan a la caja CSS del lienzo; en modo espejo
+   * hay que deshacer el volteo horizontal igual que lo hace el dibujado.
+   *
+   * @param {number} clientX
+   * @param {number} clientY
+   * @param {number} [maxDist] Radio de tolerancia en pixeles CSS.
+   */
+  pick(clientX, clientY, maxDist = 14) {
+    const last = this.last;
+    if (!last?.lms?.length) return -1;
+    const box = this.canvas.getBoundingClientRect();
+    if (!box.width || !box.height) return -1;
+    const sx = box.width / this.canvas.width;
+    const sy = box.height / this.canvas.height;
+    const cx = clientX - box.left;
+    const cy = clientY - box.top;
+    const { lms, rect, mirror } = last;
+
+    let best = -1;
+    let bestD = maxDist;
+    for (let i = 0; i < lms.length; i++) {
+      const p = lms[i];
+      if (!p) continue;
+      const dev = rect.x + p.x * rect.w;
+      const x = (mirror ? this.canvas.width - dev : dev) * sx;
+      const y = (rect.y + p.y * rect.h) * sy;
+      const d = Math.hypot(x - cx, y - cy);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   clear() {
+    this.last = null;
     if (!this.ctx) return;
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);

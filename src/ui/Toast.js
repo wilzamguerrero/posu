@@ -1,5 +1,5 @@
 /**
- * POSU · Avisos flotantes
+ * ATOM · Avisos flotantes
  * Mensajes cortos y no bloqueantes en la esquina inferior derecha.
  */
 import { icon } from './icons.js';

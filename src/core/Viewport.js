@@ -1,5 +1,5 @@
 /**
- * POSU · Visor 3D
+ * ATOM · Visor 3D
  * ---------------------------------------------------------------------------
  * Dueno del renderizador, la escena y el bucle de dibujo. Reune el resto de
  * piezas graficas (camaras, luces, escenario, post-proceso) y expone dos

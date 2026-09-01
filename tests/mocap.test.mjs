@@ -293,5 +293,36 @@ trazos.arc = 0;
 overlay.draw(fuente, null, []);
 check('sin manos ni pose no se pinta nada', trazos.arc === 0);
 
+/* ── 6 · Pulsar un punto del monitor elige un hueso ────────────────────── */
+
+const { boneForLandmark } = await import('../src/pose/landmarks.js');
+
+check('el punto del hombro apunta al brazo del mismo lado', boneForLandmark(11, false) === 'leftArm');
+check('con espejo el lado se cruza, como en el retargeting', boneForLandmark(11, true) === 'rightArm');
+check('los puntos de la cara comparten la cabeza', boneForLandmark(0, true) === 'head' && boneForLandmark(7, false) === 'head');
+check('un indice fuera de rango no devuelve hueso', boneForLandmark(99, false) === null);
+
+// El lienzo simulado necesita una caja en pantalla para traducir el cursor.
+lienzoFalso.getBoundingClientRect = () => ({ left: 0, top: 0, width: 480, height: 270 });
+
+// 33 puntos, todos visibles; el 11 se aparta del centro para que el espejo se note.
+const cuadroPose = { landmarks: Array.from({ length: 33 }, () => ({ x: 0.9, y: 0.9, z: 0, visibility: 1 })) };
+cuadroPose.landmarks[11] = { x: 0.25, y: 0.5, z: 0, visibility: 1 };
+
+settings.set('mocap.mirror', true);
+overlay.draw(fuente, cuadroPose, null);
+// rect = {x:60, y:0, w:360, h:270} -> el punto cae en 150 px y el espejo lo lleva a 330.
+check('se localiza el punto pulsado con el espejo puesto', overlay.pick(330, 135) === 11,
+  `(indice=${overlay.pick(330, 135)})`);
+check('lejos de cualquier punto no se selecciona nada', overlay.pick(20, 20) === -1);
+
+settings.set('mocap.mirror', false);
+overlay.draw(fuente, cuadroPose, null);
+check('sin espejo el punto esta en su sitio', overlay.pick(150, 135) === 11,
+  `(indice=${overlay.pick(150, 135)})`);
+
+overlay.clear();
+check('limpiar el monitor deja de aceptar pulsaciones', overlay.pick(150, 135) === -1);
+
 console.log(`\n${ok} correctas / ${fail} fallos`);
 process.exit(fail ? 1 : 0);

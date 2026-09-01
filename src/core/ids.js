@@ -1,5 +1,5 @@
 /**
- * POSU · Identificadores de los elementos de la escena
+ * ATOM · Identificadores de los elementos de la escena
  * ---------------------------------------------------------------------------
  * Figuras, solidos y luces comparten el mismo generador: sus ids conviven en
  * `scene.selected` y en la misma lista de la interfaz, asi que dos contadores

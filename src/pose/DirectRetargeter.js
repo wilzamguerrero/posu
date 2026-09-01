@@ -1,5 +1,5 @@
 /**
- * POSU · Retargeting directo
+ * ATOM · Retargeting directo
  * ---------------------------------------------------------------------------
  * Convierte los 33 puntos de BlazePose en rotaciones locales para el esqueleto
  * cargado. No asume ninguna convencion de ejes del rigging: todo se calcula

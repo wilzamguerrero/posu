@@ -1,5 +1,5 @@
 /**
- * POSU · Puntos clave de BlazePose
+ * ATOM · Puntos clave de BlazePose
  * ---------------------------------------------------------------------------
  * Indices de los 33 landmarks de MediaPipe Pose y utilidades para leerlos con
  * seguridad (todos los accesos comprueban visibilidad, porque en cuanto una
@@ -79,4 +79,40 @@ export function confidenceOf(list, indices) {
   let sum = 0;
   for (const i of indices) sum += vis(list[i]);
   return sum / indices.length;
+}
+
+/**
+ * Hueso al que "pertenece" cada punto detectado, para poder seleccionar el
+ * control del personaje pinchando sobre el monitor de captura. Son las claves
+ * canonicas de `model/boneMap.js`; los puntos de la cara comparten `head`
+ * porque ninguno de ellos mueve un hueso propio.
+ */
+export const BONE_BY_LANDMARK = {
+  0: 'head', 1: 'head', 2: 'head', 3: 'head', 4: 'head', 5: 'head',
+  6: 'head', 7: 'head', 8: 'head', 9: 'head', 10: 'head',
+  11: 'leftArm', 12: 'rightArm',
+  13: 'leftForeArm', 14: 'rightForeArm',
+  15: 'leftHand', 16: 'rightHand',
+  17: 'leftHand', 18: 'rightHand',
+  19: 'leftHand', 20: 'rightHand',
+  21: 'leftHand', 22: 'rightHand',
+  23: 'leftUpLeg', 24: 'rightUpLeg',
+  25: 'leftLeg', 26: 'rightLeg',
+  27: 'leftFoot', 28: 'rightFoot',
+  29: 'leftFoot', 30: 'rightFoot',
+  31: 'leftToe', 32: 'rightToe',
+};
+
+/**
+ * Como `BONE_BY_LANDMARK`, pero respetando el espejo de la captura: con
+ * `mocap.mirror` activo el lado derecho del sujeto mueve el lado izquierdo del
+ * personaje, asi que el punto pulsado debe seleccionar el hueso que de verdad
+ * acciona (ver `DirectRetargeter.#read`).
+ */
+export function boneForLandmark(index, mirror = false) {
+  const key = BONE_BY_LANDMARK[index];
+  if (!key || !mirror) return key ?? null;
+  if (key.startsWith('left')) return 'right' + key.slice(4);
+  if (key.startsWith('right')) return 'left' + key.slice(5);
+  return key;
 }

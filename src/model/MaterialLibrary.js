@@ -1,5 +1,5 @@
 /**
- * POSU · Biblioteca de materiales
+ * ATOM · Biblioteca de materiales
  * ---------------------------------------------------------------------------
  * Un unico catalogo de materiales para todo: las tres variantes del personaje
  * (anatomia, maniqui, esqueleto) y los solidos que el usuario inserta en la

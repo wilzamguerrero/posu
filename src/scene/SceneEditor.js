@@ -1,5 +1,5 @@
 /**
- * POSU · Editor de escena
+ * ATOM · Editor de escena
  * ---------------------------------------------------------------------------
  * Añade, selecciona y transforma los elementos que el usuario mete en la
  * escena: figuras, primitivas geometricas y luces. Todo el estado vive en el

@@ -1,7 +1,7 @@
 /**
  * Prueba de humo de la capa de interfaz: monta index.html en jsdom y construye
- * UI + StatusBar con modulos simulados. No hay WebGL en jsdom, asi que el visor
- * real no participa; lo que se comprueba es el cableado del DOM.
+ * UI + lectura flotante con modulos simulados. No hay WebGL en jsdom, asi que
+ * el visor real no participa; lo que se comprueba es el cableado del DOM.
  */
 import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
@@ -28,7 +28,7 @@ window.addEventListener('error', (e) => errors.push(String(e.error ?? e.message)
 const { Settings } = await import('../src/core/Settings.js');
 const { DEFAULTS, STORAGE_KEY } = await import('../src/config.js');
 const { UI } = await import('../src/ui/UI.js');
-const { StatusBar } = await import('../src/ui/StatusBar.js');
+const { Readout } = await import('../src/ui/Readout.js');
 const { initToasts, toast } = await import('../src/ui/Toast.js');
 
 const settings = new Settings(DEFAULTS, STORAGE_KEY);
@@ -78,7 +78,7 @@ settings.batch({ 'scene.figures': figDefs, 'figure.active': 'f0' });
 
 const ui = new UI(app);
 app.ui = ui;
-const sb = new StatusBar(document.getElementById('statusbar'), app);
+const sb = new Readout(document.getElementById('viewport-readout'), app);
 
 // 1 · Todas las secciones existen y solo una esta visible.
 const panels = [...document.querySelectorAll('#sidebar-host .panel')];
@@ -116,8 +116,42 @@ sb.setConfidence(0.82);
 for (const cb of frameCbs) cb(1 / 60);
 ui.setMocapFps(28.6);
 ui.setStatus('Prueba', 'ok');
-console.log('barra de estado:', document.getElementById('statusbar').textContent.replace(/\s+/g, ' ').trim());
+console.log('lectura del visor:', document.getElementById('viewport-readout').textContent.replace(/\s+/g, ' ').trim());
 console.log('fps del monitor:', document.getElementById('mocap-fps').textContent);
+
+// 6b · El monitor se redimensiona desde las esquinas y guarda el tamano.
+const hud = document.getElementById('mocap-hud');
+const grips = hud.querySelectorAll('.mocap-grip');
+// jsdom no hace layout: la caja del monitor se simula para que la aritmetica
+// del arrastre tenga de donde partir.
+const fakeBox = { left: 20, top: 40, width: 268, height: 240, right: 288, bottom: 280 };
+hud.getBoundingClientRect = () => fakeBox;
+document.getElementById('viewport').getBoundingClientRect = () => ({ left: 0, top: 0, width: 900, height: 600 });
+const se = hud.querySelector('.mocap-grip.se');
+const pev = (type, x, y) => new window.PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 1 });
+se.dispatchEvent(pev('pointerdown', 288, 280));
+se.dispatchEvent(pev('pointermove', 388, 360));
+// Al soltar se lee la caja real: se simula la que deberia haber quedado.
+fakeBox.width = 368; fakeBox.height = 320;
+se.dispatchEvent(pev('pointerup', 388, 360));
+console.log('esquinas del monitor:', grips.length,
+  '· ancho guardado:', settings.get('mocap.hudW'),
+  '· alto guardado:', settings.get('mocap.hudH'),
+  '· estilo:', hud.style.getPropertyValue('--mocap-w'), hud.style.height);
+// Doble clic en una esquina: de vuelta al tamano por defecto.
+se.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+console.log('tras el doble clic:', settings.get('mocap.hudW'), '/', settings.get('mocap.hudH'),
+  '· con alto fijo:', hud.classList.contains('is-sized'));
+
+// 6c · Pulsar un punto detectado pide el control correspondiente.
+const overlayCanvas = document.getElementById('mocap-overlay');
+app.overlay = { pick: (x) => (x > 100 ? 13 : -1), clear: () => {} };
+overlayCanvas.dispatchEvent(pev('pointermove', 200, 100));
+const conCursor = overlayCanvas.classList.contains('is-over-point');
+overlayCanvas.dispatchEvent(pev('pointerdown', 200, 100));
+overlayCanvas.dispatchEvent(pev('pointerdown', 10, 10));
+console.log('cursor sobre un punto:', conCursor,
+  '· controles pedidos:', called.filter((n) => n === 'selectJointFromCapture').length);
 
 // 7 · Distintivo del visor y barra de herramientas.
 console.log('distintivo:', document.getElementById('viewport-badge').textContent.replace(/\s+/g, ' ').trim());

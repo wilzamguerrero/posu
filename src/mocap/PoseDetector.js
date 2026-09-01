@@ -100,7 +100,7 @@ export class PoseDetector {
     return this.delegate === 'CPU' ? 15 : 60;
   }
 
-  /** Resumen corto para la barra de estado y los avisos. */
+  /** Resumen corto para la lectura del visor y los avisos. */
   describe() {
     const q = this.settings.get('mocap.modelQuality');
     const extra = this.usingSquare ? ' · recorte cuadrado' : '';

@@ -1,5 +1,5 @@
 /**
- * POSU · Sistema de camaras
+ * ATOM · Sistema de camaras
  * ---------------------------------------------------------------------------
  * Dos camaras que comparten posicion y objetivo:
  *

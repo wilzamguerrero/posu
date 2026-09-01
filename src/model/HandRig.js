@@ -1,5 +1,5 @@
 /**
- * POSU · Rig de manos
+ * ATOM · Rig de manos
  * ---------------------------------------------------------------------------
  * Las falanges de Mixamo no tienen una orientacion local previsible: segun el
  * personaje, doblar un dedo puede ser girar en X, en Z o en un eje mezclado.

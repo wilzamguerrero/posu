@@ -1,5 +1,5 @@
 /**
- * POSU · Fabrica de controles de interfaz
+ * ATOM · Fabrica de controles de interfaz
  * ---------------------------------------------------------------------------
  * Cada control se declara con la ruta del ajuste al que pertenece y se encarga
  * solo de dos cosas: escribir en el almacen cuando el usuario interactua y

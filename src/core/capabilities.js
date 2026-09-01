@@ -1,5 +1,5 @@
 /**
- * POSU · Perfil grafico del equipo
+ * ATOM · Perfil grafico del equipo
  * ---------------------------------------------------------------------------
  * El mismo ajuste no vale en todas partes. Lo que va sobrado en un equipo de
  * escritorio con GPU dedicada se arrastra en un telefono, y en algunos

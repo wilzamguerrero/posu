@@ -1,5 +1,5 @@
 /**
- * POSU · Filtro One Euro
+ * ATOM · Filtro One Euro
  * ---------------------------------------------------------------------------
  * Suavizado adaptativo: filtra mucho cuando el punto esta quieto (elimina el
  * temblor del detector) y poco cuando se mueve rapido (no añade retardo). Es el

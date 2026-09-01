@@ -1,5 +1,5 @@
 /**
- * POSU · Mapa de huesos
+ * ATOM · Mapa de huesos
  * ---------------------------------------------------------------------------
  * El objetivo es que el resto de la aplicacion no sepa nunca como se llaman
  * los huesos en el archivo. Se trabaja con claves canonicas ("leftArm") y este

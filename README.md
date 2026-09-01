@@ -1,4 +1,4 @@
-# POSU · Estudio de Anatomía Artística
+# ATOM
 
 Aplicación web para estudio de dibujo del natural: captura tu pose con la cámara
 (o desde una fotografía), la transfiere a una figura 3D con **anatomía, maniquí y
@@ -80,7 +80,7 @@ src/
   posing/              ManualPosing (gizmo de huesos con historial)
   scene/               SceneEditor, primitivas geométricas, luces insertables
   guides/              Guides y Perspective (reglas de proporción, composición y fuga)
-  ui/                  panels, UI, StatusBar, widgets, icons (Lucide), Toast
+  ui/                  panels, UI, Readout, widgets, icons (Lucide), Toast
   styles/              theme.css (tokens de VS Code Dark Modern) + app.css
   main.js              arranque y bucle de captura
 ```

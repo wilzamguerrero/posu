@@ -1,5 +1,5 @@
 /**
- * POSU · Shader de lente
+ * ATOM · Shader de lente
  * ---------------------------------------------------------------------------
  * Emula en una sola pasada los defectos opticos que un artista puede querer
  * reproducir al elegir un objetivo concreto:
