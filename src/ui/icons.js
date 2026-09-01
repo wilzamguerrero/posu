@@ -10,6 +10,7 @@ import createElement from 'lucide/dist/esm/createElement.js';
 
 import Activity from 'lucide/dist/esm/icons/activity.js';
 import Aperture from 'lucide/dist/esm/icons/aperture.js';
+import Atom from 'lucide/dist/esm/icons/atom.js';
 import Axis3d from 'lucide/dist/esm/icons/axis-3d.js';
 import Blend from 'lucide/dist/esm/icons/blend.js';
 import Bone from 'lucide/dist/esm/icons/bone.js';
@@ -116,7 +117,7 @@ import Link2 from 'lucide/dist/esm/icons/link-2.js';
 
 /** Nombre kebab-case -> nodo de icono de Lucide. */
 export const ICONS = {
-  activity: Activity, aperture: Aperture, 'axis-3d': Axis3d, blend: Blend, bone: Bone,
+  activity: Activity, aperture: Aperture, atom: Atom, 'axis-3d': Axis3d, blend: Blend, bone: Bone,
   box: Box, camera: Camera, 'chevron-down': ChevronDown, 'circle-check': CircleCheck,
   'circle-dot': CircleDot, 'circle-x': CircleX, 'columns-3': Columns3, 'code-xml': CodeXml, contrast: Contrast,
   copy: Copy, cpu: Cpu, crop: Crop, crosshair: Crosshair, download: Download,
@@ -178,12 +179,14 @@ export const ICONS = {
  * Crea un elemento SVG del icono indicado.
  * @param {string} name Clave de ICONS.
  * @param {number} size Tamano nominal en px.
+ * @param {string} className Clase CSS opcional.
  * @returns {SVGElement}
  */
-export function icon(name, size = 16) {
+export function icon(name, size = 16, className = '') {
   const node = ICONS[name] ?? ICONS['circle-dot'];
   const svg = createElement(node);
   svg.classList.add('svg-icon');
+  if (className) svg.classList.add(className);
   svg.setAttribute('width', String(size));
   svg.setAttribute('height', String(size));
   svg.setAttribute('aria-hidden', 'true');

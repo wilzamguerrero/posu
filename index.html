@@ -13,20 +13,9 @@
   </head>
   <body>
     <div id="app" class="app" aria-busy="true">
-      <!-- ── Barra de titulo ───────────────────────────────────────────── -->
-      <header class="titlebar">
-        <div class="titlebar-brand">
-          <span class="brand-mark" data-icon="person-standing"></span>
-          <span class="brand-name">ATOM</span>
-        </div>
-        <div class="titlebar-center" id="titlebar-status"></div>
-        <div class="titlebar-actions" id="titlebar-actions"></div>
-      </header>
-
+      <!-- Todo vive en la barra flotante del visor: logo, secciones y mandos.
+           El texto de estado se muestra en la lectura del borde inferior. -->
       <div class="workbench">
-        <!-- ── Barra de actividad ─────────────────────────────────────── -->
-        <nav class="activitybar" id="activitybar" aria-label="Secciones"></nav>
-
         <!-- ── Panel lateral ──────────────────────────────────────────── -->
         <aside class="sidebar" id="sidebar">
           <div class="sidebar-header">

@@ -47,16 +47,13 @@ export class UI {
 
     this.dom = {
       app: document.getElementById('app'),
-      status: document.getElementById('titlebar-status'),
-      actions: document.getElementById('titlebar-actions'),
-      activitybar: document.getElementById('activitybar'),
       sidebar: document.getElementById('sidebar'),
       sidebarTitle: document.getElementById('sidebar-title'),
       sidebarCollapse: document.getElementById('sidebar-collapse'),
       host: document.getElementById('sidebar-host'),
       viewport: document.getElementById('viewport'),
       toolbar: document.getElementById('viewport-toolbar'),
-      badge: document.getElementById('viewport-badge'),
+      readout: document.getElementById('viewport-readout'),
       hud: document.getElementById('mocap-hud'),
       hudDrag: document.getElementById('mocap-hud-drag'),
       hudClose: document.getElementById('mocap-hud-close'),
@@ -66,11 +63,9 @@ export class UI {
     };
 
     this.panels = buildPanels(app);
-    this.#buildActivityBar();
     this.#buildSidebar();
-    this.#buildTitlebar();
     this.#buildToolbar();
-    this.#buildBadge();
+    this.#buildReadout();
     this.#buildHud();
     this.#buildDropZone();
     this.#bindKeys();
@@ -79,23 +74,7 @@ export class UI {
     hydrateIcons(document);
   }
 
-  /* ── Barra de actividad ─────────────────────────────────────────────── */
-
-  #buildActivityBar() {
-    this.activityItems = new Map();
-    const nodes = [];
-    for (const p of this.panels) {
-      const btn = el('button', {
-        class: 'activity-item', type: 'button', title: p.title,
-        onClick: () => this.showSection(p.id),
-      }, icon(p.icon, 22));
-      this.activityItems.set(p.id, btn);
-      // "Ajustes" queda anclado abajo, como en VS Code.
-      if (p.id === 'settings') nodes.push(el('div', { class: 'activity-spacer' }));
-      nodes.push(btn);
-    }
-    this.dom.activitybar.replaceChildren(...nodes);
-  }
+  /* ── Barra de actividad (eliminada) ─────────────────────────────────── */
 
   #buildSidebar() {
     this.dom.host.replaceChildren(...this.panels.map((p) => p.node));
@@ -109,8 +88,14 @@ export class UI {
   #paintSection(id) {
     const active = this.panels.find((p) => p.id === id) ?? this.panels[0];
     for (const p of this.panels) p.node.classList.toggle('hidden', p !== active);
-    for (const [key, btn] of this.activityItems) btn.classList.toggle('is-active', key === active.id);
     this.dom.sidebarTitle.textContent = active.title;
+    // Actualizar botones dropdown en la barra si existen
+    if (this.toolbarDropdowns) {
+      this.toolbarDropdowns.forEach((dropdown) => {
+        const isActive = dropdown.panelId === active.id;
+        dropdown.btn.classList.toggle('is-active', isActive);
+      });
+    }
   }
 
   /** Muestra una seccion; si ya estaba visible, repliega el panel. */
@@ -138,36 +123,7 @@ export class UI {
     });
   }
 
-  /* ── Barra de titulo ────────────────────────────────────────────────── */
-
-  #buildTitlebar() {
-    const { actions } = this.app;
-    this.statusText = el('span', { class: 'title-status-text', text: 'Listo' });
-    this.dom.status.replaceChildren(this.statusText);
-
-    this.dom.actions.replaceChildren(
-      iconToggle(this.settings, { path: 'mocap.showHud', iconName: 'webcam', title: 'Monitor de captura' }),
-      iconToggle(this.settings, { path: 'mocap.frozen', iconName: 'snowflake', title: 'Congelar la pose (Espacio)' }),
-      iconButton({ iconName: 'image', title: 'Guardar captura PNG (Ctrl+S)', onClick: () => actions.screenshot(false) }),
-      iconToggle(this.settings, { path: 'ui.sidebar', iconName: 'panel-left-close', title: 'Panel lateral (H)' }),
-      iconButton({ iconName: 'maximize', title: 'Pantalla completa', onClick: () => this.#toggleFullscreen() }),
-    );
-  }
-
-  /** Texto de estado de la barra de titulo. */
-  setStatus(text, kind = '') {
-    this.statusText.textContent = text;
-    this.statusText.className = 'title-status-text' + (kind ? ' ' + kind : '');
-  }
-
-  async #toggleFullscreen() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await this.dom.app.requestFullscreen();
-    } catch {
-      toast('Este navegador no permite la pantalla completa', 'warn');
-    }
-  }
+  /* ── Barra de titulo (eliminada) ────────────────────────────────────── */
 
   /* ── Barra de herramientas del visor ────────────────────────────────── */
 
@@ -175,6 +131,52 @@ export class UI {
     const s = this.settings;
     const { actions } = this.app;
     const sep = () => el('div', { class: 'toolbar-sep' });
+
+    // Logo de ATOM
+    const brand = el('div', { class: 'toolbar-brand' }, [
+      icon('atom', 20),
+      el('span', { class: 'brand-name', text: 'ATOM' }),
+    ]);
+
+    // Menús desplegables para paneles
+    this.toolbarDropdowns = [];
+    const createDropdown = (label, iconName, items, panelId) => {
+      const dropdown = el('div', { class: 'toolbar-dropdown' });
+      const btn = el('button', { class: 'toolbar-dropdown-btn', title: label }, [
+        icon(iconName, 16),
+        icon('chevron-down', 12, 'chev'),
+      ]);
+      const menu = el('div', { class: 'toolbar-dropdown-menu' });
+
+      items.forEach((item) => {
+        const itemBtn = el('button', { class: 'toolbar-dropdown-item' }, [
+          icon(item.icon, 16),
+          el('span', { text: item.label }),
+        ]);
+        itemBtn.addEventListener('click', () => {
+          item.onClick();
+          dropdown.classList.remove('is-open');
+        });
+        menu.appendChild(itemBtn);
+      });
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wasOpen = dropdown.classList.contains('is-open');
+        // Cerrar todos los dropdowns
+        document.querySelectorAll('.toolbar-dropdown').forEach((d) => d.classList.remove('is-open'));
+        if (!wasOpen) dropdown.classList.add('is-open');
+      });
+
+      dropdown.append(btn, menu);
+      this.toolbarDropdowns.push({ dropdown, btn, panelId });
+      return dropdown;
+    };
+
+    // Cerrar dropdowns al hacer clic fuera
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.toolbar-dropdown').forEach((d) => d.classList.remove('is-open'));
+    });
 
     const variant = (value, iconName, title) => {
       const btn = el('button', { class: 'icon-btn', type: 'button', title }, icon(iconName, 16));
@@ -197,14 +199,71 @@ export class UI {
     s.on('camera.projection', paintProj);
     paintProj(s.get('camera.projection'));
 
+    // Dropdown de figuras (Anatomía/Maniquí/Esqueleto)
+    const figuraDropdown = createDropdown('Figura', 'person-standing', [
+      { label: 'Anatomia', icon: 'person-standing', onClick: () => s.set('figure.variant', 'anatomia') },
+      { label: 'Maniqui', icon: 'box', onClick: () => s.set('figure.variant', 'maniqui') },
+      { label: 'Esqueleto', icon: 'bone', onClick: () => s.set('figure.variant', 'esqueleto') },
+      { label: 'Panel Figura', icon: 'sliders-horizontal', onClick: () => this.showSection('figure') },
+    ], 'figure');
+
+    // Dropdown de escena
+    const escenaDropdown = createDropdown('Escena', 'shapes', [
+      { label: 'Panel Escena', icon: 'sliders-horizontal', onClick: () => this.showSection('scene') },
+    ], 'scene');
+
+    // Dropdown de cámara
+    const camaraDropdown = createDropdown('Camara', 'camera', [
+      { label: 'Perspectiva/Ortografica', icon: 'ratio', onClick: () => s.set('camera.projection', s.get('camera.projection') === 'ortografica' ? 'perspectiva' : 'ortografica') },
+      { label: 'Encuadrar figura', icon: 'maximize', onClick: () => actions.frameFigure() },
+      { label: 'Restablecer camara', icon: 'rotate-ccw', onClick: () => actions.resetCamera() },
+      { label: 'Panel Camara', icon: 'sliders-horizontal', onClick: () => this.showSection('camera') },
+    ], 'camera');
+
+    // Dropdown de luz
+    const luzDropdown = createDropdown('Luz', 'lightbulb', [
+      { label: 'Panel Luz', icon: 'sliders-horizontal', onClick: () => this.showSection('light') },
+    ], 'light');
+
+    // Dropdown de captura
+    const capturaDropdown = createDropdown('Captura', 'video', [
+      { label: 'Monitor de captura', icon: 'webcam', onClick: () => s.set('mocap.showHud', !s.get('mocap.showHud')) },
+      { label: 'Congelar pose', icon: 'snowflake', onClick: () => s.set('mocap.frozen', !s.get('mocap.frozen')) },
+      { label: 'Panel Captura', icon: 'sliders-horizontal', onClick: () => this.showSection('mocap') },
+    ], 'mocap');
+
+    // Dropdown de poses
+    const posesDropdown = createDropdown('Poses', 'library', [
+      { label: 'Pose manual', icon: 'hand', onClick: () => s.set('ui.manualPosing', !s.get('ui.manualPosing')) },
+      { label: 'Panel Poses', icon: 'sliders-horizontal', onClick: () => this.showSection('poses') },
+    ], 'poses');
+
+    // Dropdown de guías
+    const guiasDropdown = createDropdown('Guias', 'pencil-ruler', [
+      { label: 'Canon de cabezas', icon: 'ruler', onClick: () => s.set('guides.heads', !s.get('guides.heads')) },
+      { label: 'Regla de tercios', icon: 'columns-3', onClick: () => s.set('guides.thirds', !s.get('guides.thirds')) },
+      { label: 'Rejilla del suelo', icon: 'grid-3x3', onClick: () => s.set('stage.grid', !s.get('stage.grid')) },
+      { label: 'Panel Guias', icon: 'sliders-horizontal', onClick: () => this.showSection('guides') },
+    ], 'guides');
+
+    // Dropdown de ajustes
+    const ajustesDropdown = createDropdown('Ajustes', 'settings', [
+      { label: 'Captura PNG', icon: 'image', onClick: () => actions.screenshot(false) },
+      { label: 'Pantalla completa', icon: 'maximize', onClick: () => this.#toggleFullscreen() },
+      { label: 'Panel Ajustes', icon: 'sliders-horizontal', onClick: () => this.showSection('settings') },
+    ], 'settings');
+
     this.dom.toolbar.replaceChildren(
-      variant('anatomia', 'person-standing', 'Anatomia (1)'),
-      variant('maniqui', 'box', 'Maniqui (2)'),
-      variant('esqueleto', 'bone', 'Esqueleto (3)'),
+      brand,
       sep(),
-      projection,
-      iconButton({ iconName: 'maximize', title: 'Encuadrar la figura (F)', onClick: () => actions.frameFigure() }),
-      iconButton({ iconName: 'rotate-ccw', title: 'Restablecer la camara', onClick: () => actions.resetCamera() }),
+      figuraDropdown,
+      escenaDropdown,
+      camaraDropdown,
+      luzDropdown,
+      capturaDropdown,
+      posesDropdown,
+      guiasDropdown,
+      ajustesDropdown,
       sep(),
       iconToggle(this.settings, { path: 'ui.manualPosing', iconName: 'hand', title: 'Pose manual (G)' }),
       iconToggle(this.settings, { path: 'mocap.mirror', iconName: 'flip-horizontal', title: 'Captura en espejo' }),
@@ -214,12 +273,19 @@ export class UI {
       this.#toolButton('scale', 'scaling', 'Escalar el elemento seleccionado (R)'),
       sep(),
       this.#perspectiveButton(),
-      iconToggle(this.settings, { path: 'guides.heads', iconName: 'ruler', title: 'Canon de cabezas' }),
-      iconToggle(this.settings, { path: 'guides.thirds', iconName: 'columns-3', title: 'Regla de los tercios' }),
-      iconToggle(this.settings, { path: 'stage.grid', iconName: 'grid-3x3', title: 'Rejilla del suelo' }),
       sep(),
       this.#captureButton(),
+      iconToggle(this.settings, { path: 'ui.sidebar', iconName: 'panel-left-close', title: 'Panel lateral (H)' }),
     );
+  }
+
+  async #toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await this.dom.app.requestFullscreen();
+    } catch {
+      toast('Este navegador no permite la pantalla completa', 'warn');
+    }
   }
 
   /**
@@ -276,26 +342,31 @@ export class UI {
     return btn;
   }
 
-  /* ── Distintivo del visor ───────────────────────────────────────────── */
+  /* ── Lectura del visor (información técnica abajo) ──────────────────── */
 
-  #buildBadge() {
-    const line = () => el('div', {});
-    const lens = line();
-    const proj = line();
-    const engine = line();
-    this.dom.badge.replaceChildren(lens, proj, engine);
+  #buildReadout() {
+    const s = this.settings;
+    const readout = this.dom.readout;
 
     const paint = () => {
-      const s = this.settings;
       const ortho = s.get('camera.projection') === 'ortografica';
-      lens.innerHTML = ortho
+      const lensInfo = ortho
         ? `<b>orto</b> ${(s.get('camera.orthoZoom') ?? 1).toFixed(2)}×`
         : `<b>${Math.round(s.get('camera.focalLength'))} mm</b> f/${Number(s.get('camera.fStop')).toFixed(1)}`;
-      proj.innerHTML = `<b>${ortho ? 'ortografica' : 'perspectiva'}</b> · ${Math.round(s.get('camera.filmGauge'))} mm`;
+      const projInfo = `<b>${ortho ? 'ortografica' : 'perspectiva'}</b> · ${Math.round(s.get('camera.filmGauge'))} mm`;
       const variant = s.get('figure.variant');
-      engine.innerHTML = `<b>${variant}</b> · ${s.get('mocap.engine')}`;
+      const engineInfo = `<b>${variant}</b> · ${s.get('mocap.engine')}`;
+
+      readout.innerHTML = `
+        <span>${lensInfo}</span>
+        <span style="opacity: 0.4">·</span>
+        <span>${projInfo}</span>
+        <span style="opacity: 0.4">·</span>
+        <span>${engineInfo}</span>
+      `;
     };
-    this.settings.on(
+
+    s.on(
       ['camera.projection', 'camera.focalLength', 'camera.fStop', 'camera.filmGauge', 'camera.orthoZoom',
         'figure.variant', 'mocap.engine'],
       paint,

@@ -25,20 +25,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ── Estructura general ──────────────────────────────────────────────── */
 .app {
-  display: grid;
-  grid-template-rows: var(--titlebar-h) 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   height: 100dvh;
 }
 
 .titlebar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 8px 0 12px;
-  background: var(--bg-app);
-  border-bottom: 1px solid var(--border);
-  user-select: none;
+  display: none;
 }
 .titlebar-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .brand-mark { color: var(--link); display: block; }
@@ -59,19 +53,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .title-status-text.err { color: var(--err); }
 .titlebar-actions { display: flex; align-items: center; gap: 2px; }
 
-.workbench { display: flex; min-height: 0; background: var(--bg-editor); }
+.workbench { display: flex; flex: 1; min-height: 0; background: var(--bg-editor); }
 
-/* ── Barra de actividad ──────────────────────────────────────────────── */
+/* ── Barra de actividad (oculta, solo paneles) ───────────────────────── */
 .activitybar {
-  width: var(--activitybar-w);
-  flex: 0 0 var(--activitybar-w);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 2px;
-  background: var(--bg-app);
-  border-right: 1px solid var(--border);
+  display: none;
 }
+.activity-item {
+  display: none;
+}
+.activity-item:hover { color: var(--fg-strong); }
+.activity-item.is-active { color: var(--fg-strong); }
+.activity-item.is-active::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--fg-strong);
+}
+.activity-item .svg-icon { width: 22px; height: 22px; }
+.activity-spacer { flex: 1; }
 .activity-item {
   position: relative;
   width: var(--activitybar-w);
@@ -99,14 +100,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* ── Panel lateral ───────────────────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-w);
-  flex: 0 0 var(--sidebar-w);
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  transform: translateX(0);
 }
-.app.sidebar-hidden .sidebar { display: none; }
+.app.sidebar-hidden .sidebar {
+  transform: translateX(-100%);
+  pointer-events: none;
+}
 .sidebar-header {
   display: flex;
   align-items: center;
@@ -137,13 +147,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .viewport-toolbar {
   position: absolute;
   top: 10px;
-  /* Centrada con `inset` y `margin: auto`, no con `left: 50%`: en un elemento
-     absoluto, `left: 50%` deja como ancho disponible solo la mitad derecha del
-     visor, y la barra se partia en dos filas mucho antes de hacer falta. */
-  left: 0;
-  right: 0;
-  width: max-content;
-  margin-inline: auto;
+  left: 12px;
+  right: auto;
+  width: auto;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -155,39 +161,131 @@ button, input, select, textarea { font: inherit; color: inherit; }
   box-shadow: var(--shadow-sm);
   z-index: 4;
   max-width: calc(100% - 24px);
-  /* Siempre una fila: si de verdad no cabe (pantallas estrechas) se desplaza en
-     horizontal, que estorba menos que una segunda fila sobre la figura. */
   flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   scrollbar-width: none;
   overscroll-behavior-x: contain;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateX(0);
+}
+.app:not(.sidebar-hidden) .viewport-toolbar {
+  transform: translateX(var(--sidebar-w));
 }
 .viewport-toolbar::-webkit-scrollbar { display: none; }
 .viewport-toolbar > * { flex: 0 0 auto; }
 .toolbar-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 2px; }
 
-.viewport-badge {
-  position: absolute;
-  top: 10px;
-  right: 12px;
+/* Logo en la barra de herramientas */
+.toolbar-brand {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-dim);
-  pointer-events: none;
-  z-index: 3;
-  text-align: right;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
 }
-.viewport-badge b { color: var(--fg-muted); font-weight: 500; }
+.toolbar-brand .brand-mark { color: var(--link); width: 20px; height: 20px; }
+.toolbar-brand .brand-name {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--fg-strong);
+  font-size: 12px;
+}
 
-/* ── Lectura flotante (antes: barra de estado inferior) ──────────────────
-   Vive dentro del visor, con la misma tipografia de `.viewport-badge`, pero
-   anclada abajo y en una sola fila. Al no ocupar una fila del grid, ningun
-   cambio de la interfaz puede desplazar el resto del layout. */
+/* Menú desplegable en la barra */
+.toolbar-dropdown {
+  position: relative;
+}
+.toolbar-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+  justify-content: center;
+}
+.toolbar-dropdown-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+.toolbar-dropdown-btn.is-active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+.toolbar-dropdown-btn .svg-icon {
+  width: 16px;
+  height: 16px;
+}
+.toolbar-dropdown-btn .chev {
+  width: 8px;
+  height: 8px;
+  color: var(--fg-dim);
+  transition: transform 0.15s ease;
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+}
+.toolbar-dropdown.is-open .toolbar-dropdown-btn .chev {
+  transform: rotate(180deg);
+}
+
+.toolbar-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 160px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  z-index: 10;
+  display: none;
+}
+.toolbar-dropdown.is-open .toolbar-dropdown-menu {
+  display: block;
+}
+
+.toolbar-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.toolbar-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+.toolbar-dropdown-item.is-active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+.toolbar-dropdown-item .svg-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--fg-dim);
+}
+
+.viewport-badge {
+  display: none;
+}
+
+/* ── Lectura flotante (información centrada abajo) ────────────────────────
+   Ahora muestra toda la información técnica centrada en la parte inferior. */
 .viewport-readout {
   position: absolute;
   left: 12px;
@@ -195,19 +293,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
   bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 12px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--fg-dim);
   user-select: none;
   z-index: 3;
-  /* El visor manda: solo los elementos accionables capturan el puntero. */
   pointer-events: none;
   overflow: hidden;
   white-space: nowrap;
+  text-shadow: var(--shadow-text);
 }
-.viewport-badge,
-.viewport-readout { text-shadow: var(--shadow-text); }
+.viewport-readout b { color: var(--fg-muted); font-weight: 500; }
 
 .status-item {
   display: inline-flex;
