@@ -340,6 +340,53 @@ async function main() {
     return loadCharacter(libraryUrl('character'));
   };
 
+  /**
+   * Convierte un `.fbx` a `.glb` en el propio navegador y lo descarga, para
+   * poder dejarlo en `public/models` o compartirlo. El lector y el exportador se
+   * cargan aqui, en diferido: pesan y no todo el mundo convierte nada.
+   *
+   * @param {File} file archivo elegido o soltado por el usuario
+   * @param {(texto: string, avance: number) => void} [onStage]
+   */
+  actions.convertFbx = async (file, onStage) => {
+    if (!file) return null;
+    if (!/\.fbx$/i.test(file.name)) {
+      toast('El conversor solo acepta archivos .fbx', 'warn');
+      return null;
+    }
+    const { convertFbxToGlb } = await import('./model/FbxToGlb.js');
+    ui.setStatus(`Convirtiendo ${file.name}…`);
+    try {
+      const res = await convertFbxToGlb(file, {
+        maxTextureSize: Number(settings.get('convert.maxTexture')) || 0,
+        jpegColor: settings.get('convert.jpeg') !== false,
+        onStage,
+      });
+      download(res.blob, res.name);
+      ui.setStatus(`Convertido: ${res.name}`, 'ok');
+      toast(`${res.name} descargado`, 'ok');
+      return res;
+    } catch (err) {
+      console.error('[Conversor]', err);
+      ui.setStatus('No se pudo convertir el FBX', 'err');
+      toast(`No se pudo convertir: ${errorText(err)}`, 'err');
+      return null;
+    }
+  };
+
+  /** Vuelve a descargar el ultimo resultado del conversor, sin reconvertir. */
+  actions.saveConverted = (res) => {
+    if (!res?.blob) return false;
+    download(res.blob, res.name);
+    return true;
+  };
+
+  /** Prueba en la figura activa un resultado del conversor, sin reconvertir. */
+  actions.loadConverted = (res) => {
+    if (!res?.blob) return false;
+    return loadCharacter(new File([res.blob], res.name, { type: 'model/gltf-binary' }));
+  };
+
   actions.handleDroppedFile = async (file) => {
     if (isModelFile(file.name)) return loadCharacter(file);
     const ok = await source.useFile(file);

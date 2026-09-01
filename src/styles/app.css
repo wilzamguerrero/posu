@@ -643,6 +643,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
   font-size: 11px; color: var(--fg-muted); line-height: 1.5;
 }
 .notice.info { border-left-color: var(--link); }
+.notice.ok { border-left-color: var(--ok); }
 .notice.warn { border-left-color: var(--warn); }
 .notice.err { border-left-color: var(--err); }
 .notice .svg-icon { width: 14px; height: 14px; margin-top: 1px; }

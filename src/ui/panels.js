@@ -12,6 +12,7 @@ import {
   presetGrid, reactive,
 } from './widgets.js';
 import { icon } from './icons.js';
+import { humanBytes } from '../model/FbxToGlb.js';
 import {
   FOCAL_PRESETS, VIEW_PRESETS, LIGHT_PRESETS, FOCUS_TARGETS, POSE_MODELS, MODEL_LIBRARY,
   APP_VERSION, APP_AUTHOR,
@@ -150,11 +151,115 @@ function figurePanel(app) {
         { label: 'Cargar .glb / .fbx', icon: 'upload', onClick: () => actions.loadModelFile() },
         { label: 'Restablecer', icon: 'refresh-cw', title: 'Vuelve al modelo incluido', onClick: () => actions.resetModel() },
       ], { cols: 2 }),
-      notice('info', 'La lista es la carpeta <code>public/models</code>: cada figura se llama como su archivo, sin la extension. Copia ahi un <b>.glb</b> y aparece. Tambien puedes <b>arrastrar</b> el archivo sobre el visor.'),
+      fbxConverter(app),
     ]),
   ];
 }
 
+/**
+ * Conversor FBX → GLB, en el sitio del aviso que habia aqui. Deja preparado el
+ * archivo sin salir de la aplicacion: se elige (o se suelta) un `.fbx`, se
+ * descarga el `.glb`, y desde ahi se puede copiar a `public/models` o compartir.
+ * El resultado se guarda en memoria para poder probarlo o volver a bajarlo sin
+ * repetir la conversion, que en un personaje con texturas no es instantanea.
+ */
+function fbxConverter(app) {
+  const { actions } = app;
+  let ultimo = null;
+  let trabajando = false;
+
+  const zona = el('div', { class: 'dropbox' }, [
+    icon('file-up', 18),
+    el('div', { class: 'dropbox-text' }, [
+      el('b', { text: 'Convertir FBX a GLB' }),
+      el('span', { text: 'Elige un .fbx o sueltalo aqui' }),
+    ]),
+  ]);
+  const barra = meter();
+  const estado = el('div', { class: 'field-hint' });
+  const resultado = el('div', { class: 'reactive' });
+
+  const paso = (texto, avance = 0) => {
+    estado.textContent = texto;
+    barra.setValue(avance);
+    barra.classList.toggle('hidden', avance <= 0 || avance >= 1);
+  };
+
+  const mostrar = (res) => {
+    ultimo = res;
+    if (!res) { resultado.replaceChildren(); return; }
+    const detalle = [
+      `${humanBytes(res.sourceBytes)} → ${humanBytes(res.bytes)}`,
+      `${res.meshes} malla${res.meshes === 1 ? '' : 's'}`,
+      res.bones ? `${res.bones} huesos` : null,
+      res.animations ? `${res.animations} animacion${res.animations === 1 ? '' : 'es'}` : null,
+      res.textures ? `${res.textures} textura${res.textures === 1 ? '' : 's'}` : 'sin texturas',
+      res.scale !== 1 ? 'escala cm → m' : null,
+    ].filter(Boolean).join(' · ');
+    resultado.replaceChildren(
+      notice('ok', `<b>${res.name}</b><br>${detalle}`, 'circle-check'),
+      buttons([
+        { label: 'Descargar otra vez', icon: 'download', onClick: () => actions.saveConverted?.(ultimo) },
+        { label: 'Probar en la figura', icon: 'person-standing',
+          title: 'Carga el resultado en la figura activa sin volver a convertir',
+          onClick: () => actions.loadConverted?.(ultimo) },
+      ], { cols: 2, compact: true }),
+    );
+  };
+
+  const convertir = async (file) => {
+    if (!file || trabajando) return;
+    trabajando = true;
+    zona.classList.add('is-busy');
+    mostrar(null);
+    paso('Preparando…', 0.02);
+    const res = await actions.convertFbx?.(file, paso);
+    trabajando = false;
+    zona.classList.remove('is-busy');
+    paso(res ? 'Listo, descargado.' : 'No se pudo convertir ese archivo.', 0);
+    mostrar(res);
+  };
+
+  zona.addEventListener('click', async () => {
+    if (trabajando) return;
+    convertir(await pickFile('.fbx'));
+  });
+  zona.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.dataTransfer.dropEffect = 'copy';
+    zona.classList.add('is-over');
+  });
+  zona.addEventListener('dragleave', () => zona.classList.remove('is-over'));
+  zona.addEventListener('drop', (ev) => {
+    // Sin `stopPropagation` el archivo llegaria tambien al visor, que lo cargaria
+    // en la escena en vez de convertirlo.
+    ev.preventDefault();
+    ev.stopPropagation();
+    zona.classList.remove('is-over');
+    convertir(ev.dataTransfer?.files?.[0]);
+  });
+
+  return el('div', { class: 'converter' }, [
+    zona,
+    segmented({
+      label: 'Tamano maximo de textura', path: 'convert.maxTexture', compact: true,
+      options: [
+        { value: 1024, label: '1k' },
+        { value: 2048, label: '2k' },
+        { value: 4096, label: '4k' },
+        { value: 0, label: 'Tal cual' },
+      ],
+      hint: 'Un FBX de Mixamo trae mapas de 4096 px. Reducirlos a 2k baja el peso del .glb sin que se note en el visor.',
+    }),
+    toggle({ path: 'convert.jpeg', label: 'Color en JPEG (menos peso)',
+      hint: 'Solo el color de los materiales opacos. Los mapas de normales y rugosidad se quedan en PNG.' }),
+    barra,
+    estado,
+    resultado,
+    notice('info', 'La lista de arriba es la carpeta <code>public/models</code>: cada figura se llama como su archivo, sin la extension. Copia ahi el <b>.glb</b> y aparece.'),
+  ]);
+}
 /**
  * Rejilla de la biblioteca de figuras. Se reconstruye a mano (no por una ruta
  * del almacen) porque la lista no vive en los ajustes: la rellena

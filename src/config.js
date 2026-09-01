@@ -100,6 +100,16 @@ export const DEFAULTS = {
     right: { preset: 'relajada', thumb: 0.22, index: 0.18, middle: 0.16, ring: 0.18, pinky: 0.22, spread: 0.15, thumbOut: 0.35 },
   },
 
+  /**
+   * Conversor FBX → GLB del panel Modelo. Un FBX de Mixamo trae texturas de
+   * 4096 px: guardadas tal cual el .glb se va a decenas de megas, asi que por
+   * defecto se limita el lado mayor y el color se escribe en JPEG.
+   */
+  convert: {
+    maxTexture: 2048,           // 0 = dejar las texturas como vienen
+    jpeg: true,                 // color en JPEG cuando el material es opaco
+  },
+
   /** Un material independiente por variante de malla y por objeto insertado. */
   materials: {
     slot: 'anatomia',           // pestana activa del panel
