@@ -15,6 +15,7 @@ import { DEFAULTS, STORAGE_KEY, MODEL_LIBRARY } from './config.js';
 import { Settings } from './core/Settings.js';
 import { Viewport } from './core/Viewport.js';
 import { FigureSet, MAX_FIGURAS, libraryUrl } from './model/FigureSet.js';
+import { refreshModelLibrary } from './model/library.js';
 import { PoseEngine } from './pose/PoseEngine.js';
 import { PoseLibrary } from './pose/PoseLibrary.js';
 import { PoseDetector } from './mocap/PoseDetector.js';
@@ -90,6 +91,9 @@ async function main() {
   settings.set('mocap.frozen', false, { silent: true });
 
   boot(0.08, 'Preparando el motor 3D…');
+  // Biblioteca de figuras: los archivos que hay en `public/models`. Se resuelve
+  // antes de sembrar la escena y de montar los paneles, que leen la lista.
+  await refreshModelLibrary();
   const viewport = new Viewport(document.getElementById('gl-canvas'), settings);
 
   /* ── Contexto grafico perdido ───────────────────────────────────────── */

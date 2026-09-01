@@ -145,19 +145,33 @@ function figurePanel(app) {
       notice('info', 'Los ejes de flexion se deducen de la geometria de la mano, no de los ejes locales del archivo: funcionan igual en cualquier personaje de Mixamo.'),
     ]),
     group({ id: 'fig-file', title: 'Modelo', icon: 'folder-open' }, [
-      presetGrid({
-        path: 'figure.model', cols: 2,
-        options: MODEL_LIBRARY.map((m) => ({ value: m.id, label: m.label, icon: 'user', title: m.note })),
-        onPick: (id) => actions.loadLibraryModel(id),
-        hint: 'El modelo se carga en la figura activa. Todas comparten el esqueleto de Mixamo: la pose se conserva al cambiar de figura.',
-      }),
+      modelLibraryGrid(app),
       buttons([
         { label: 'Cargar .glb / .fbx', icon: 'upload', onClick: () => actions.loadModelFile() },
         { label: 'Restablecer', icon: 'refresh-cw', title: 'Vuelve al modelo incluido', onClick: () => actions.resetModel() },
       ], { cols: 2 }),
-      notice('info', 'Tambien puedes <b>arrastrar</b> el archivo sobre el visor. Se admite el esqueleto estandar de Mixamo (<code>mixamorig…</code>).'),
+      notice('info', 'La lista es la carpeta <code>public/models</code>: cada figura se llama como su archivo, sin la extension. Copia ahi un <b>.glb</b> y aparece. Tambien puedes <b>arrastrar</b> el archivo sobre el visor.'),
     ]),
   ];
+}
+
+/**
+ * Rejilla de la biblioteca de figuras. Se reconstruye a mano (no por una ruta
+ * del almacen) porque la lista no vive en los ajustes: la rellena
+ * `refreshModelLibrary()` leyendo la carpeta `public/models`.
+ */
+function modelLibraryGrid(app) {
+  const node = reactive([], () => (MODEL_LIBRARY.length
+    ? presetGrid({
+      path: 'figure.model', cols: 2,
+      options: MODEL_LIBRARY.map((m) => ({ value: m.id, label: m.label, icon: 'user', title: m.file })),
+      onPick: (id) => app.actions.loadLibraryModel(id),
+      hint: 'El modelo se carga en la figura activa. Todas comparten el esqueleto de Mixamo: la pose se conserva al cambiar de figura.',
+    })
+    : notice('warn', 'La carpeta <code>public/models</code> esta vacia. Copia ahi un <b>.glb</b> y la figura aparece aqui sola.', 'triangle-alert')));
+  app.hooks ??= {};
+  app.hooks.refreshModelGrid = () => node.refresh();
+  return node;
 }
 
 /**
@@ -191,7 +205,7 @@ function figureControls(app, id, { modelo = false, posar = false } = {}) {
     // Escribir la ruta basta: `FigureSet` recarga esa figura al verla cambiar.
     out.push(presetGrid({
       label: 'Modelo', path: base + '.model', cols: 2,
-      options: MODEL_LIBRARY.map((m) => ({ value: m.id, label: m.label, icon: 'user', title: m.note })),
+      options: MODEL_LIBRARY.map((m) => ({ value: m.id, label: m.label, icon: 'user', title: m.file })),
       hint: 'Se sustituye el modelo de esta figura y se conserva su pose.',
     }));
   }

@@ -74,8 +74,12 @@ const base = 'http://127.0.0.1:' + server.address().port + '/';
 const { Settings } = await import('../src/core/Settings.js');
 const { DEFAULTS, MODEL_LIBRARY } = await import('../src/config.js');
 const { FigureSet, MAX_FIGURAS } = await import('../src/model/FigureSet.js');
+const { refreshModelLibrary } = await import('../src/model/library.js');
 
-// Toda la biblioteca apunta al GLB local: asi cualquier `model` es cargable.
+// La biblioteca es el contenido de la carpeta `models`; aqui se simula con los
+// nombres que usa la prueba. Todos apuntan al GLB local, asi cualquier `model`
+// es cargable sin salir a la red.
+await refreshModelLibrary(['character.glb', 'xbot.glb', 'ybot.glb']);
 for (const m of MODEL_LIBRARY) m.url = base + 'character.glb';
 
 // Visor simulado: solo hace falta que recoja y suelte objetos.

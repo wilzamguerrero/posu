@@ -117,6 +117,12 @@ for (const cb of frameCbs) cb(1 / 60);
 ui.setMocapFps(28.6);
 ui.setStatus('Prueba', 'ok');
 console.log('lectura del visor:', document.getElementById('viewport-readout').textContent.replace(/\s+/g, ' ').trim());
+// El texto de estado ya no vive en una barra de titulo: `ui.setStatus` tiene que
+// acabar en la lectura del borde inferior (antes lanzaba «no es una funcion»).
+const chip = document.querySelector('#viewport-readout .status-item.status-text');
+console.log('estado:', JSON.stringify(chip?.textContent), '· clase:', chip?.className);
+ui.setStatus('Fallo simulado', 'err');
+console.log('estado con error:', JSON.stringify(chip?.textContent), '· clase:', chip?.className);
 console.log('fps del monitor:', document.getElementById('mocap-fps').textContent);
 
 // 6b · El monitor se redimensiona desde las esquinas y guarda el tamano.

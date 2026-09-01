@@ -325,6 +325,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .status-item.warn { color: var(--warn); }
 .status-item.err { color: var(--err); }
 .status-item.ok { color: var(--ok); }
+/* Aviso libre: puede ser largo, asi que cede sitio y se recorta con puntos. */
+.status-item.status-text { min-width: 0; overflow: hidden; }
+.status-item.status-text > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-spacer { flex: 1; min-width: 8px; }
 .status-value { color: var(--fg-muted); }
 

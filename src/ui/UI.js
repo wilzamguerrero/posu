@@ -65,7 +65,6 @@ export class UI {
     this.panels = buildPanels(app);
     this.#buildSidebar();
     this.#buildToolbar();
-    this.#buildReadout();
     this.#buildHud();
     this.#buildDropZone();
     this.#bindKeys();
@@ -124,6 +123,20 @@ export class UI {
   }
 
   /* ── Barra de titulo (eliminada) ────────────────────────────────────── */
+
+  /**
+   * Texto de estado de la aplicacion. Ya no hay barra de titulo: el aviso vive
+   * en la lectura del borde inferior del visor. Se guarda tambien aqui porque
+   * la interfaz se monta antes que la lectura y algun modulo (la carga de la
+   * figura) puede avisar durante el arranque.
+   *
+   * @param {string} text
+   * @param {''|'ok'|'warn'|'err'} [kind]
+   */
+  setStatus(text, kind = '') {
+    this.status = { text: String(text ?? ''), kind };
+    this.app.readout?.setStatus?.(this.status.text, kind);
+  }
 
   /* ── Barra de herramientas del visor ────────────────────────────────── */
 
@@ -342,37 +355,12 @@ export class UI {
     return btn;
   }
 
-  /* ── Lectura del visor (información técnica abajo) ──────────────────── */
+  /* ── Lectura del visor ──────────────────────────────────────────────── */
 
-  #buildReadout() {
-    const s = this.settings;
-    const readout = this.dom.readout;
-
-    const paint = () => {
-      const ortho = s.get('camera.projection') === 'ortografica';
-      const lensInfo = ortho
-        ? `<b>orto</b> ${(s.get('camera.orthoZoom') ?? 1).toFixed(2)}×`
-        : `<b>${Math.round(s.get('camera.focalLength'))} mm</b> f/${Number(s.get('camera.fStop')).toFixed(1)}`;
-      const projInfo = `<b>${ortho ? 'ortografica' : 'perspectiva'}</b> · ${Math.round(s.get('camera.filmGauge'))} mm`;
-      const variant = s.get('figure.variant');
-      const engineInfo = `<b>${variant}</b> · ${s.get('mocap.engine')}`;
-
-      readout.innerHTML = `
-        <span>${lensInfo}</span>
-        <span style="opacity: 0.4">·</span>
-        <span>${projInfo}</span>
-        <span style="opacity: 0.4">·</span>
-        <span>${engineInfo}</span>
-      `;
-    };
-
-    s.on(
-      ['camera.projection', 'camera.focalLength', 'camera.fStop', 'camera.filmGauge', 'camera.orthoZoom',
-        'figure.variant', 'mocap.engine'],
-      paint,
-    );
-    paint();
-  }
+  // La linea del borde inferior la construye y mantiene `Readout` (ui/Readout.js),
+  // que main.js crea justo despues de esta clase. Aqui no se toca: escribir en
+  // `#viewport-readout` desde los dos sitios borraba los indicadores vivos
+  // (fps, triangulos, confianza) cada vez que cambiaba un ajuste de camara.
 
   /* ── Monitor de captura ─────────────────────────────────────────────── */
 

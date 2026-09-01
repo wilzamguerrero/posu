@@ -120,6 +120,28 @@ convertidos si estan versionados, asi que el proyecto funciona sin ella.
 El script convierte FBX → glTF y optimiza con `gltf-transform`. Cualquier archivo
 con el esqueleto estándar `mixamorig…` sirve igual.
 
+### Añadir figuras a la biblioteca
+
+Copia el `.glb` (o `.gltf`/`.fbx`) en **`public/models/`** y aparecerá en el panel
+**Figura › Modelo** con el nombre del archivo sin la extensión — `xbot.glb` sale
+como «xbot». No hay lista, índice, manifiesto ni tabla de nombres en ninguna
+parte: el plugin `atom-model-list` de [`vite.config.js`](vite.config.js) lee el
+directorio, así que añadir, quitar o **renombrar** un archivo se refleja sin
+tocar código.
+
+- `npm run dev` lee `public/models` y recarga la página en cuanto sueltas el
+  archivo.
+- `npm run preview` lee `dist/models`, así que también ahí se ve al recargar,
+  sin reconstruir.
+- **`dist/` es salida generada**: `npm run build` la borra y la vuelve a crear
+  desde `public/`. Lo que pongas solo en `dist/models` se pierde en la siguiente
+  build; el sitio de los modelos es `public/models`.
+- En un servidor estático sin esa ruta (Cloudflare Pages) vale la lista que quedó
+  dentro del paquete al construir.
+- Si el mismo nombre existe en dos formatos, gana el `.glb`.
+- Los nombres con espacios o acentos valen: se muestran tal cual y la URL se
+  codifica sola.
+
 ## Requisitos
 
 Navegador con WebGL 2 y WebAssembly: Chrome/Edge 113+, Firefox 115+, Safari 17+.

@@ -28,17 +28,35 @@ export const POSE_MODELS = {
   heavy: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task',
 };
 
+/** Carpeta publica donde viven las figuras. */
+export const MODEL_DIR = 'models';
+
 /**
- * Biblioteca de figuras convertidas. Todas comparten la nomenclatura de huesos
- * "mixamorig..." asi que el rig, las poses y el mocap funcionan en cualquiera.
+ * Entrada de la biblioteca a partir del nombre de archivo.
+ *
+ * El nombre que se ve en el panel es el del archivo sin la extension, tal cual:
+ * no hay ninguna tabla de nombres en ninguna parte, asi que renombrar el `.glb`
+ * renombra la figura y basta con recargar. `id` es lo que se guarda en los
+ * ajustes (`figure.model`), y por eso es el nombre del archivo y no un indice.
  */
-export const MODEL_LIBRARY = [
-  { id: 'character', label: 'Figura base', url: 'models/character.glb', note: 'Anatomia, maniqui y esqueleto' },
-  { id: 'xbot',      label: 'X Bot',       url: 'models/xbot.glb',      note: 'Maniqui gris de Mixamo' },
-  { id: 'ybot',      label: 'Y Bot',       url: 'models/ybot.glb',      note: 'Maniqui claro de Mixamo' },
-  { id: 'ch43',      label: 'Atleta',      url: 'models/ch43.glb',      note: 'Personaje texturizado' },
-  { id: 'ch50',      label: 'Musculatura', url: 'models/ch50.glb',      note: 'Personaje texturizado' },
-];
+export function modelEntry(file) {
+  const name = String(file);
+  const id = name.replace(/\.[^.]+$/, '');
+  // La url se codifica: hay nombres de archivo con espacios, acentos o signos
+  // que de otro modo no llegarian bien al cargador.
+  return { id, file: name, label: id, url: `${MODEL_DIR}/${encodeURIComponent(name)}` };
+}
+
+/**
+ * Biblioteca de figuras. Todas comparten la nomenclatura de huesos
+ * "mixamorig..." asi que el rig, las poses y el mocap funcionan en cualquiera.
+ *
+ * Es un array **mutable** y arranca solo con el modelo por defecto: la lista de
+ * verdad la pone `refreshModelLibrary()` (src/model/library.js) leyendo la
+ * carpeta `public/models`. Esto es unicamente el respaldo para cuando esa
+ * carpeta no se puede leer (las pruebas en Node, por ejemplo).
+ */
+export const MODEL_LIBRARY = [modelEntry(DEFAULT_MODEL_URL.split('/').pop())];
 
 /** Objetivos de encuadre para el autofoco y las vistas predefinidas. */
 export const FOCUS_TARGETS = ['figura', 'cabeza', 'torso', 'manos', 'pies'];

@@ -23,7 +23,10 @@ function item({ iconName, title, onClick, mono = true, cls = '' }) {
     root,
     set(text, kind = '') {
       if (value.textContent !== text) value.textContent = text;
-      root.className = 'status-item' + (cls ? ' ' + cls : '') + (kind ? ' ' + kind : '');
+      // `hidden` la pone quien decide si el elemento se muestra; reescribir la
+      // clase entera sin conservarla lo volveria a sacar en el tic siguiente.
+      const oculto = root.classList.contains('hidden');
+      root.className = 'status-item' + (cls ? ' ' + cls : '') + (kind ? ' ' + kind : '') + (oculto ? ' hidden' : '');
     },
   };
 }
@@ -33,7 +36,11 @@ export class Readout {
   constructor(host, app) {
     this.app = app;
     this.settings = app.settings;
+    // `ui.setStatus` escribe aqui a traves de `app.readout`: se registra en el
+    // acto para que no dependa de que lo haga quien construye la lectura.
+    app.readout = this;
 
+    this.status = item({ iconName: 'info', title: 'Ultimo aviso de la aplicacion', mono: false, cls: 'status-text' });
     this.capture = item({ iconName: 'video', title: 'Estado de la captura de movimiento', onClick: () => app.ui.showSection('mocap') });
     this.confidence = item({ iconName: 'activity', title: 'Confianza media de la deteccion' });
     this.bone = item({ iconName: 'bone', title: 'Hueso seleccionado en la pose manual', onClick: () => app.ui.showSection('poses') });
@@ -43,6 +50,7 @@ export class Readout {
     this.fps = item({ iconName: 'gauge', title: 'Fotogramas por segundo del visor' });
 
     host.replaceChildren(
+      this.status.root,
       this.capture.root,
       this.confidence.root,
       this.bone.root,
@@ -56,6 +64,10 @@ export class Readout {
     this.#bind();
     this.#paintStatic();
     this.setCapture('inactiva');
+    // La interfaz se monta antes que la lectura: si ya hubo un aviso durante el
+    // arranque (la carga de la figura, por ejemplo), se recupera aqui.
+    const previo = app.ui?.status;
+    this.setStatus(previo?.text || 'Listo', previo?.kind || '');
     this.last = 0;
     app.viewport.onFrame(() => this.#tickThrottled());
   }
@@ -74,11 +86,23 @@ export class Readout {
     this.lens.set(ortho
       ? `orto ${Number(s.get('camera.orthoZoom')).toFixed(2)}×`
       : `${Math.round(s.get('camera.focalLength'))}mm ${s.get('camera.dof') ? 'f/' + Number(s.get('camera.fStop')).toFixed(1) : ''}`.trim());
+    this.lens.root.title = `Optica de la camara · ${ortho ? 'ortografica' : 'perspectiva'} · sensor ${Math.round(s.get('camera.filmGauge'))} mm`;
+    this.capture.root.title = `Estado de la captura de movimiento · motor «${s.get('mocap.engine')}»`;
     this.#paintFigure();
     const show = s.get('quality.showStats') !== false;
     this.tris.root.classList.toggle('hidden', !show);
     this.fps.root.classList.toggle('hidden', !show);
     this.bone.set(s.get('ui.selectedBone') ? String(s.get('ui.selectedBone')).replace(/^mixamorig:?/, '') : 'sin seleccion');
+  }
+
+  /**
+   * Texto libre del ultimo aviso: lo escribe `ui.setStatus`, que es a quien
+   * llaman la carga de figuras y el arranque de la captura.
+   */
+  setStatus(text, kind = '') {
+    const texto = String(text ?? '');
+    this.status.set(texto, kind);
+    this.status.root.classList.toggle('hidden', !texto);
   }
 
   /**
