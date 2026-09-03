@@ -2,7 +2,7 @@
  * Buscador de imagenes de referencia: el motor que comparten la funcion de
  * Cloudflare Pages y el middleware del servidor de Vite. Aqui no se sale a la
  * red: `fetch` se sustituye por un servidor falso, asi que lo que se comprueba es
- * el analisis del HTML de Bing, el orden de respaldo entre proveedores y, sobre
+ * el analisis del HTML de Bing, la mezcla entrelazada de los ocho sitios y, sobre
  * todo, los frenos del proxy de imagenes, que es lo unico de la aplicacion que
  * pide una url que escribe cualquiera.
  */
@@ -118,7 +118,7 @@ await searchImages('x', { provider: 'bing', page: 999 });
 check('la pagina se limita a la 20', (pedida('images/async')?.url ?? '').includes('first=609'),
   pedida('images/async')?.url);
 
-/* -- 2 - Cadena de proveedores ----------------------------------------- */
+/* -- 2 - Mezcla de proveedores ----------------------------------------- */
 
 const DDG_PORTADA = '<html><script>DDG.deep.initialize(\'d.js?q=correr&vqd="4-987654321"\');</script></html>';
 const DDG_JSON = { results: [
@@ -142,62 +142,180 @@ const WM_JSON = { query: { pages: [
 ] } };
 const rutaWm = [['commons.wikimedia.org', () => json(WM_JSON)]];
 
-// Bing caido: se pasa a DuckDuckGo sin que el usuario se entere de nada.
-servir([['bing.com', () => html('vaya', 500)], ...rutaDuck, ...rutaOv]);
+// Los cuatro archivos de museo: cada uno tiene su forma de decir donde esta la
+// imagen, y en todos hay fichas sin foto que no pueden llegar a la rejilla.
+const ARTIC_JSON = {
+  config: { iiif_url: 'https://iiif.artic.test/2' },
+  data: [
+    { id: 500, title: 'Figura corriendo', artist_title: 'Anonimo', image_id: 'abc-123', thumbnail: { width: 2400, height: 3000 } },
+    { id: 501, title: 'Obra sin foto', artist_title: '', thumbnail: { width: 900, height: 900 } },
+  ],
+};
+const CLE_JSON = { data: [
+  { id: 900, title: 'Thetis corriendo', url: 'https://www.clevelandart.test/art/1963.92',
+    creators: [{ description: 'Severo da Ravenna' }],
+    images: {
+      web: { url: 'https://cdn.clevelandart.test/1963.92_web.jpg', width: '528', height: '893' },
+      print: { url: 'https://cdn.clevelandart.test/1963.92_print.jpg', width: '2012', height: '3400' },
+    } },
+  { id: 901, title: 'Ficha sin foto', url: 'https://www.clevelandart.test/art/2', images: {} },
+] };
+const MET_OBJ = {
+  11: { objectID: 11, title: 'Atleta', artistDisplayName: 'Rodin', primaryImageSmall: 'https://images.met.test/11-web.jpg', objectURL: 'https://www.met.test/11' },
+  12: { objectID: 12, title: 'Ficha sin foto', primaryImageSmall: '', objectURL: 'https://www.met.test/12' },
+  13: { objectID: 13, title: 'Discobolo', primaryImageSmall: 'https://images.met.test/13-web.jpg', objectURL: 'https://www.met.test/13' },
+};
+const WEL_JSON = { results: [
+  { id: 'wel1', source: { id: 'ttv1', title: 'Lamina de anatomia' }, thumbnail: { url: 'https://iiif.wellcome.test/image/L001.jpg/info.json' } },
+  { id: 'wel2', source: { id: 'ttv2', title: 'Ficha sin IIIF' }, thumbnail: { url: 'https://otro.test/x.png' } },
+] };
+const rutaBing = [['bing.com/images/async', () => html(BING)]];
+const rutaArtic = [['api.artic.edu', () => json(ARTIC_JSON)]];
+const rutaCle = [['clevelandart.org', () => json(CLE_JSON)]];
+const rutaMet = [
+  ['collection/v1/search', () => json({ total: 3, objectIDs: [11, 12, 13] })],
+  ['collection/v1/objects/', (url) => json(MET_OBJ[Number(url.split('/').pop())] ?? {})],
+];
+const rutaWel = [['wellcomecollection.org', () => json(WEL_JSON)]];
+const todas = [...rutaBing, ...rutaDuck, ...rutaWm, ...rutaOv, ...rutaArtic, ...rutaCle, ...rutaMet];
+
+// Sin proveedor elegido se pregunta a los siete a la vez y la rejilla sale
+// entrelazada: es la diferencia con la cadena de respaldo que habia antes, donde
+// el primero que contestaba (Bing, siempre) tapaba a los demas.
+servir(todas);
 r = await searchImages('correr');
-check('si Bing falla se sigue con DuckDuckGo',
-  r.provider === 'duck' && r.results.length === 2, r.provider + ' ' + JSON.stringify(r.tried));
-check('el fallo queda anotado en la lista de intentos',
-  r.tried.some((t) => t.startsWith('bing:')), JSON.stringify(r.tried));
-check('DuckDuckGo ya trae el tamano resuelto', r.results[0]?.w === 1024 && r.results[0]?.h === 768);
+const orden = r.results.map((x) => x.source).join(',');
+check('sin proveedor elegido contestan los siete',
+  r.provider === 'mezcla' && r.label === 'Varias fuentes' && r.fuentes.length === 7,
+  r.provider + ' ' + JSON.stringify(r.tried));
+check('la rejilla junta lo de todos, no lo del primero que responde',
+  r.results.length === 10, r.results.length + ' :: ' + JSON.stringify(r.fuentes));
+check('la lista viene entrelazada y no por bloques',
+  orden === 'bing,bing,duck,duck,wikimedia,openverse,artic,cleveland,met,met', orden);
+check('los dos buscadores web se quedan las primeras filas',
+  r.results.slice(0, 4).every((x) => x.source === 'bing' || x.source === 'duck'), orden);
+check('cada resultado dice de que sitio sale', r.results.every((x) => x.source));
+check('y el recuento por sitio viaja con nombre para la interfaz',
+  r.fuentes.every((f) => f.count > 0 && f.label), JSON.stringify(r.fuentes));
+check('Wellcome se queda fuera de la mezcla automatica',
+  !pedida('wellcomecollection'), pedida('wellcomecollection')?.url);
 check('el testigo vqd de la portada viaja en la peticion JSON',
   (pedida('i.js')?.url ?? '').includes('vqd=4-987654321'), pedida('i.js')?.url);
-check('con resultados no se molesta a Openverse', !pedida('openverse'));
+check('DuckDuckGo ya trae el tamano resuelto',
+  r.results[2]?.w === 1024 && r.results[2]?.h === 768, r.results[2]?.w + 'x' + r.results[2]?.h);
 
-// Bing contesta bien pero sin nada dentro (le cambian el HTML) y DuckDuckGo no
-// suelta el testigo: entra Wikimedia Commons, que es una API de verdad.
-servir([['bing.com', () => html('<html></html>')],
-  ['duckduckgo.com/?q=', () => html('<html>sin testigo</html>')], ...rutaWm, ...rutaOv]);
-r = await searchImages('correr');
-check('sin resultados en Bing y sin vqd en DuckDuckGo entra Wikimedia',
-  r.provider === 'wikimedia' && r.results.length === 1, r.provider + ' ' + JSON.stringify(r.tried));
+// Cada sitio por dentro: de donde sale la imagen y que se queda fuera.
+const deWm = r.results.find((x) => x.source === 'wikimedia');
 check('de Commons solo salen imagenes de mapa de bits',
   !r.results.some((x) => /\.svg|\.webm|Sello/i.test(x.full)), r.results.map((x) => x.full).join(', '));
 check('el titulo de Commons se limpia del File: y los guiones bajos',
-  r.results[0]?.title === 'Marathon Barcelona Catalunya 2007', r.results[0]?.title);
-check('se pide en el espacio de nombres de archivo y solo bitmap',
+  deWm?.title === 'Marathon Barcelona Catalunya 2007', deWm?.title);
+check('a Commons se le pide el espacio de archivo y solo bitmap',
   /gsrnamespace=6/.test(pedida('wikimedia')?.url ?? '')
   && /filetype%3Abitmap/.test(pedida('wikimedia')?.url ?? ''), pedida('wikimedia')?.url);
-check('con Wikimedia respondiendo no se llega a Openverse', !pedida('openverse'));
 
-// Y si tambien se cae Commons, queda Openverse.
-servir([['bing.com', () => html('<html></html>')],
-  ['duckduckgo.com/?q=', () => html('<html>sin testigo</html>')],
-  ['commons.wikimedia.org', () => json({}, 500)], ...rutaOv]);
-r = await searchImages('correr');
-check('con los tres primeros fuera queda Openverse',
-  r.provider === 'openverse' && r.results.length === 1, r.provider + ' ' + JSON.stringify(r.tried));
+const deOv = r.results.find((x) => x.source === 'openverse');
 check('Openverse pide la miniatura a su propio servidor',
-  r.results[0]?.thumb.startsWith('https://api.openverse.org/'), r.results[0]?.thumb);
-check('y el filtro de adultos se traduce a mature=false',
+  deOv?.thumb.startsWith('https://api.openverse.org/'), deOv?.thumb);
+check('y su filtro de adultos se traduce a mature=false',
   (pedida('openverse')?.url ?? '').includes('mature=false'));
 
+const deArtic = r.results.find((x) => x.source === 'artic');
+check('del Art Institute la imagen se pide por IIIF al tamano que hace falta',
+  deArtic?.full === 'https://iiif.artic.test/2/abc-123/full/1200,/0/default.jpg'
+  && deArtic?.thumb === 'https://iiif.artic.test/2/abc-123/full/400,/0/default.jpg', deArtic?.full);
+check('y queda marcada para pedirla por el propio dominio, que ese servidor no deja enlazar',
+  deArtic?.proxy === true && r.results.filter((x) => x.proxy).length === 1);
+check('la obra sin imagen no llega a la rejilla', !r.results.some((x) => x.id === 'artic-501'));
+
+const deCle = r.results.find((x) => x.source === 'cleveland');
+check('de Cleveland se usa la copia web, no la de imprenta',
+  deCle?.full === 'https://cdn.clevelandart.test/1963.92_web.jpg' && deCle?.w === 528, deCle?.full);
+check('y el autor va pegado al titulo',
+  deCle?.title === 'Thetis corriendo · Severo da Ravenna', deCle?.title);
+
+const delMet = r.results.filter((x) => x.source === 'met');
+check('el Met necesita una ficha por obra y se piden todas de golpe',
+  pedidas.filter((p) => p.url.includes('collection/v1/objects/')).length === 3);
+check('y las obras sin fotografia se caen solas',
+  delMet.length === 2 && delMet[0]?.full === 'https://images.met.test/11-web.jpg', String(delMet.length));
+
+// Que un sitio se caiga resta resultados, no la busqueda entera. Los que no
+// tienen ruta en el servidor falso cuentan como caidos, asi que aqui contestan
+// dos: DuckDuckGo y Commons.
+servir([['bing.com', () => html('vaya', 500)], ...rutaDuck, ...rutaWm]);
+r = await searchImages('correr');
+check('si Bing se cae la mezcla sigue con los demas',
+  r.results.length === 3 && !r.results.some((x) => x.source === 'bing'), JSON.stringify(r.fuentes));
+check('y el fallo queda anotado en la lista de intentos',
+  r.tried.some((t) => t.startsWith('bing:')), JSON.stringify(r.tried));
+
 servir([['bing.com', () => html('no', 500)], ['duckduckgo.com', () => html('no', 500)],
-  ['commons.wikimedia.org', () => json({}, 500)], ['openverse', () => json({}, 500)]]);
+  ['commons.wikimedia.org', () => json({}, 500)], ['openverse', () => json({}, 500)],
+  ['artic.edu', () => json({}, 500)], ['clevelandart.org', () => json({}, 500)],
+  ['metmuseum.org', () => json({}, 500)]]);
 let lanzo = '';
 try { await searchImages('correr'); } catch (err) { lanzo = err?.message ?? 'error'; }
-check('si los cuatro fallan la busqueda se rinde con un error', lanzo !== '', lanzo);
+check('solo si fallan todos la busqueda se rinde con un error', lanzo !== '', lanzo);
+
+// La web se solapa: la misma foto la tienen indexada los dos buscadores, y con
+// parametros distintos en la url.
+const DDG_REPE = { results: [
+  { image: 'https://static.ejemplo.com/fotos/mujer%20corriendo.jpg?w=800', thumbnail: 'https://ext.ddg.test/th0', title: 'La de Bing otra vez', url: 'https://sitio.ddg.test/0', width: 1200, height: 800 },
+  ...DDG_JSON.results,
+] };
+servir([...rutaBing, ['duckduckgo.com/?q=', () => html(DDG_PORTADA)],
+  ['duckduckgo.com/i.js', () => json(DDG_REPE)]]);
+r = await searchImages('correr');
+check('una imagen que traen dos buscadores aparece una sola vez',
+  r.results.filter((x) => x.full.includes('mujer%20corriendo')).length === 1 && r.results.length === 4,
+  r.results.length + ' resultados');
+
+// DuckDuckGo sirve un centenar de golpe y Commons hasta 64: mas de lo que cabe en
+// la rejilla, asi que la mezcla corta y reparte por cupos.
+const DDG_MUCHOS = { results: Array.from({ length: 200 }, (_, i) => ({
+  image: `https://fotos.ddg.test/m${i}.jpg`, thumbnail: `https://ext.ddg.test/m${i}`,
+  title: 'foto ' + i, url: `https://sitio.ddg.test/m${i}`, width: 900, height: 600 })) };
+const WM_MUCHOS = { query: { pages: Array.from({ length: 40 }, (_, i) => ({
+  pageid: 1000 + i, title: `File:Foto_${i}.jpg`,
+  imageinfo: [{ mime: 'image/jpeg', width: 900, height: 600,
+    url: `https://upload.wikimedia.test/${i}.jpg`, descriptionurl: `https://commons.wikimedia.test/${i}` }] })) } };
+servir([['duckduckgo.com/?q=', () => html(DDG_PORTADA)], ['duckduckgo.com/i.js', () => json(DDG_MUCHOS)],
+  ['commons.wikimedia.org', () => json(WM_MUCHOS)]]);
+r = await searchImages('correr');
+const cuenta = Object.fromEntries(r.fuentes.map((f) => [f.id, f.count]));
+check('la lista mezclada se corta en 120, que es lo que se manda al navegador',
+  r.results.length === 120, String(r.results.length));
+check('y el reparto sigue el cupo: cinco del buscador por cada dos del archivo',
+  cuenta.duck === 86 && cuenta.wikimedia === 34, JSON.stringify(cuenta));
 
 servir(rutaWm);
 r = await searchImages('correr', { provider: 'wikimedia', page: 3 });
-check('el proveedor elegido a mano es el unico que se prueba',
-  r.provider === 'wikimedia' && pedidas.length === 1, pedidas.length + ' peticiones');
+check('el proveedor elegido a mano es el unico al que se pregunta',
+  r.provider === 'wikimedia' && r.label === 'Wikimedia Commons' && pedidas.length === 1,
+  pedidas.length + ' peticiones');
 check('la pagina 3 de Commons salta los 64 primeros',
   (pedida('wikimedia')?.url ?? '').includes('gsroffset=64'), pedida('wikimedia')?.url);
 
-servir([['bing.com/images/async', () => html(BING)]]);
+servir(rutaDuck);
+await searchImages('correr', { provider: 'duck', page: 3 });
+check('la pagina 3 de DuckDuckGo salta 200, que sirve de cien en cien',
+  (pedida('i.js')?.url ?? '').includes('s=200'), pedida('i.js')?.url);
+
+// Wellcome se queda fuera de la mezcla, pero elegido a mano funciona igual.
+servir(rutaWel);
+r = await searchImages('anatomia', { provider: 'wellcome' });
+check('Wellcome responde cuando se elige a mano',
+  r.provider === 'wellcome' && r.results.length === 1, r.provider + ' ' + r.results.length);
+check('y su imagen se arma desde el info.json de IIIF',
+  r.results[0]?.thumb === 'https://iiif.wellcome.test/image/L001.jpg/full/400,/0/default.jpg',
+  r.results[0]?.thumb);
+
+servir(rutaBing);
 r = await searchImages('correr', { provider: 'loquesea' });
-check('un proveedor desconocido cae en la cadena de siempre', r.provider === 'bing');
+check('un proveedor desconocido cae en la mezcla', r.tried.length > 1, JSON.stringify(r.tried));
+check('y si solo contesta uno la respuesta lleva su nombre y no «mezcla»',
+  r.provider === 'bing' && r.label === 'Bing' && r.fuentes.length === 1, r.provider + '/' + r.label);
 
 servir([]);
 r = await searchImages('   ');

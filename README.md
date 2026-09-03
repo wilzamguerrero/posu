@@ -76,10 +76,14 @@ imagen/vídeo para extraer su pose.
 
 El buscador (`Espacio`) hace lo mismo sin salir de la página: escribes la pose
 que necesitas, pulsas una miniatura y esa imagen entra en el monitor de captura,
-de donde el detector saca la postura para la figura activa. Busca en Bing y, si
-falla, en DuckDuckGo, Wikimedia Commons y Openverse; no hay ninguna clave de API
-y las imágenes se descargan por el propio dominio (`/api/img-proxy`), porque una
-imagen de otro dominio sin CORS no se puede subir a una textura de WebGL.
+de donde el detector saca la postura para la figura activa. Pregunta a la vez a
+Bing, DuckDuckGo, Wikimedia Commons, Openverse y los archivos abiertos del Art
+Institute of Chicago, el Cleveland Museum of Art y el Met, y devuelve una sola
+rejilla entrelazada (hasta 120 imágenes) con una fila de fuentes para quedarte
+solo con las de un sitio; la Wellcome Collection queda fuera de la mezcla y se
+elige a mano en **Captura › Buscador**. No hay ninguna clave de API y las
+imágenes se descargan por el propio dominio (`/api/img-proxy`), porque una imagen
+de otro dominio sin CORS no se puede subir a una textura de WebGL.
 
 ## Arquitectura
 

@@ -6,6 +6,10 @@
  * de donde el detector saca la pose y la pasa a la figura activa. Es el mismo
  * camino que soltar un archivo en la ventana, sin salir de la aplicacion.
  *
+ * La rejilla mezcla los ocho sitios que consulta el servidor. Encima queda una
+ * fila con los que han contestado y cuanto ha puesto cada uno, que filtra lo ya
+ * cargado sin volver a la red.
+ *
  * Se abre con Espacio, con el boton de la lupa de la barra o desde el panel
  * Captura, y se cierra con Escape.
  */
@@ -39,6 +43,12 @@ export class SearchBar {
     this.open = false;
     /** @type {Array<object>} */
     this.results = [];
+    /** Si la ultima pagina venia llena, y por tanto hay mas que pedir. */
+    this.hayMas = false;
+    /** Sitio por el que esta filtrada la rejilla; vacio es «todos». */
+    this.filtro = '';
+    /** Nombre presentable de cada sitio que ha contestado. */
+    this.etiquetas = new Map();
     this.#build();
   }
 
@@ -145,18 +155,23 @@ export class SearchBar {
     this.page = append ? this.page + 1 : 1;
     if (!append) {
       this.results = [];
+      this.filtro = '';
+      this.etiquetas.clear();
       this.#renderMessage('Buscando…', 'search');
     }
     this.tag.textContent = 'buscando…';
+    this.tag.title = '';
 
     try {
       const res = await this.app.search.search(q, { page: this.page });
       this.results = append ? this.results.concat(res.results) : res.results;
-      this.tag.textContent = res.label ? res.label.toLowerCase() : '';
+      for (const f of res.fuentes ?? []) this.etiquetas.set(f.id, f.label);
+      this.hayMas = res.results.length >= 12;
+      this.#renderTag(res);
       if (!this.results.length) {
         this.#renderMessage(`Sin resultados para «${q}».`, 'image');
       } else {
-        this.#renderResults(res.results.length >= 12);
+        this.#renderResults();
       }
     } catch (err) {
       console.error('[Buscador]', err);
@@ -165,6 +180,31 @@ export class SearchBar {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Cuantas imagenes hay cargadas y de cuantos sitios vienen. */
+  #renderTag(res) {
+    const total = this.results.length;
+    const fuentes = this.#fuentes();
+    if (!total) {
+      this.tag.textContent = res.label ? res.label.toLowerCase() : '';
+      this.tag.title = '';
+      return;
+    }
+    this.tag.textContent = fuentes.length > 1
+      ? `${total} · ${fuentes.length} fuentes`
+      : `${total} · ${(this.etiquetas.get(fuentes[0]?.id) ?? res.label ?? '').toLowerCase()}`;
+    this.tag.title = fuentes.map((f) => `${this.etiquetas.get(f.id) ?? f.id}: ${f.count}`).join('\n');
+  }
+
+  /** Recuento por sitio de todo lo cargado, en el orden en que llego. */
+  #fuentes() {
+    const cuenta = new Map();
+    for (const r of this.results) {
+      const id = r.source || 'web';
+      cuenta.set(id, (cuenta.get(id) ?? 0) + 1);
+    }
+    return [...cuenta].map(([id, count]) => ({ id, count }));
   }
 
   /* ── Eleccion de una imagen ───────────────────────────────────────────── */
@@ -212,13 +252,17 @@ export class SearchBar {
     this.body.replaceChildren(el('div', { class: 'imgsearch-message' }, [icon(iconName, 26), el('p', { text })]));
   }
 
-  /** Rejilla de miniaturas. `hayMas` anade el boton de la pagina siguiente. */
-  #renderResults(hayMas) {
-    const grid = el('div', { class: 'imgsearch-grid' }, this.results.map((r) => this.#card(r)));
-    const hijos = [grid];
+  /** Rejilla de miniaturas, con la fila de sitios si hay mas de uno. */
+  #renderResults() {
+    const fuentes = this.#fuentes();
+    const visibles = this.filtro ? this.results.filter((r) => r.source === this.filtro) : this.results;
+    const grid = el('div', { class: 'imgsearch-grid' }, visibles.map((r) => this.#card(r)));
     // `replaceChildren` no descarta los nulos como hace `el()`: colar uno pinta
     // un nodo de texto con la palabra «null» debajo de la rejilla.
-    if (hayMas) {
+    const hijos = [];
+    if (fuentes.length > 1) hijos.push(this.#chipsFuente(fuentes));
+    hijos.push(grid);
+    if (this.hayMas) {
       hijos.push(el('div', { class: 'imgsearch-more' }, [
         el('button', { class: 'btn', type: 'button', onClick: () => this.run(this.query, { append: true }) }, [
           icon('plus', 14), el('span', { text: 'Cargar mas' }),
@@ -228,13 +272,37 @@ export class SearchBar {
     this.body.replaceChildren(...hijos);
   }
 
+  /**
+   * Fila de sitios que han contestado. Filtra lo que ya esta cargado, sin volver
+   * a la red: con ocho fuentes en la misma rejilla conviene poder quedarse solo
+   * con las fotografias de un buscador o solo con las laminas de un museo.
+   */
+  #chipsFuente(fuentes) {
+    const chip = (id, texto, cuantas) => el('button', {
+      class: 'imgsearch-chip' + (this.filtro === id ? ' is-on' : ''),
+      type: 'button', 'aria-pressed': this.filtro === id ? 'true' : 'false',
+      onClick: () => { this.filtro = id; this.#renderResults(); },
+    }, [
+      icon(id ? 'image' : 'layers', 12),
+      el('span', { text: texto }),
+      el('small', { text: String(cuantas) }),
+    ]);
+    return el('div', { class: 'imgsearch-chips imgsearch-fuentes' }, [
+      chip('', 'Todas', this.results.length),
+      ...fuentes.map((f) => chip(f.id, this.etiquetas.get(f.id) ?? f.id, f.count)),
+    ]);
+  }
+
   /** Una miniatura: la imagen, el dominio de origen y el tamano real. */
   #card(r) {
-    const img = el('img', { src: r.thumb, alt: r.title || 'resultado', loading: 'lazy', referrerpolicy: 'no-referrer' });
+    const img = el('img', {
+      src: this.app.search.thumbUrl?.(r) ?? r.thumb,
+      alt: r.title || 'resultado', loading: 'lazy', referrerpolicy: 'no-referrer',
+    });
     const medida = r.w && r.h ? `${r.w}×${r.h}` : '';
     const card = el('button', {
       class: 'imgsearch-card', type: 'button',
-      title: [r.title, r.host, medida].filter(Boolean).join(' · '),
+      title: [r.title, this.etiquetas.get(r.source), r.host, medida].filter(Boolean).join(' · '),
     }, [
       img,
       el('span', { class: 'imgsearch-meta' }, [

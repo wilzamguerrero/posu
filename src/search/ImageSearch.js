@@ -7,6 +7,11 @@
  * ahi la imagen entra en el monitor de captura por el mismo camino que un
  * archivo soltado en la ventana.
  *
+ * La lista llega ya mezclada de los ocho sitios que consulta el servidor, y cada
+ * resultado dice de cual sale (`source`) para que la paleta pueda filtrarla. Si
+ * las funciones no estan desplegadas queda el respaldo de aqui: los dos archivos
+ * que contestan con CORS abierto, preguntados a la vez.
+ *
  * Los tres caminos para traerse los bytes de una imagen ajena, en orden:
  *
  *   1. el proxy del propio dominio, que es el que funciona siempre,
@@ -66,15 +71,25 @@ export class ImageSearch {
   }
 
   /**
+   * Url con la que pintar la miniatura de un resultado. Los servidores que no
+   * dejan enlazar sus imagenes desde fuera (el del Art Institute contesta 403 sin
+   * su Referer) vienen marcados con `proxy` y salen por el propio dominio.
+   */
+  thumbUrl(result) {
+    const thumb = String(result?.thumb || result?.full || '');
+    return result?.proxy && this.serverOk && thumb ? this.proxy(thumb) : thumb;
+  }
+
+  /**
    * Busca imagenes en la web.
    *
    * @param {string} query
    * @param {{page?:number}} [opts]
-   * @returns {Promise<{results:Array<object>, provider:string, label:string, page:number}>}
+   * @returns {Promise<{results:Array<object>, provider:string, label:string, page:number, fuentes:Array<object>}>}
    */
   async search(query, { page = 1 } = {}) {
     const q = String(query ?? '').trim();
-    if (!q) return { results: [], provider: '', label: '', page: 1 };
+    if (!q) return { results: [], provider: '', label: '', page: 1, fuentes: [] };
     const safe = this.settings.get('search.safe') === false ? '0' : '1';
     const provider = this.settings.get('search.provider') || 'auto';
     const url = `${api('img-search')}?q=${encodeURIComponent(q)}&page=${page}&safe=${safe}&provider=${encodeURIComponent(provider)}`;
@@ -89,7 +104,10 @@ export class ImageSearch {
           const data = await res.json();
           if (!res.ok) throw new Error(data?.error || 'error ' + res.status);
           this.lastProvider = data.label || data.provider || '';
-          return { results: data.results ?? [], provider: data.provider ?? '', label: this.lastProvider, page };
+          return {
+            results: data.results ?? [], provider: data.provider ?? '',
+            label: this.lastProvider, page, fuentes: data.fuentes ?? [],
+          };
         }
       } catch (err) {
         if (this.serverOk) throw err;
@@ -101,21 +119,40 @@ export class ImageSearch {
   /**
    * Respaldo sin servidor, para un alojamiento estatico sin las funciones: los
    * dos unicos sitios que contestan con CORS abierto y sin clave, asi que la
-   * busqueda sigue viva aunque no haya nada del lado del servidor. Wikimedia va
-   * primero porque es el que responde siempre.
+   * busqueda sigue viva aunque no haya nada del lado del servidor. Se preguntan a
+   * la vez y se juntan las dos listas, como hace el servidor con las ocho.
    */
   async #sinServidor(q, page) {
+    const posibles = {
+      wikimedia: () => this.#wikimedia(q, page),
+      openverse: () => this.#openverse(q, page),
+    };
+    const pedido = this.settings.get('search.provider');
+    const orden = posibles[pedido] ? [pedido] : Object.keys(posibles);
+
+    const tandas = await Promise.allSettled(orden.map((id) => posibles[id]()));
+    const results = [];
+    const vistos = new Set();
     let ultimo = null;
-    for (const intento of [() => this.#wikimedia(q, page), () => this.#openverse(q, page)]) {
-      try {
-        const res = await intento();
-        if (res.results.length) return res;
-      } catch (err) {
-        ultimo = err;
+    for (const t of tandas) {
+      if (t.status === 'rejected') { ultimo = t.reason; continue; }
+      for (const r of t.value.results) {
+        const clave = String(r.full).split('?')[0];
+        if (vistos.has(clave)) continue;
+        vistos.add(clave);
+        results.push(r);
       }
     }
-    if (ultimo) throw ultimo;
-    return { results: [], provider: '', label: '', page };
+    if (!results.length && ultimo) throw ultimo;
+
+    const fuentes = [...new Set(results.map((r) => r.source))]
+      .map((id) => ({ id, label: id === 'wikimedia' ? 'Wikimedia Commons' : 'Openverse', count: results.filter((r) => r.source === id).length }));
+    this.lastProvider = fuentes.length === 1 ? fuentes[0].label : 'Varias fuentes';
+    return {
+      results, page, fuentes,
+      provider: fuentes.length === 1 ? fuentes[0].id : 'mezcla',
+      label: fuentes.length ? this.lastProvider : '',
+    };
   }
 
   /** Archivo de Wikimedia Commons: API de MediaWiki, `origin=*` abre el CORS. */
@@ -136,9 +173,9 @@ export class ImageSearch {
         title: String(p.title ?? '').replace(/^file:/i, '').replace(/\.[^.]+$/, '').replace(/_/g, ' '),
         full: i.url, thumb: i.thumburl || i.url, page: i.descriptionurl ?? '',
         host: 'commons.wikimedia.org', w: Number(i.width) || 0, h: Number(i.height) || 0,
+        source: 'wikimedia',
       };
     }).filter(Boolean);
-    this.lastProvider = 'Wikimedia Commons';
     return { results, provider: 'wikimedia', label: 'Wikimedia Commons', page };
   }
 
@@ -154,9 +191,8 @@ export class ImageSearch {
       .map((r) => ({
         id: r.id, title: r.title ?? '', full: r.url, thumb: r.thumbnail || r.url,
         page: r.foreign_landing_url ?? '', host: (r.provider ?? '').toLowerCase(),
-        w: Number(r.width) || 0, h: Number(r.height) || 0,
+        w: Number(r.width) || 0, h: Number(r.height) || 0, source: 'openverse',
       }));
-    this.lastProvider = 'Openverse';
     return { results, provider: 'openverse', label: 'Openverse', page };
   }
 

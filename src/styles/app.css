@@ -509,6 +509,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .imgsearch-chip:hover { background: var(--bg-hover); border-color: var(--fg-dim); color: var(--fg-strong); }
 .imgsearch-chip .svg-icon { color: var(--fg-dim); }
+/* Fila de sitios que han contestado: filtra la rejilla ya cargada. */
+.imgsearch-fuentes { position: sticky; top: -8px; z-index: 1; padding: 2px 0 4px; background: var(--bg-elevated); }
+.imgsearch-chip small { font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-dim); }
+.imgsearch-chip.is-on {
+  color: var(--fg-strong);
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.imgsearch-chip.is-on .svg-icon, .imgsearch-chip.is-on small { color: var(--accent); }
 
 .imgsearch-message {
   display: grid;

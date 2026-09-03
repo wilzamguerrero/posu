@@ -72,20 +72,26 @@ const app = {
     },
   },
   hooks: {},
-  // Buscador de imagenes simulado: dos resultados de mentira y un archivo de
-  // tres bytes, para que la paleta se monte y se pueda pulsar una miniatura sin
-  // tocar la red.
+  // Buscador de imagenes simulado: dos resultados de mentira de dos sitios
+  // distintos y un archivo de tres bytes, para que la paleta se monte, se pueda
+  // filtrar por fuente y pulsar una miniatura sin tocar la red.
   search: {
     veces: 0,
     async search(q, { page = 1 } = {}) {
       this.veces++;
       return {
-        provider: 'bing', label: 'Bing', page, results: [
-          { id: 'r1', title: 'Corriendo', full: 'https://ejemplo.test/1.jpg', thumb: 'https://ejemplo.test/t1.jpg', page: 'https://ejemplo.test/a', host: 'ejemplo.test', w: 1200, h: 800 },
-          { id: 'r2', title: 'Saltando', full: 'https://ejemplo.test/2.jpg', thumb: 'https://ejemplo.test/t2.jpg', page: 'https://otro.test/b', host: 'otro.test', w: 900, h: 1600 },
+        provider: 'mezcla', label: 'Varias fuentes', page, results: [
+          { id: 'r1', title: 'Corriendo', full: 'https://ejemplo.test/1.jpg', thumb: 'https://ejemplo.test/t1.jpg', page: 'https://ejemplo.test/a', host: 'ejemplo.test', w: 1200, h: 800, source: 'bing' },
+          { id: 'r2', title: 'Saltando', full: 'https://museo.test/2.jpg', thumb: 'https://museo.test/t2.jpg', page: 'https://museo.test/b', host: 'museo.test', w: 900, h: 1600, source: 'artic', proxy: true },
+        ],
+        fuentes: [
+          { id: 'bing', label: 'Bing', count: 1 },
+          { id: 'artic', label: 'Art Institute of Chicago', count: 1 },
         ],
       };
     },
+    // Los sitios que no dejan enlazar sus imagenes salen por el propio dominio.
+    thumbUrl(r) { return r?.proxy ? '/api/img-proxy?url=' + encodeURIComponent(r.thumb) : r.thumb; },
     async toFile() { return new window.File([new Uint8Array([1, 2, 3])], 'referencia.jpg', { type: 'image/jpeg' }); },
   },
   actions: new Proxy({}, { get: (_, name) => act(name) }),
@@ -142,7 +148,20 @@ const cards = [...palette.querySelectorAll('.imgsearch-card')];
 console.log('resultados pintados:', cards.length, '· busquedas pedidas:', app.search.veces,
   '· proveedor:', palette.querySelector('.imgsearch-tag')?.textContent,
   '· sobra un «null»:', palette.textContent.includes('null'));
-cards[0]?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+// La fila de sitios filtra lo que ya esta cargado, sin volver a la red, y la
+// miniatura del archivo que no deja enlazar se pide por el propio dominio.
+const chipFuente = (i) => palette.querySelectorAll('.imgsearch-fuentes .imgsearch-chip')[i];
+console.log('fila de fuentes:', [...palette.querySelectorAll('.imgsearch-fuentes .imgsearch-chip')]
+  .map((c) => c.textContent).join(' | '));
+console.log('miniatura por el proxy:',
+  [...palette.querySelectorAll('.imgsearch-card img')][1]?.getAttribute('src')?.startsWith('/api/img-proxy'));
+chipFuente(2)?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+console.log('filtrado por un sitio:', palette.querySelectorAll('.imgsearch-card').length,
+  'miniatura · sin volver a la red:', app.search.veces === 1);
+chipFuente(0)?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+console.log('«Todas» las devuelve:', palette.querySelectorAll('.imgsearch-card').length);
+[...palette.querySelectorAll('.imgsearch-card')][0]
+  ?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 await flush();
 console.log('al elegir una imagen:', called.includes('handleDroppedFile') ? 'va al monitor de captura' : 'NO LLEGA al monitor',
   '· paleta cerrada:', palette.classList.contains('hidden'));

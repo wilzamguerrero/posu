@@ -222,13 +222,16 @@ export const DEFAULTS = {
   },
 
   /**
-   * Buscador de imagenes de referencia (Espacio). `provider` en `auto` prueba
-   * Bing, luego DuckDuckGo, luego Wikimedia Commons y por ultimo Openverse: el
-   * primero que responda con resultados es el que se usa. `safe` filtra el
-   * contenido para adultos (los dos archivos no tienen ese filtro).
+   * Buscador de imagenes de referencia (Espacio). En `auto` se pregunta a los
+   * siete sitios a la vez y la rejilla sale mezclada, con mas cupo para Bing y
+   * DuckDuckGo, que son los que entienden una frase en castellano; los archivos
+   * de museo estan indexados en ingles. Con un proveedor concreto solo se
+   * pregunta a ese. `safe` filtra el contenido para adultos, y solo lo tienen los
+   * dos buscadores web.
    */
   search: {
-    provider: 'auto',           // auto | bing | duck | wikimedia | openverse
+    // auto | bing | duck | wikimedia | openverse | artic | cleveland | met | wellcome
+    provider: 'auto',
     safe: true,
   },
 
