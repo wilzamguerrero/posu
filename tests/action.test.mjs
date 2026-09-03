@@ -70,11 +70,11 @@ const { ActionLine } = await import('../src/guides/ActionLine.js');
 /* ── Esqueleto de juguete, de pie mirando a la camara ────────────────── */
 const SITIOS = {
   headTop: [0, 1.75, 0], head: [0, 1.62, 0], neck: [0, 1.5, 0],
-  spine2: [0.02, 1.35, 0], spine1: [0.04, 1.2, 0], spine: [0.03, 1.05, 0], hips: [0, 0.95, 0],
-  leftShoulder: [0.06, 1.45, 0], leftArm: [0.18, 1.42, 0], leftForeArm: [0.45, 1.42, 0], leftHand: [0.68, 1.42, 0],
-  rightShoulder: [-0.06, 1.45, 0], rightArm: [-0.18, 1.38, 0], rightForeArm: [-0.45, 1.38, 0], rightHand: [-0.68, 1.38, 0],
-  leftUpLeg: [0.1, 0.92, 0], leftLeg: [0.12, 0.5, 0], leftFoot: [0.12, 0.1, 0], leftToe: [0.12, 0.03, 0.1],
-  rightUpLeg: [-0.1, 0.9, 0], rightLeg: [-0.11, 0.48, 0], rightFoot: [-0.11, 0.04, 0], rightToe: [-0.11, 0.02, 0.1],
+  spine2: [0.012, 1.35, 0], spine1: [0.016, 1.2, 0], spine: [0.01, 1.05, 0], hips: [0, 0.95, 0],
+  leftShoulder: [0.055, 1.45, 0], leftArm: [0.18, 1.42, 0], leftForeArm: [0.45, 1.42, 0], leftHand: [0.68, 1.42, 0],
+  rightShoulder: [-0.055, 1.45, 0], rightArm: [-0.18, 1.38, 0], rightForeArm: [-0.45, 1.38, 0], rightHand: [-0.68, 1.38, 0],
+  leftUpLeg: [0.09, 0.92, 0], leftLeg: [0.11, 0.5, 0], leftFoot: [0.11, 0.1, 0], leftToe: [0.11, 0.03, 0.1],
+  rightUpLeg: [-0.09, 0.9, 0], rightLeg: [-0.1, 0.48, 0], rightFoot: [-0.1, 0.04, 0], rightToe: [-0.1, 0.02, 0.1],
 };
 const raiz = new THREE.Object3D();
 const bones = {};
@@ -181,23 +181,55 @@ check('el ritmo de hombro a pierna anade las dos curvas cruzadas',
     pasaPor(hombro, 40) && pasaPor(pie, 26));
 }
 
-// Y se puede pedir que cada curva siga la pierna de su propio lado.
-const firma = (c) => c.puntos.map(([x, y]) => Math.round(x) + ',' + Math.round(y)).join(' ');
-const cruzado = firma(ctx);
-settings.set('guides.action.cross', false);
-ctx = fakeCtx();
-linea.draw(ctx, W, H, 1);
-check('sin cruzar se siguen dibujando las dos curvas', ctx.fills.length === 4,
-  ctx.fills.length + ' rellenos');
-check('pero por otro camino', firma(ctx) !== cruzado);
-{
-  const hombro = px('leftArm');
-  const pie = px('leftFoot');
-  const pasaPor = (p, r) => ctx.puntos.some(([x, y]) => Math.hypot(x - p.x, y - p.y) < r);
-  check('cada una baja del hombro al pie de su lado', pasaPor(hombro, 40) && pasaPor(pie, 26));
-}
-settings.set('guides.action.cross', true);
+// Y se puede elegir el camino: cruzado, por su lado o por el costado. Se apagan
+// los demas trazos para medir solo las dos curvas de las piernas.
+settings.set('guides.action.line', false);
 settings.set('guides.action.arms', false);
+const firma = (c) => c.puntos.map(([x, y]) => Math.round(x) + ',' + Math.round(y)).join(' ');
+const pasaPor = (c, p, r) => c.puntos.some(([x, y]) => Math.hypot(x - p.x, y - p.y) < r);
+const porCamino = (modo) => {
+  settings.set('guides.action.legPath', modo);
+  const c = fakeCtx();
+  linea.draw(c, W, H, 1);
+  return c;
+};
+
+const cruzado = porCamino('cruzado');
+check('cruzado deja las dos curvas solas', cruzado.fills.length === 2,
+  cruzado.fills.length + ' rellenos');
+
+const mismo = porCamino('mismo');
+check('por su lado tambien son dos', mismo.fills.length === 2, mismo.fills.length + ' rellenos');
+check('pero por otro camino', firma(mismo) !== firma(cruzado));
+check('cada una baja del hombro al pie de su lado',
+  pasaPor(mismo, px('leftArm'), 40) && pasaPor(mismo, px('leftFoot'), 26));
+check('y sigue pasando por la columna', pasaPor(mismo, px('spine1'), 6));
+
+// Por el costado: la columna solo le presta su curvatura.
+const costado = porCamino('costado');
+check('por el costado tambien son dos', costado.fills.length === 2,
+  costado.fills.length + ' rellenos');
+{
+  // Punto de control esperado: la columna acercada a la recta hombro-cadera.
+  const a = px('leftShoulder');
+  const b = px('leftUpLeg');
+  const p = px('spine1');
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  const t = ((p.x - a.x) * ex + (p.y - a.y) * ey) / (ex * ex + ey * ey);
+  const qx = a.x + ex * t;
+  const qy = a.y + ey * t;
+  const esperado = { x: qx + (p.x - qx) * 0.32, y: qy + (p.y - qy) * 0.32 };
+  check('no entra al centro del torso', !pasaPor(costado, p, 7),
+    'columna en ' + p.x.toFixed(0) + ',' + p.y.toFixed(0));
+  check('pero se queda con parte de la curvatura de la espalda',
+    pasaPor(costado, esperado, 7) && Math.abs(esperado.x - qx) > 2,
+    'esperado ' + esperado.x.toFixed(0) + ',' + esperado.y.toFixed(0)
+    + ' · recta ' + qx.toFixed(0) + ',' + qy.toFixed(0));
+  check('y baja del hombro al pie de su lado',
+    pasaPor(costado, px('leftShoulder'), 22) && pasaPor(costado, px('leftFoot'), 26));
+}
+settings.set('guides.action.legPath', 'cruzado');
 settings.set('guides.action.legs', false);
 
 /* ── 5 · Exageracion y fantasma ──────────────────────────────────────── */

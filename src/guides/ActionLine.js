@@ -41,9 +41,11 @@ const RITMO_BRAZOS = [
 ];
 
 /**
- * Ritmo de hombro a pie: baja por el torso y sigue por una pierna. `cruzado` va
- * al lado contrario (los dos trazos se cruzan en la pelvis, la construccion
- * clasica del contrapposto) y `mismo` sigue la pierna de su propio lado.
+ * Ritmo de hombro a pie, por caminos. `cruzado` baja al pie del lado contrario
+ * (los dos trazos se cruzan en la pelvis: la construccion clasica del
+ * contrapposto) y `mismo` sigue la pierna de su propio lado; los dos pasan por la
+ * columna. El tercero, `costado`, no entra al centro del torso: lo arma
+ * `#sideChain`.
  */
 const RITMO_PIERNAS = {
   cruzado: [
@@ -55,6 +57,21 @@ const RITMO_PIERNAS = {
     ['rightShoulder', 'spine1', 'rightUpLeg', 'rightLeg', 'rightFoot'],
   ],
 };
+
+/** Tramo de columna que da su curvatura al ritmo por el costado. */
+const COLUMNA_RITMO = ['spine2', 'spine1', 'spine'];
+
+/** Lo que cuelga de la cadera en cada lado, para el ritmo por el costado. */
+const PIERNA = {
+  left: ['leftUpLeg', 'leftLeg', 'leftFoot'],
+  right: ['rightUpLeg', 'rightLeg', 'rightFoot'],
+};
+
+/**
+ * Cuanto se queda el ritmo por el costado de la separacion de la columna
+ * respecto a la recta hombro-cadera: 0 seria una recta y 1 la columna misma.
+ */
+const COSTADO = 0.32;
 
 /** Huesos del muñeco fantasma, por parejas. */
 const HUESOS = [
@@ -69,6 +86,21 @@ const HUESOS = [
 /** Miembros que arrastra el giro de los hombros y el de la cadera. */
 const CUELGA_DE_HOMBROS = ['leftArm', 'leftForeArm', 'leftHand', 'rightArm', 'rightForeArm', 'rightHand', 'neck', 'head'];
 const CUELGA_DE_CADERA = ['leftUpLeg', 'leftLeg', 'leftFoot', 'leftToe', 'rightUpLeg', 'rightLeg', 'rightFoot', 'rightToe'];
+
+/**
+ * Acerca `p` a la recta a-b dejandole la fraccion `k` de su separacion. Con k=1
+ * se queda donde estaba y con k=0 cae sobre la recta.
+ */
+function acercar(p, a, b, k) {
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  const largo = ex * ex + ey * ey;
+  if (largo < 1e-6) return { x: p.x, y: p.y };
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * ex + (p.y - a.y) * ey) / largo));
+  const qx = a.x + ex * t;
+  const qy = a.y + ey * t;
+  return { x: qx + (p.x - qx) * k, y: qy + (p.y - qy) * k };
+}
 
 /** Color con la opacidad pedida, para los degradados del desvanecido. */
 function conAlfa(color, alfa) {
@@ -141,9 +173,8 @@ export class ActionLine {
     }
     if (a.arms) this.#flow(ctx, this.#armPoints(P), grosor * 0.78, a.color, alfa * 0.92);
     if (a.legs) {
-      const modo = a.cross === false ? 'mismo' : 'cruzado';
-      for (const cadena of RITMO_PIERNAS[modo]) {
-        this.#flow(ctx, this.#chain(P, cadena), grosor * 0.78, a.color, alfa * 0.92);
+      for (const cadena of this.#legPoints(P)) {
+        this.#flow(ctx, cadena, grosor * 0.78, a.color, alfa * 0.92);
       }
     }
     if (a.ghost && campo) this.#ghost(ctx, P, campo, e, dpr, alfa);
@@ -194,6 +225,36 @@ export class ActionLine {
       if (p) out.push(p);
     }
     return out;
+  }
+
+  /**
+   * Las dos cadenas del ritmo de las piernas, segun el camino elegido en
+   * `guides.action.legPath`.
+   */
+  #legPoints(P) {
+    const modo = this.settings.get('guides.action.legPath') ?? 'cruzado';
+    if (modo === 'costado') return [this.#sideChain(P, 'left'), this.#sideChain(P, 'right')];
+    return (RITMO_PIERNAS[modo] ?? RITMO_PIERNAS.cruzado).map((keys) => this.#chain(P, keys));
+  }
+
+  /**
+   * Ritmo por el costado: del hombro a la pierna de su lado sin entrar al centro
+   * del torso. Los puntos de la columna se acercan a la recta hombro-cadera y se
+   * quedan con una parte de su separacion, asi que el trazo baja casi recto pero
+   * llevandose la curvatura de la espalda: si la figura se dobla, el trazo se
+   * dobla con ella.
+   */
+  #sideChain(P, lado) {
+    const hombro = P.get(`${lado}Shoulder`) ?? P.get(`${lado}Arm`);
+    const pierna = this.#chain(P, PIERNA[lado]);
+    const cadera = pierna[0];
+    if (!hombro || !cadera) return pierna;
+    const medio = [];
+    for (const key of COLUMNA_RITMO) {
+      const p = P.get(key);
+      if (p) medio.push(acercar(p, hombro, cadera, COSTADO));
+    }
+    return [hombro, ...medio, ...pierna];
   }
 
   /** Cadena del ritmo de los brazos: brazo, cintura escapular, brazo. */
@@ -411,8 +472,9 @@ export class ActionLine {
   #projectBones(ch, W, H) {
     const cam = this.viewport.cameras.active;
     const claves = new Set([
-      'headTop', ...COLUMNA, ...RITMO_BRAZOS.flat(),
-      ...Object.values(RITMO_PIERNAS).flat(2),
+      'headTop', ...COLUMNA, ...COLUMNA_RITMO, ...RITMO_BRAZOS.flat(),
+      ...Object.values(RITMO_PIERNAS).flat(2), ...Object.values(PIERNA).flat(),
+      'leftShoulder', 'rightShoulder',
     ]);
     for (const [a, b] of HUESOS) { claves.add(a); claves.add(b); }
     const out = new Map();

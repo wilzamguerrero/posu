@@ -67,7 +67,7 @@ npm run deploy       # build + wrangler pages deploy dist
 | Posar huesos a mano con el gizmo | tecla `G`; deshacer con `Ctrl+Z` |
 | Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Escena › Manipulador** o `Alt+X` |
 | Caja envolvente al pasar el ratón, del elemento elegido o de todos | panel **Escena › Caja envolvente** o el botón **Caja** |
-| Línea de acción, ritmos brazo a brazo y hombro a pierna, fantasma exagerado | panel **Guías › Línea de acción** |
+| Línea de acción, ritmos brazo a brazo y hombro a pierna (cruzado, por su lado o por el costado), fantasma exagerado | panel **Guías › Línea de acción** |
 | Dibujar sobre el visor con presión de pluma | tecla `D`; `Alt` para orbitar sin salir |
 | Gestos de mano, curvatura por dedo, apertura y pulgar | panel **Figura › Manos** |
 | Mover las falanges con tus propios dedos | panel **Captura › Dedos por cámara** |

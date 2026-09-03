@@ -1101,8 +1101,15 @@ function guidesPanel(app) {
         hint: 'Una sola curva de una mano a la otra, arqueada por encima de los hombros.' }),
       toggle({ path: 'guides.action.legs', label: 'Ritmo de hombro a pierna',
         hint: 'Dos curvas que bajan del hombro por el torso hasta el pie.' }),
-      toggle({ path: 'guides.action.cross', label: 'Cruzarlo al lado contrario',
-        hint: 'Encendido, cada curva baja hasta el pie del otro lado y las dos se cruzan en la pelvis (el contrapposto de un trazo). Apagado, cada una sigue la pierna de su propio lado.' }),
+      segmented({
+        label: 'Camino de ese ritmo', path: 'guides.action.legPath',
+        options: [
+          { value: 'cruzado', label: 'Cruzado', icon: 'spline', title: 'Baja al pie del lado contrario; los dos trazos se cruzan en la pelvis' },
+          { value: 'mismo', label: 'Mismo lado', icon: 'spline', title: 'Pasa por la columna y baja a la pierna de su lado' },
+          { value: 'costado', label: 'Por el costado', icon: 'spline', title: 'Del hombro a la pierna casi recto, sin entrar al centro' },
+        ],
+        hint: 'Por el costado no pasa por la columna: baja del hombro a la pierna de su lado casi recto, pero llevandose la curvatura de la espalda (si la figura se dobla, el trazo se dobla).',
+      }),
       slider({ label: 'Exageracion', path: 'guides.action.exaggeration', min: 0, max: 1.5, step: 0.05,
         format: (v) => Math.round(v * 100) + ' %',
         hint: 'Amplifica la curva del movimiento. El trazo exagerado sale de puntos junto al real.' }),
