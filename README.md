@@ -37,6 +37,12 @@ npm run deploy       # build + wrangler pages deploy dist
 ```
 
 - `wrangler.toml` declara `pages_build_output_dir = "dist"`.
+- `functions/api/` se despliega solo con el mismo comando: son las dos rutas del
+  buscador de imágenes (`img-search` e `img-proxy`), que en `npm run dev` y en
+  `npm run preview` las sirve un plugin de `vite.config.js` con el mismo módulo
+  compartido (`server/imageSearch.mjs`). El proxy solo atiende peticiones de la
+  propia página (`Sec-Fetch-Site`), solo reenvía respuestas `image/*` de hasta
+  12 MB y rechaza cualquier destino que no sea http/https público.
 - `public/_headers` fija las cachés y **evita a propósito** las cabeceras
   `COEP`/`COOP`: con ellas activas el navegador bloquearía la descarga del modelo
   `.task` de Google, que no responde con `Cross-Origin-Resource-Policy`.
@@ -55,7 +61,8 @@ npm run deploy       # build + wrangler pages deploy dist
 | Focal, sensor, descentrado, viñeteo, distorsión de barril, desenfoque | panel **Cámara** |
 | Posición X/Y/Z de la luz principal, relleno y contra | panel **Luz** |
 | Iniciar la cámara, motor de retargeting, suavizado | panel **Captura** o tecla `B` |
-| Congelar la pose | tecla `Espacio` |
+| Buscar una imagen de referencia en la web | tecla `Espacio` o la lupa de la barra del visor |
+| Congelar la pose | tecla `C` |
 | Posar huesos a mano con el gizmo | tecla `G`; deshacer con `Ctrl+Z` |
 | Gestos de mano, curvatura por dedo, apertura y pulgar | panel **Figura › Manos** |
 | Mover las falanges con tus propios dedos | panel **Captura › Dedos por cámara** |
@@ -66,6 +73,13 @@ npm run deploy       # build + wrangler pages deploy dist
 
 Arrastra sobre el visor un `.glb`/`.fbx` para cargar tu propia figura, o una
 imagen/vídeo para extraer su pose.
+
+El buscador (`Espacio`) hace lo mismo sin salir de la página: escribes la pose
+que necesitas, pulsas una miniatura y esa imagen entra en el monitor de captura,
+de donde el detector saca la postura para la figura activa. Busca en Bing y, si
+falla, en DuckDuckGo, Wikimedia Commons y Openverse; no hay ninguna clave de API
+y las imágenes se descargan por el propio dominio (`/api/img-proxy`), porque una
+imagen de otro dominio sin CORS no se puede subir a una textura de WebGL.
 
 ## Arquitectura
 
@@ -80,9 +94,12 @@ src/
   posing/              ManualPosing (gizmo de huesos con historial)
   scene/               SceneEditor, primitivas geométricas, luces insertables
   guides/              Guides y Perspective (reglas de proporción, composición y fuga)
-  ui/                  panels, UI, Readout, widgets, icons (Lucide), Toast
+  search/              ImageSearch (cliente del buscador de imágenes)
+  ui/                  panels, UI, Readout, widgets, icons (Lucide), Toast, SearchBar
   styles/              theme.css (tokens de VS Code Dark Modern) + app.css
   main.js              arranque y bucle de captura
+server/                motor del buscador y del proxy de imágenes (sin dependencias)
+functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
 ```
 
 - **Un solo esqueleto, tres mallas.** Las variantes se generan sobre el

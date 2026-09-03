@@ -815,9 +815,32 @@ function mocapPanel(app) {
         { label: 'Analizar fotograma', icon: 'scan-face', title: 'Detecta la pose del fotograma actual',
           onClick: () => actions.detectStill() },
       ], { cols: 2 }),
+      buttons([
+        { label: 'Buscar imagen en la web', icon: 'search', variant: 'primary',
+          title: 'Buscador de imagenes de referencia (Espacio)',
+          onClick: () => actions.searchImage?.() },
+      ], { cols: 1 }),
       toggle({ path: 'mocap.frozen', label: 'Congelar pose', hint: 'Mantiene la ultima pose detectada aunque te muevas.' }),
       toggle({ path: 'mocap.autoStart', label: 'Iniciar la camara al abrir' }),
       field('Confianza de la deteccion', conf),
+    ]),
+    group({ id: 'mo-buscador', title: 'Buscador de imagenes', icon: 'search', open: false }, [
+      buttons([
+        { label: 'Abrir el buscador', icon: 'search', title: 'Tambien con la tecla Espacio',
+          onClick: () => actions.searchImage?.() },
+      ], { cols: 1 }),
+      select({ label: 'Proveedor', path: 'search.provider',
+        options: [
+          { value: 'auto', label: 'Automatico (recomendado)' },
+          { value: 'bing', label: 'Bing Imagenes' },
+          { value: 'duck', label: 'DuckDuckGo' },
+          { value: 'wikimedia', label: 'Wikimedia Commons' },
+          { value: 'openverse', label: 'Openverse (licencia libre)' },
+        ],
+        hint: 'En automatico se prueba Bing, luego DuckDuckGo, luego Wikimedia Commons y por ultimo Openverse.' }).root,
+      toggle({ path: 'search.safe', label: 'Filtrar contenido para adultos',
+        hint: 'Desactivalo si buscas desnudo artistico para estudio de figura. Los dos archivos (Commons y Openverse) no tienen este filtro.' }),
+      notice('info', 'Las imagenes se descargan por el propio dominio para que el detector pueda leerlas. No se usa ninguna clave de API.', 'search'),
     ]),
     group({ id: 'mo-solver', title: 'Transferencia', icon: 'bone' }, [
       segmented({
@@ -1111,7 +1134,8 @@ function settingsPanel(app) {
         kbd('Esc', 'Deseleccionar'),
         kbd('Alt + X', 'Ejes del mundo / locales'),
         kbd('Shift + R', 'Volver a la pose de reposo'),
-        kbd('Space', 'Congelar la pose'),
+        kbd('Space', 'Buscar una imagen de referencia'),
+        kbd('C', 'Congelar la pose'),
         kbd('Ctrl + Z', 'Deshacer el ultimo giro'),
         kbd('Ctrl + S', 'Guardar captura PNG'),
       ]),

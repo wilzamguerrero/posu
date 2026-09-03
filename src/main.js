@@ -28,6 +28,7 @@ import { BONE_LABELS } from './model/boneMap.js';
 import { HandRig, HAND_PRESET_BY_ID } from './model/HandRig.js';
 import { Guides } from './guides/Guides.js';
 import { SceneEditor } from './scene/SceneEditor.js';
+import { ImageSearch } from './search/ImageSearch.js';
 import { UI } from './ui/UI.js';
 import { Readout } from './ui/Readout.js';
 import { pickFile } from './ui/panels.js';
@@ -208,6 +209,10 @@ async function main() {
 
   const library = new PoseLibrary(null, { onChange: () => app.hooks.refreshPoses?.() });
   app.library = library;
+
+  // Buscador de imagenes de referencia: se monta antes de la interfaz porque la
+  // paleta de busqueda es parte de ella.
+  app.search = new ImageSearch(settings);
 
   const posing = new ManualPosing({
     settings, viewport, character: null,
@@ -402,6 +407,8 @@ async function main() {
     if (!file) return;
     await actions.handleDroppedFile(file);
   };
+  /** Abre la paleta de busqueda de imagenes de referencia (tecla Espacio). */
+  actions.searchImage = () => app.ui?.toggleSearch?.();
   actions.detectStill = async () => {
     if (source.kind !== 'imagen') {
       toast('Carga primero una imagen de referencia', 'warn');

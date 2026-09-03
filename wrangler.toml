@@ -1,7 +1,9 @@
-# Proyecto de Cloudflare Pages (sitio estatico, sin funciones ni backend).
+# Proyecto de Cloudflare Pages: sitio estatico mas las dos funciones del
+# buscador de imagenes (`functions/api/`), que `wrangler pages deploy` recoge
+# solo, sin configurar nada aqui.
 #
 #   npm run build            genera dist/
-#   npx wrangler pages deploy   publica dist/ en Cloudflare
+#   npx wrangler pages deploy   publica dist/ (y functions/) en Cloudflare
 name = "posu"
 compatibility_date = "2026-08-31"
 pages_build_output_dir = "dist"

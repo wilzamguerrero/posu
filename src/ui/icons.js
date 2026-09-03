@@ -65,6 +65,7 @@ import Rotate3d from 'lucide/dist/esm/icons/rotate-3d.js';
 import Ruler from 'lucide/dist/esm/icons/ruler.js';
 import Save from 'lucide/dist/esm/icons/save.js';
 import ScanFace from 'lucide/dist/esm/icons/scan-face.js';
+import Search from 'lucide/dist/esm/icons/search.js';
 import SettingsIcon from 'lucide/dist/esm/icons/settings.js';
 import SlidersHorizontal from 'lucide/dist/esm/icons/sliders-horizontal.js';
 import Snowflake from 'lucide/dist/esm/icons/snowflake.js';
@@ -129,7 +130,7 @@ export const ICONS = {
   orbit: Orbit, palette: Palette, 'panel-left-close': PanelLeftClose,
   'pencil-ruler': PencilRuler, 'person-standing': PersonStanding, play: Play, plus: Plus,
   ratio: Ratio, 'refresh-cw': RefreshCw, 'rotate-ccw': RotateCcw, 'rotate-3d': Rotate3d,
-  ruler: Ruler, save: Save, 'scan-face': ScanFace, settings: SettingsIcon,
+  ruler: Ruler, save: Save, 'scan-face': ScanFace, search: Search, settings: SettingsIcon,
   'sliders-horizontal': SlidersHorizontal, snowflake: Snowflake, sparkles: Sparkles,
   square: Square, sun: Sun, sunrise: Sunrise, target: Target, 'trash-2': Trash2,
   'triangle-alert': TriangleAlert, upload: Upload, video: Video, webcam: Webcam, x: XIcon,

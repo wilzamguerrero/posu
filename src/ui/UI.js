@@ -11,6 +11,7 @@
 import { el, useStore } from './widgets.js';
 import { icon, hydrateIcons } from './icons.js';
 import { buildPanels } from './panels.js';
+import { SearchBar } from './SearchBar.js';
 import { toast } from './Toast.js';
 import { PERSPECTIVE_MODES, PERSPECTIVE_BY_ID } from '../guides/Perspective.js';
 
@@ -59,6 +60,7 @@ export class UI {
       hudClose: document.getElementById('mocap-hud-close'),
       hudFps: document.getElementById('mocap-fps'),
       hudOverlay: document.getElementById('mocap-overlay'),
+      search: document.getElementById('imgsearch'),
       dropHint: document.getElementById('drop-hint'),
     };
 
@@ -66,6 +68,7 @@ export class UI {
     this.#buildSidebar();
     this.#buildToolbar();
     this.#buildHud();
+    this.#buildSearch();
     this.#buildDropZone();
     this.#bindKeys();
     // El editor de escena avisa cuando se elige un elemento en el visor.
@@ -240,6 +243,7 @@ export class UI {
 
     // Dropdown de captura
     const capturaDropdown = createDropdown('Captura', 'video', [
+      { label: 'Buscar imagen de referencia', icon: 'search', onClick: () => this.toggleSearch() },
       { label: 'Monitor de captura', icon: 'webcam', onClick: () => s.set('mocap.showHud', !s.get('mocap.showHud')) },
       { label: 'Congelar pose', icon: 'snowflake', onClick: () => s.set('mocap.frozen', !s.get('mocap.frozen')) },
       { label: 'Panel Captura', icon: 'sliders-horizontal', onClick: () => this.showSection('mocap') },
@@ -287,6 +291,11 @@ export class UI {
       sep(),
       this.#perspectiveButton(),
       sep(),
+      iconButton({
+        id: 'imgsearch-toggle', iconName: 'search',
+        title: 'Buscar una imagen de referencia en la web (Espacio)',
+        onClick: () => this.toggleSearch(),
+      }),
       this.#captureButton(),
       iconToggle(this.settings, { path: 'ui.sidebar', iconName: 'panel-left-close', title: 'Panel lateral (H)' }),
     );
@@ -530,6 +539,26 @@ export class UI {
     this.dom.hudFps.textContent = fps > 0 ? Math.round(fps) + ' fps' : '—';
   }
 
+  /* ── Buscador de imagenes ───────────────────────────────────────────── */
+
+  /**
+   * Monta la paleta de busqueda sobre el visor. Solo existe si la aplicacion
+   * trae el cliente (`app.search`), que es quien habla con el servidor.
+   */
+  #buildSearch() {
+    if (!this.dom.search || !this.app.search) return;
+    this.searchBar = new SearchBar(this.app, this.dom.search);
+  }
+
+  /** Abre o cierra el buscador de imagenes de referencia. */
+  toggleSearch() {
+    if (!this.searchBar) {
+      toast('El buscador de imagenes no esta disponible', 'warn');
+      return;
+    }
+    this.searchBar.toggle();
+  }
+
   /* ── Arrastrar y soltar ─────────────────────────────────────────────── */
 
   #buildDropZone() {
@@ -565,6 +594,13 @@ export class UI {
         else if (k === 's') { ev.preventDefault(); actions.screenshot(false); }
         return;
       }
+      // El buscador abierto se queda con Escape: cerrarlo es lo que espera
+      // quien lo tiene delante, antes que deseleccionar en la escena.
+      if (ev.key === 'Escape' && this.searchBar?.open) {
+        ev.preventDefault();
+        this.searchBar.hide();
+        return;
+      }
       // El editor de escena tiene prioridad: W/E/R cambian de herramienta y
       // Supr/Esc/Alt+X actuan sobre el elemento seleccionado. Con Shift se le
       // deja pasar la tecla para no pisar los atajos con mayuscula.
@@ -580,15 +616,18 @@ export class UI {
         case '3': s.set('figure.variant', 'esqueleto'); break;
         case 'R': actions.resetPose(); break;
         case 'P': this.cyclePerspective(-1); break;
+        // Espacio abre el buscador de imagenes de referencia. Congelar la pose,
+        // que antes vivia aqui, se ha movido a la C.
         case ' ':
           ev.preventDefault();
-          s.set('mocap.frozen', s.get('mocap.frozen') !== true);
+          this.toggleSearch();
           break;
         default: {
           switch (ev.key.toLowerCase()) {
             case 'p': this.cyclePerspective(1); break;
             case 'o': s.set('camera.projection', s.get('camera.projection') === 'ortografica' ? 'perspectiva' : 'ortografica'); break;
             case 'b': this.running ? actions.stopCapture() : actions.startCapture(); break;
+            case 'c': s.set('mocap.frozen', s.get('mocap.frozen') !== true); break;
             case 'f': actions.frameFigure(); break;
             case 'g': s.set('ui.manualPosing', s.get('ui.manualPosing') !== true); break;
             case 'h': s.set('ui.sidebar', s.get('ui.sidebar') === false); break;

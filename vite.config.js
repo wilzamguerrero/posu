@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import { resolve, join, basename } from 'node:path';
 import fs from 'node:fs';
+import { searchImages, fetchImage, mismoOrigen } from './server/imageSearch.mjs';
 
 /** Extensiones de figura que el cargador de `Character` sabe abrir. */
 const MODEL_EXT = /\.(glb|gltf|fbx)$/i;
@@ -77,11 +78,72 @@ function modelList() {
   };
 }
 
+/**
+ * Las dos rutas del buscador de imagenes, en desarrollo y en `preview`.
+ * ---------------------------------------------------------------------------
+ * Al desplegar en Cloudflare Pages las sirven las funciones de `functions/api`;
+ * aqui se montan sobre el servidor de Vite con el mismo modulo compartido, para
+ * que el buscador funcione igual con `npm run dev` sin levantar nada aparte.
+ *
+ *   · /api/img-search?q=…   lista de resultados en JSON
+ *   · /api/img-proxy?u=…    bytes de una imagen, ya desde este mismo origen
+ */
+function imageSearchApi() {
+  const enviar = (res, status, body, headers = {}) => {
+    res.statusCode = status;
+    for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+    res.end(body);
+  };
+  const enviarJson = (res, status, data, cache = 'no-store') => enviar(
+    res, status, JSON.stringify(data),
+    { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': cache },
+  );
+
+  const attach = (server) => {
+    server.middlewares.use(async (req, res, next) => {
+      const url = new URL(req.originalUrl ?? req.url ?? '/', 'http://localhost');
+      const esBusqueda = url.pathname === '/api/img-search';
+      if (!esBusqueda && url.pathname !== '/api/img-proxy') return next();
+
+      // `Sec-Fetch-Site` lo pone el navegador: solo atendemos a la propia pagina.
+      const cabeceras = { get: (n) => req.headers[String(n).toLowerCase()] };
+      if (!mismoOrigen(cabeceras)) return enviar(res, 403, 'peticion externa');
+
+      try {
+        if (esBusqueda) {
+          const q = url.searchParams.get('q') ?? '';
+          if (!q.trim()) return enviarJson(res, 400, { error: 'falta la busqueda' });
+          const data = await searchImages(q, {
+            page: Number(url.searchParams.get('page')) || 1,
+            safe: url.searchParams.get('safe') !== '0',
+            provider: url.searchParams.get('provider') ?? 'auto',
+          });
+          return enviarJson(res, 200, data, 'public, max-age=120');
+        }
+        const u = url.searchParams.get('u');
+        if (!u) return enviar(res, 400, 'falta la imagen');
+        const img = await fetchImage(u);
+        if (!img.ok) return enviar(res, img.status, img.error);
+        return enviar(res, 200, Buffer.from(img.body), {
+          'Content-Type': img.type,
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        });
+      } catch (err) {
+        console.error('[buscador]', err);
+        return enviar(res, 502, 'la busqueda no respondio');
+      }
+    });
+  };
+
+  return { name: 'atom-image-search', configureServer: attach, configurePreviewServer: attach };
+}
+
 export default defineConfig({
   // Rutas relativas: la build funciona igual en Cloudflare Pages, en un
   // subdirectorio o abierta desde un servidor estatico cualquiera.
   base: './',
-  plugins: [modelList()],
+  plugins: [modelList(), imageSearchApi()],
   resolve: {
     alias: {
       // El entry point por defecto de kalidokit usa imports sin extension.

@@ -72,6 +72,22 @@ const app = {
     },
   },
   hooks: {},
+  // Buscador de imagenes simulado: dos resultados de mentira y un archivo de
+  // tres bytes, para que la paleta se monte y se pueda pulsar una miniatura sin
+  // tocar la red.
+  search: {
+    veces: 0,
+    async search(q, { page = 1 } = {}) {
+      this.veces++;
+      return {
+        provider: 'bing', label: 'Bing', page, results: [
+          { id: 'r1', title: 'Corriendo', full: 'https://ejemplo.test/1.jpg', thumb: 'https://ejemplo.test/t1.jpg', page: 'https://ejemplo.test/a', host: 'ejemplo.test', w: 1200, h: 800 },
+          { id: 'r2', title: 'Saltando', full: 'https://ejemplo.test/2.jpg', thumb: 'https://ejemplo.test/t2.jpg', page: 'https://otro.test/b', host: 'otro.test', w: 900, h: 1600 },
+        ],
+      };
+    },
+    async toFile() { return new window.File([new Uint8Array([1, 2, 3])], 'referencia.jpg', { type: 'image/jpeg' }); },
+  },
   actions: new Proxy({}, { get: (_, name) => act(name) }),
 };
 settings.batch({ 'scene.figures': figDefs, 'figure.active': 'f0' });
@@ -103,12 +119,37 @@ range.dispatchEvent(new window.Event('input', { bubbles: true }));
 const check = document.querySelector('#sidebar-host input[type="checkbox"]');
 check.click();
 
-// 5 · Atajos de teclado.
+// 5 · Atajos de teclado. Espacio abre el buscador de imagenes, asi que congelar
+// la pose se pide con C.
 const key = (k, opts = {}) => window.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, ...opts }));
-key('2'); key('o'); key(' '); key('g'); key('h'); key('f'); key('b'); key('z', { ctrlKey: true });
+const flush = () => new Promise((r) => setTimeout(r, 0));
+key('2'); key('o'); key('c'); key('g'); key('h'); key('f'); key('b'); key('z', { ctrlKey: true });
 console.log('variante:', settings.get('figure.variant'), '· proyeccion:', settings.get('camera.projection'),
   '· congelada:', settings.get('mocap.frozen'), '· pose manual:', settings.get('ui.manualPosing'));
 console.log('acciones invocadas:', [...new Set(called)].join(', '));
+
+// 5b · El buscador de imagenes: Espacio lo abre, Intro busca, una miniatura
+// entra en el monitor de captura por el mismo camino que un archivo soltado.
+const palette = document.getElementById('imgsearch');
+key(' ');
+console.log('buscador con Espacio:', !palette.classList.contains('hidden'),
+  '· foco en el cuadro:', document.activeElement?.id);
+const input = document.getElementById('imgsearch-input');
+input.value = 'persona corriendo';
+input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+await flush();
+const cards = [...palette.querySelectorAll('.imgsearch-card')];
+console.log('resultados pintados:', cards.length, '· busquedas pedidas:', app.search.veces,
+  '· proveedor:', palette.querySelector('.imgsearch-tag')?.textContent,
+  '· sobra un «null»:', palette.textContent.includes('null'));
+cards[0]?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await flush();
+console.log('al elegir una imagen:', called.includes('handleDroppedFile') ? 'va al monitor de captura' : 'NO LLEGA al monitor',
+  '· paleta cerrada:', palette.classList.contains('hidden'));
+key(' ');
+key('Escape');
+console.log('Escape cierra el buscador:', palette.classList.contains('hidden'),
+  '· sin tocar la seleccion de escena:', settings.get('scene.selected') === '');
 
 // 6 · Barra de estado y monitor.
 sb.setCapture('camara en directo', 'ok');
