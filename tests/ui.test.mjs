@@ -236,9 +236,13 @@ overlayCanvas.dispatchEvent(pev('pointerdown', 10, 10));
 console.log('cursor sobre un punto:', conCursor,
   '· controles pedidos:', called.filter((n) => n === 'selectJointFromCapture').length);
 
-// 7 · Distintivo del visor y barra de herramientas.
+// 7 · Distintivo del visor y barra de herramientas. La barra ya no lleva el logo
+// de ATOM ni el interruptor de espejo, que vive en el panel de Captura.
 console.log('distintivo:', document.getElementById('viewport-badge').textContent.replace(/\s+/g, ' ').trim());
-console.log('botones de la barra del visor:', document.querySelectorAll('#viewport-toolbar .icon-btn').length);
+console.log('botones de la barra del visor:', document.querySelectorAll('#viewport-toolbar .icon-btn').length,
+  '· sin logo:', !document.querySelector('#viewport-toolbar .toolbar-brand'),
+  '· sin espejo:', ![...document.querySelectorAll('#viewport-toolbar [title]')].some((b) => /espejo/i.test(b.title)),
+  '· espejo en el panel:', [...document.querySelectorAll('#sidebar-host label')].some((l) => /espejo/i.test(l.textContent)));
 
 toast('mensaje de prueba', 'ok');
 console.log('avisos:', document.querySelectorAll('#toasts > *').length);

@@ -34,9 +34,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .titlebar {
   display: none;
 }
-.titlebar-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.brand-mark { color: var(--link); display: block; }
-.brand-name { font-weight: 700; letter-spacing: 0.06em; color: var(--fg-strong); }
 .titlebar-center {
   flex: 1;
   display: flex;
@@ -141,11 +138,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .viewport-toolbar {
   position: absolute;
-  top: 10px;
+  /* Columna centrada en la altura y pegada al borde izquierdo del visor: con el
+     panel lateral a la vista se aparta su ancho justo, y al ocultarlo se queda
+     al borde mismo de la pagina. */
+  top: 50%;
   left: 12px;
   right: auto;
   width: auto;
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 4px;
   padding: 4px;
@@ -155,35 +156,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   z-index: 4;
-  max-width: calc(100% - 24px);
   flex-wrap: nowrap;
+  /* Visible a proposito: los menus se abren hacia el visor y no se pueden
+     recortar. */
   overflow: visible;
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  transform: translateX(0);
+  transform: translateY(-50%);
 }
 .app:not(.sidebar-hidden) .viewport-toolbar {
-  transform: translateX(var(--sidebar-w));
+  transform: translate(var(--sidebar-w), -50%);
 }
-.viewport-toolbar::-webkit-scrollbar { display: none; }
 .viewport-toolbar > * { flex: 0 0 auto; }
-.toolbar-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 2px; }
-
-/* Logo en la barra de herramientas */
-.toolbar-brand {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 4px;
-}
-.toolbar-brand .brand-mark { color: var(--link); width: 20px; height: 20px; }
-.toolbar-brand .brand-name {
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--fg-strong);
-  font-size: 12px;
-}
+.toolbar-sep { width: 20px; height: 1px; background: var(--border-strong); margin: 2px 0; }
 
 /* Menú desplegable en la barra */
 .toolbar-dropdown {
@@ -238,8 +222,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .toolbar-dropdown-menu {
   position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  /* La barra es una columna pegada al borde: los menus se abren hacia el visor,
+     a la derecha del boton y a su misma altura. */
+  top: 0;
+  left: calc(100% + 6px);
   min-width: 160px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
@@ -885,10 +871,18 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
      panel se pega a la esquina y su fila de secciones queda en lo mas alto. */
   .sidebar { position: absolute; top: 0; bottom: 0; left: 0;
     width: min(320px, 100%); z-index: 30; box-shadow: var(--shadow); }
-  /* Abajo y con los botones mas juntos, para que la fila entera siga cabiendo;
-     por encima de la lectura flotante, que ocupa el borde inferior. */
-  .viewport-toolbar { top: auto; bottom: 26px; gap: 2px; padding: 3px; }
-  .viewport-toolbar .icon-btn { width: 24px; height: 24px; }
+  /* Mas juntos y algo mas pequenos para que la columna entera siga cabiendo en
+     una pantalla baja; sigue centrada en la altura. */
+  .viewport-toolbar { gap: 2px; padding: 3px; }
+  .viewport-toolbar .icon-btn,
+  .viewport-toolbar .toolbar-dropdown-btn { width: 24px; height: 24px; }
+  .viewport-toolbar .toolbar-sep { margin: 0; }
+}
+/* Ventana baja: la columna se aprieta para no salirse por arriba y por abajo. */
+@media (max-height: 620px) {
+  .viewport-toolbar { gap: 2px; padding: 3px; }
+  .viewport-toolbar .icon-btn,
+  .viewport-toolbar .toolbar-dropdown-btn { width: 24px; height: 24px; }
   .viewport-toolbar .toolbar-sep { margin: 0; }
 }
 @media (prefers-reduced-motion: reduce) {

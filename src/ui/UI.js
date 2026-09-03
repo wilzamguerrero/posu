@@ -172,12 +172,6 @@ export class UI {
     const { actions } = this.app;
     const sep = () => el('div', { class: 'toolbar-sep' });
 
-    // Logo de ATOM
-    const brand = el('div', { class: 'toolbar-brand' }, [
-      icon('atom', 20),
-      el('span', { class: 'brand-name', text: 'ATOM' }),
-    ]);
-
     // Menus desplegables de acciones. Cambiar de panel ya no vive aqui: eso lo
     // hace la fila de iconos de lo alto de la barra lateral (`#buildTabs`).
     const createDropdown = (label, iconName, items) => {
@@ -278,8 +272,6 @@ export class UI {
     ]);
 
     this.dom.toolbar.replaceChildren(
-      brand,
-      sep(),
       figuraDropdown,
       camaraDropdown,
       capturaDropdown,
@@ -288,7 +280,6 @@ export class UI {
       ajustesDropdown,
       sep(),
       iconToggle(this.settings, { path: 'ui.manualPosing', iconName: 'hand', title: 'Pose manual (G)' }),
-      iconToggle(this.settings, { path: 'mocap.mirror', iconName: 'flip-horizontal', title: 'Captura en espejo' }),
       sep(),
       this.#toolButton('translate', 'move', 'Mover el elemento seleccionado (W)'),
       this.#toolButton('rotate', 'rotate-3d', 'Girar el elemento seleccionado (E)'),
