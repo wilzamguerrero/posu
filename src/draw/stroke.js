@@ -89,33 +89,21 @@ export function decimate(points, min = 1) {
 }
 
 /**
- * Contorno cerrado de un trazo, listo para `ctx.fill(path)`.
- *
- * Se recorre el lado izquierdo de la linea hacia delante, se da la vuelta con
- * una tapa redonda y se vuelve por el lado derecho. Los tramos se unen con
- * curvas cuadraticas que pasan por los puntos medios, que es la manera clasica
- * de suavizar una polilinea sin desviarse de ella.
+ * Orillas de un trazo: para cada punto, a donde cae el borde izquierdo y el
+ * derecho segun su grosor. Se calculan una vez y con ellas se puede dibujar el
+ * trazo entero o solo un trozo (`strokeOutline`), que es lo que permite pintar
+ * un mismo trazo en dos mitades con distinto degradado sin que se vea la union:
+ * las dos comparten las coordenadas exactas del corte.
  *
  * @param {{x:number,y:number,w:number}[]} points radio (medio grosor) por punto
- * @returns {Path2D}
  */
-export function strokePath(points) {
-  const path = new Path2D();
-  const pts = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-  if (!pts.length) return path;
-
-  if (pts.length === 1) {
-    const r = Math.max(0.35, pts[0].w);
-    path.moveTo(pts[0].x + r, pts[0].y);
-    path.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
-    return path;
-  }
-
+export function strokeSides(points) {
+  const centro = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   const izq = [];
   const der = [];
-  for (let i = 0; i < pts.length; i++) {
-    const prev = pts[i - 1] ?? pts[i];
-    const next = pts[i + 1] ?? pts[i];
+  for (let i = 0; i < centro.length; i++) {
+    const prev = centro[i - 1] ?? centro[i];
+    const next = centro[i + 1] ?? centro[i];
     let dx = next.x - prev.x;
     let dy = next.y - prev.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -124,25 +112,66 @@ export function strokePath(points) {
     // Normal a izquierda del avance.
     const nx = -dy;
     const ny = dx;
-    const w = Math.max(0.15, pts[i].w);
-    izq.push({ x: pts[i].x + nx * w, y: pts[i].y + ny * w });
-    der.push({ x: pts[i].x - nx * w, y: pts[i].y - ny * w });
+    const w = Math.max(0.15, centro[i].w);
+    izq.push({ x: centro[i].x + nx * w, y: centro[i].y + ny * w });
+    der.push({ x: centro[i].x - nx * w, y: centro[i].y - ny * w });
+  }
+  return { centro, izq, der };
+}
+
+/**
+ * Contorno cerrado de (un trozo de) un trazo, listo para `ctx.fill(path)`.
+ *
+ * Se recorre el lado izquierdo hacia delante, se da la vuelta y se vuelve por el
+ * derecho. Los tramos se unen con curvas cuadraticas que pasan por los puntos
+ * medios, que es la manera clasica de suavizar una polilinea sin desviarse de
+ * ella. Las puntas de verdad se cierran con una tapa redonda; un corte interior
+ * se cierra en recto, de orilla a orilla, para que el trozo siguiente encaje.
+ *
+ * @param {{centro:object[],izq:object[],der:object[]}} lados de `strokeSides`
+ * @param {number} [from] indice del primer punto del trozo
+ * @param {number} [to] indice del ultimo
+ * @returns {Path2D}
+ */
+export function strokeOutline({ centro, izq, der }, from = 0, to = centro.length - 1) {
+  const path = new Path2D();
+  const a = Math.max(0, Math.min(from, centro.length - 1));
+  const b = Math.max(a, Math.min(to, centro.length - 1));
+  if (!centro.length) return path;
+
+  if (b === a) {
+    const r = Math.max(0.35, centro[a].w);
+    path.moveTo(centro[a].x + r, centro[a].y);
+    path.arc(centro[a].x, centro[a].y, r, 0, Math.PI * 2);
+    return path;
   }
 
-  const angulo = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
-  const aFin = angulo(pts[pts.length - 2], pts[pts.length - 1]);
-  const aIni = angulo(pts[0], pts[1]);
+  const angulo = (p, q) => Math.atan2(q.y - p.y, q.x - p.x);
+  const aFin = angulo(centro[b - 1], centro[b]);
+  const aIni = angulo(centro[a], centro[a + 1]);
 
-  suave(path, izq, true);
-  // Tapa del final: de la orilla izquierda a la derecha pasando por la punta.
-  path.arc(pts[pts.length - 1].x, pts[pts.length - 1].y,
-    Math.max(0.15, pts[pts.length - 1].w), aFin + Math.PI / 2, aFin - Math.PI / 2, true);
-  suave(path, der.reverse(), false);
-  // Y tapa del principio, cerrando el contorno.
-  path.arc(pts[0].x, pts[0].y, Math.max(0.15, pts[0].w),
-    aIni - Math.PI / 2, aIni - Math.PI * 1.5, true);
+  suave(path, izq.slice(a, b + 1), true);
+  if (b === centro.length - 1) {
+    // Punta: tapa redonda de la orilla izquierda a la derecha.
+    path.arc(centro[b].x, centro[b].y, Math.max(0.15, centro[b].w),
+      aFin + Math.PI / 2, aFin - Math.PI / 2, true);
+  } else {
+    path.lineTo(der[b].x, der[b].y);
+  }
+  suave(path, der.slice(a, b + 1).reverse(), false);
+  if (a === 0) {
+    path.arc(centro[a].x, centro[a].y, Math.max(0.15, centro[a].w),
+      aIni - Math.PI / 2, aIni - Math.PI * 1.5, true);
+  }
   path.closePath();
   return path;
+}
+
+/** Contorno completo de un trazo: el atajo de siempre. */
+export function strokePath(points) {
+  const lados = strokeSides(points);
+  if (!lados.centro.length) return new Path2D();
+  return strokeOutline(lados);
 }
 
 /** Polilinea suavizada con cuadraticas por los puntos medios. */

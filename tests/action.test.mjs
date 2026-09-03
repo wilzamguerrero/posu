@@ -269,7 +269,54 @@ check('exagerar aparta el fantasma de la pose real', d1 > 4, d1.toFixed(1) + ' p
 check('y a mas exageracion, mas separacion', d1 > d2 + 1,
   '0.4 -> ' + d2.toFixed(1) + ' px · 0.9 -> ' + d1.toFixed(1) + ' px');
 
-/* ── 6 · Sin figura no se dibuja ─────────────────────────────────────── */
+/* ── 6 · De perfil el trazo no puede desaparecer ─────────────────────── */
+// Brazos colgando y camara de canto: los dos brazos se proyectan casi encima, el
+// trazo vuelve sobre si mismo y la cuerda entre las dos manos se queda en nada.
+// Con un solo degradado por esa cuerda, todo el trazo caia fuera del eje y se
+// dibujaba transparente: la linea desaparecia del visor.
+for (const [key, sitio] of Object.entries({
+  leftArm: [0.16, 1.42, 0], leftForeArm: [0.19, 1.16, 0], leftHand: [0.21, 0.92, 0], leftMiddle2: [0.215, 0.84, 0],
+  rightArm: [-0.16, 1.42, 0], rightForeArm: [-0.19, 1.16, 0], rightHand: [-0.21, 0.92, 0], rightMiddle2: [-0.215, 0.84, 0],
+})) bones[key].position.set(...sitio);
+raiz.updateMatrixWorld(true);
+
+const perfil = new THREE.PerspectiveCamera(45, W / H, 0.1, 100);
+perfil.position.set(3.4, 1, 0);
+perfil.lookAt(0, 0.95, 0);
+perfil.updateMatrixWorld(true);
+viewport.cameras.active = perfil;
+
+settings.set('guides.action.line', false);
+settings.set('guides.action.ghost', false);
+settings.set('guides.action.arms', true);
+const lado = fakeCtx();
+linea.draw(lado, W, H, 1);
+{
+  const ejes = lado.grads.map((g) => Math.hypot(g.eje[2] - g.eje[0], g.eje[3] - g.eje[1]));
+  check('de perfil el trazo se sigue pintando', lado.fills.length > 0,
+    lado.fills.length + ' rellenos');
+  check('y se parte en dos mitades con su propio eje',
+    lado.fills.length === 2 && ejes.length === 2 && ejes.every((d) => d > 60),
+    'ejes de ' + ejes.map((d) => d.toFixed(0)).join(' y ') + ' px');
+  const ys = lado.puntos.map(([, y]) => y);
+  check('y cubre el brazo de arriba abajo', Math.max(...ys) - Math.min(...ys) > 100,
+    (Math.max(...ys) - Math.min(...ys)).toFixed(0) + ' px de alto');
+}
+// Con los brazos abiertos y de frente, las dos puntas quedan lejos: un solo
+// relleno con un degradado basta, y es el camino barato.
+for (const key of ['leftArm', 'leftForeArm', 'leftHand', 'leftMiddle2',
+  'rightArm', 'rightForeArm', 'rightHand', 'rightMiddle2']) {
+  bones[key].position.set(...SITIOS[key]);
+}
+raiz.updateMatrixWorld(true);
+viewport.cameras.active = cam;
+const frente = fakeCtx();
+linea.draw(frente, W, H, 1);
+check('de frente y con los brazos abiertos basta un relleno', frente.fills.length === 1,
+  frente.fills.length + ' rellenos');
+settings.set('guides.action.arms', false);
+
+/* ── 7 · Sin figura no se dibuja ─────────────────────────────────────── */
 linea.setCharacter(null);
 ctx = fakeCtx();
 linea.draw(ctx, W, H, 1);

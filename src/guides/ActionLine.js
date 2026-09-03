@@ -21,7 +21,9 @@
  * esqueleto no se toca.
  */
 import * as THREE from 'three';
-import { strokePath, curvePath, resample, relax, extend, pathLength } from '../draw/stroke.js';
+import {
+  strokeSides, strokeOutline, curvePath, resample, relax, extend, pathLength,
+} from '../draw/stroke.js';
 
 const _v = new THREE.Vector3();
 
@@ -208,8 +210,38 @@ export class ActionLine {
     // La prolongacion crece con el trazo, pero con tope: en un trazo corto una
     // cola larga se comeria el dibujo.
     const abierta = extend(curva, Math.min(largo * 0.13, grosor * 22));
-    ctx.fillStyle = this.#fade(ctx, abierta, color, alfa);
-    ctx.fill(strokePath(this.#brush(abierta, grosor)));
+    this.#paint(ctx, this.#brush(abierta, grosor), color, alfa);
+  }
+
+  /**
+   * Rellena el trazo con su desvanecido. El degradado de un lienzo va por el
+   * espacio, no por el recorrido, asi que su eje es la cuerda entre las dos
+   * puntas... y eso falla cuando el trazo vuelve sobre si mismo: en una vista de
+   * perfil los dos brazos se proyectan casi encima, la cuerda entre las manos se
+   * queda en unos pocos pixeles y TODO el trazo cae fuera de ese eje, o sea
+   * transparente — la linea desaparecia. Cuando pasa eso se pinta en dos mitades,
+   * cada una con su eje, cortadas en recto por el mismo sitio para que la union no
+   * se vea.
+   */
+  #paint(ctx, brocha, color, alfa) {
+    const lados = strokeSides(brocha);
+    const n = lados.centro.length - 1;
+    if (n < 2) return;
+    const a = lados.centro[0];
+    const b = lados.centro[n];
+    const cuerda = Math.hypot(b.x - a.x, b.y - a.y);
+
+    if (cuerda > pathLength(lados.centro) * 0.6) {
+      ctx.fillStyle = this.#fade(ctx, a, b, color, [[0, 0], [0.16, alfa], [0.84, alfa], [1, 0]]);
+      ctx.fill(strokeOutline(lados));
+      return;
+    }
+    const m = Math.round(n / 2);
+    const medio = lados.centro[m];
+    ctx.fillStyle = this.#fade(ctx, a, medio, color, [[0, 0], [0.32, alfa], [1, alfa]]);
+    ctx.fill(strokeOutline(lados, 0, m));
+    ctx.fillStyle = this.#fade(ctx, medio, b, color, [[0, alfa], [0.68, alfa], [1, 0]]);
+    ctx.fill(strokeOutline(lados, m, n));
   }
 
   /** La misma curva, a puntos: es la que muestra la exageracion. */
@@ -314,19 +346,16 @@ export class ActionLine {
   }
 
   /**
-   * Degradado a lo largo del trazo que lo hace aparecer y desaparecer sin cortes.
-   * El eje es la cuerda entre las dos puntas, que para una curva de ritmo (una S
-   * tumbada o una C) es justo la direccion en la que se quiere el desvanecido.
+   * Degradado del punto `a` al `b` con las paradas pedidas (`[[sitio, opacidad]]`).
+   * Es lo que hace que el trazo aparezca y desaparezca sin cortes.
    */
-  #fade(ctx, puntos, color, alfa) {
-    const a = puntos[0];
-    const b = puntos[puntos.length - 1];
-    if (!ctx.createLinearGradient || Math.hypot(b.x - a.x, b.y - a.y) < 1) return conAlfa(color, alfa);
+  #fade(ctx, a, b, color, stops) {
+    const opaca = stops.reduce((n, s) => Math.max(n, s[1]), 0);
+    if (!ctx.createLinearGradient || Math.hypot(b.x - a.x, b.y - a.y) < 1) {
+      return conAlfa(color, opaca);
+    }
     const g = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-    g.addColorStop(0, conAlfa(color, 0));
-    g.addColorStop(0.16, conAlfa(color, alfa));
-    g.addColorStop(0.84, conAlfa(color, alfa));
-    g.addColorStop(1, conAlfa(color, 0));
+    for (const [sitio, opacidad] of stops) g.addColorStop(sitio, conAlfa(color, opacidad));
     return g;
   }
 
