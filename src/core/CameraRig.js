@@ -101,16 +101,32 @@ export class CameraRig {
    * Descentrado de lente. Desplaza el tronco de vision sin girar la camara:
    * es lo que permite dibujar un edificio o una figura en contrapicado
    * manteniendo las verticales paralelas.
+   *
+   * El desplazamiento se hace con `setViewOffset`, que tiene una trampa: deduce
+   * el aspecto de la ventana que se le pasa (`fullWidth / fullHeight`) y lo
+   * escribe encima del de la camara, y `clearViewOffset` no lo devuelve. Con la
+   * base cuadrada de antes, tocar el descentrado dejaba la perspectiva en 1:1 y
+   * la figura salia estirada; encima `setFocalLength` divide el sensor por el
+   * aspecto, asi que la focal efectiva tampoco era la del panel. Por eso la base
+   * va en la proporcion del lienzo y el aspecto se restablece al terminar.
    */
   applyShift() {
     const h = this.settings.get('camera.shiftH');
     const v = this.settings.get('camera.shiftV');
-    const N = 1000; // Base arbitraria: solo importa la proporcion.
+    // Base arbitraria: solo importan la proporcion y que los desplazamientos
+    // vayan en la misma escala (una unidad = un encuadre entero).
+    const H = 1000;
+    const W = H * this.aspect;
+    const desplazada = Math.abs(h) > 1e-4 || Math.abs(v) > 1e-4;
     for (const cam of [this.perspective, this.orthographic]) {
-      if (Math.abs(h) < 1e-4 && Math.abs(v) < 1e-4) cam.clearViewOffset();
-      else cam.setViewOffset(N, N, h * N, v * N, N, N);
-      cam.updateProjectionMatrix();
+      if (desplazada) cam.setViewOffset(W, H, h * W, v * H, W, H);
+      else cam.clearViewOffset();
     }
+    // El aspecto de la perspectiva lo manda el lienzo (`setAspect`), nunca el
+    // descentrado.
+    this.perspective.aspect = this.aspect;
+    this.perspective.updateProjectionMatrix();
+    this.orthographic.updateProjectionMatrix();
   }
 
   /** Recalcula el tronco ortografico a partir del encuadre en perspectiva. */
@@ -144,8 +160,11 @@ export class CameraRig {
   }
 
   setAspect(aspect) {
-    this.aspect = aspect;
-    this.perspective.aspect = aspect;
+    // Un lienzo de altura cero (pestana oculta, panel replegado) daria un
+    // aspecto sin sentido y con el se irian al garete el descentrado y la
+    // ortografica: se ignora y se conserva el ultimo bueno.
+    this.aspect = Number.isFinite(aspect) && aspect > 0 ? aspect : this.aspect;
+    this.perspective.aspect = this.aspect;
     this.applyFocalLength();
   }
 

@@ -202,7 +202,10 @@ export const DEFAULTS = {
     minPresence: 0.5,
     minTracking: 0.5,
     engine: 'directo',          // directo | kalidokit
-    mirror: true,
+    // Apagado a proposito: la vista en espejo intercambia izquierda y derecha,
+    // que es lo comodo si te mueves frente a la camara, pero desconcierta cuando
+    // la pose viene de una foto o de un video.
+    mirror: false,
     smoothing: 0.35,            // factor de slerp por fotograma
     oneEuro: true,
     oneEuroFreq: 30,

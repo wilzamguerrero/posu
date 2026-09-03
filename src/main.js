@@ -90,12 +90,34 @@ async function main() {
   const settings = new Settings(DEFAULTS, STORAGE_KEY);
   // La captura nunca arranca congelada por un valor heredado de la sesion.
   settings.set('mocap.frozen', false, { silent: true });
+  // La vista en espejo pasa a estar apagada por defecto. Lo guardado gana sobre
+  // los valores por defecto (`mergeKnown`), asi que un navegador con sesion
+  // previa no notaria el cambio: se apaga una sola vez y se deja constancia.
+  const ESPEJO_KEY = 'posu.migra.espejo';
+  try {
+    if (localStorage.getItem(ESPEJO_KEY) !== '1') {
+      settings.set('mocap.mirror', false, { silent: true });
+      settings.save();
+      localStorage.setItem(ESPEJO_KEY, '1');
+    }
+  } catch { /* modo privado: se queda con lo que haya */ }
 
   boot(0.08, 'Preparando el motor 3D…');
   // Biblioteca de figuras: los archivos que hay en `public/models`. Se resuelve
   // antes de sembrar la escena y de montar los paneles, que leen la lista.
   await refreshModelLibrary();
   const viewport = new Viewport(document.getElementById('gl-canvas'), settings);
+
+  // El contexto compartido se declara aqui, vacio, y se va rellenando a medida
+  // que nacen los modulos. Tiene que existir ANTES que cualquier objeto capaz de
+  // avisar mientras se construye: `Settings` emite de forma sincrona, asi que
+  // sembrar la escena (`figures.seed()`) ya dispara `onChange`, y con `app`
+  // declarado mas abajo el arranque moria con «Cannot access 'app' before
+  // initialization» (minificado, «no se puede acceder a 'h'»). Solo a veces,
+  // porque una sesion guardada que ya tiene figuras no siembra nada.
+  const app = { settings, viewport, hooks: {}, actions: {} };
+  // Comodidad en consola: `atom.character` es la figura activa.
+  Object.defineProperty(app, 'character', { get: () => app.figures?.active ?? null, enumerable: true });
 
   /* ── Contexto grafico perdido ───────────────────────────────────────── */
 
@@ -154,8 +176,9 @@ async function main() {
   // `FigureSet` es el dueno de los personajes vivos: crea, carga, clona y
   // destruye. El resto del programa solo pregunta por la figura activa, que es
   // la que recibe la captura por camara, las poses, el posado manual y las
-  // manos. Los avisos llegan por estas devoluciones de llamada, que se disparan
-  // siempre despues de montar `app` y la interfaz.
+  // manos. Los avisos llegan por estas devoluciones de llamada, que pueden
+  // saltar ya durante el sembrado, antes de que exista la interfaz: por eso todo
+  // lo que tocan de `app` va con `?.`.
   const figures = new FigureSet({
     settings,
     viewport,
@@ -187,12 +210,9 @@ async function main() {
   const overlay = new Overlay2D(document.getElementById('mocap-overlay'), settings);
   const guides = new Guides(document.getElementById('guide-canvas'), settings, viewport);
 
-  const app = {
-    settings, viewport, figures, engine, detector, overlay, guides,
-    hooks: {}, actions: {},
-  };
-  // Compatibilidad y comodidad en consola: `atom.character` es la figura activa.
-  Object.defineProperty(app, 'character', { get: () => figures.active, enumerable: true });
+  // Ya estan todos: se completa el contexto declarado al principio.
+  Object.assign(app, { figures, engine, detector, overlay, guides });
+
 
 
   detector.onFallback = (aviso) => {

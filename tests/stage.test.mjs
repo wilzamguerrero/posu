@@ -53,6 +53,19 @@ settings.set('camera.filmGauge', DEFAULTS.camera.filmGauge);
 settings.set('camera.focalLength', 50);
 
 // ------------------------------------------------- descentrado (tilt-shift) ---
+// Huella de la proyeccion: los dos factores de escala de la matriz son la
+// proporcion de la imagen, y los terminos de centro dicen cuanto se ha
+// desplazado el encuadre.
+const huella = (cam) => {
+  const e = cam.projectionMatrix.elements;
+  return cam.isOrthographicCamera
+    ? { sx: e[0], sy: e[5], cx: e[12], cy: e[13] }
+    : { sx: e[0], sy: e[5], cx: e[8], cy: e[9] };
+};
+const antesP = huella(rig.perspective);
+const antesO = huella(rig.orthographic);
+const mmAntes = rig.perspective.getFocalLength();
+
 settings.set('camera.shiftV', 0.2);
 const view = rig.perspective.view;
 check('el descentrado vertical desplaza el tronco de vision',
@@ -60,8 +73,48 @@ check('el descentrado vertical desplaza el tronco de vision',
   'offsetY=' + (view ? view.offsetY : 'sin view'));
 check('el descentrado tambien se aplica a la ortografica',
   rig.orthographic.view?.enabled === true);
+
+// La imagen se mueve, pero no se estira. `setViewOffset` deduce el aspecto de la
+// base que se le pasa y lo escribe encima del de la camara: con la base cuadrada
+// de antes, mover el descentrado deformaba la figura y ademas cambiaba la focal
+// efectiva (el sensor se divide por el aspecto) sin tocar el panel.
+const conV = huella(rig.perspective);
+check('descentrar no deforma la imagen',
+  Math.abs(conV.sx - antesP.sx) < 1e-9 && Math.abs(conV.sy - antesP.sy) < 1e-9,
+  'sx ' + antesP.sx.toFixed(5) + ' -> ' + conV.sx.toFixed(5)
+  + ' · sy ' + antesP.sy.toFixed(5) + ' -> ' + conV.sy.toFixed(5));
+check('descentrar no toca el aspecto ni la focal',
+  Math.abs(rig.perspective.aspect - 16 / 9) < 1e-9
+  && Math.abs(rig.perspective.getFocalLength() - mmAntes) < 0.01,
+  'aspecto=' + rig.perspective.aspect.toFixed(4) + ' · ' + rig.perspective.getFocalLength().toFixed(2) + ' mm');
+check('lo que cambia es el centro: un 0.2 sube el encuadre un 20%',
+  Math.abs(conV.cy - -0.4) < 1e-9 && Math.abs(conV.cx - antesP.cx) < 1e-9,
+  'centro y=' + conV.cy.toFixed(5));
+const orthoV = huella(rig.orthographic);
+check('la ortografica descentrada tampoco se deforma',
+  Math.abs(orthoV.sx - antesO.sx) < 1e-9 && Math.abs(orthoV.sy - antesO.sy) < 1e-9
+  && Math.abs(orthoV.cy - (antesO.cy + 0.4)) < 1e-9,
+  'sx ' + antesO.sx.toFixed(5) + ' -> ' + orthoV.sx.toFixed(5) + ' · centro y=' + orthoV.cy.toFixed(5));
+
 settings.set('camera.shiftV', 0);
+settings.set('camera.shiftH', -0.11);
+const conH = huella(rig.perspective);
+check('el descentrado horizontal mueve el encuadre sin estirarlo',
+  Math.abs(conH.sx - antesP.sx) < 1e-9 && Math.abs(conH.sy - antesP.sy) < 1e-9
+  && Math.abs(conH.cx - -0.22) < 1e-9,
+  'sx=' + conH.sx.toFixed(5) + ' · centro x=' + conH.cx.toFixed(5));
+
+settings.set('camera.shiftH', 0);
 check('al volver a cero se limpia el descentrado', rig.perspective.view?.enabled === false);
+// `clearViewOffset` no devuelve el aspecto que le escribio `setViewOffset`: si
+// no se restablece a mano, la imagen se queda deformada para siempre.
+const aCero = huella(rig.perspective);
+check('al volver a cero la proyeccion es la de partida',
+  Math.abs(aCero.sx - antesP.sx) < 1e-9 && Math.abs(aCero.sy - antesP.sy) < 1e-9
+  && Math.abs(aCero.cx) < 1e-9 && Math.abs(aCero.cy) < 1e-9
+  && Math.abs(rig.perspective.aspect - 16 / 9) < 1e-9,
+  'sx=' + aCero.sx.toFixed(5) + ' sy=' + aCero.sy.toFixed(5)
+  + ' aspecto=' + rig.perspective.aspect.toFixed(4));
 
 // ------------------------------------------------ perspectiva vs ortografica ---
 const dist = rig.perspective.position.distanceTo(rig.controls.target);

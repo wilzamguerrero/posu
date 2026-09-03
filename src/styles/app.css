@@ -334,7 +334,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* ── Monitor de captura ──────────────────────────────────────────────── */
 .mocap-hud {
   position: absolute;
-  left: 12px;
+  /* A la derecha: el panel lateral flota sobre el borde izquierdo del visor y
+     tapaba el monitor. Al arrastrarlo se pasa a left/top (ver UI.js). */
+  right: 12px;
   /* Por defecto se apoya justo encima de la lectura flotante del visor. */
   bottom: 30px;
   /* El ancho lo fija el usuario al redimensionar, pero nunca desborda el visor. */

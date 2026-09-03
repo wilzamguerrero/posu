@@ -444,9 +444,12 @@ export class UI {
 
     let drag = null;
     for (const grip of hud.querySelectorAll('.mocap-grip')) {
-      // Doble clic en una esquina: de vuelta al tamano por defecto.
+      // Doble clic en una esquina: de vuelta al tamano y al sitio por defecto
+      // (abajo a la derecha). Sin soltar las coordenadas del arrastre el monitor
+      // se quedaria donde lo dejo el usuario, sin manera de recuperar la esquina.
       grip.addEventListener('dblclick', (ev) => {
         ev.stopPropagation();
+        for (const prop of ['left', 'top', 'right', 'bottom']) hud.style.removeProperty(prop);
         this.settings.batch(() => {
           this.settings.set('mocap.hudW', 268);
           this.settings.set('mocap.hudH', 0);

@@ -116,6 +116,29 @@ check('hereda los ajustes viejos de colocacion',
 check('locate y pathOf apuntan a su hueco', figures.pathOf(id0) === 'scene.figures.0');
 check('no se puede quedar sin figuras', figures.remove(id0) === false && figures.count === 1);
 
+// Regresion del arranque: `Settings` emite en el acto, asi que el aviso de
+// `onChange` salta DENTRO de `seed()`, antes de que devuelva el id. Todo lo que
+// toque esa devolucion tiene que existir ya; cuando `main.js` declaraba `app`
+// despues de sembrar, el arranque moria a veces con «Cannot access 'app' before
+// initialization» (solo con la sesion en blanco, que es la que siembra).
+{
+  const avisos = [];
+  const enBlanco = new Settings(DEFAULTS, null);
+  const aparte = new FigureSet({
+    settings: enBlanco,
+    // Visor de pega propio: lo que cargue esta prueba no cuenta para el recuento
+    // final de objetos sueltos.
+    viewport: { add() {}, remove() {}, invalidateShadows() {} },
+    onChange: () => avisos.push(enBlanco.get('figure.active')),
+  });
+  const sembrada = aparte.seed();
+  check('sembrar avisa dentro de seed, no despues',
+    avisos.length > 0 && avisos.at(-1) === sembrada,
+    avisos.length + ' avisos · activa=' + (avisos.at(-1) ?? 'ninguna'));
+  await aparte.sync();
+  aparte.dispose();
+}
+
 // ------------------------------------------------- 2 · alta de una segunda ---
 const id1 = await figures.add({});
 const b = figures.get(id1);
