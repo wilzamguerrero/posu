@@ -270,6 +270,58 @@ console.log('botones de la barra del visor:', document.querySelectorAll('#viewpo
   '· sin espejo:', ![...document.querySelectorAll('#viewport-toolbar [title]')].some((b) => /espejo/i.test(b.title)),
   '· espejo en el panel:', [...document.querySelectorAll('#sidebar-host label')].some((l) => /espejo/i.test(l.textContent)));
 
+// 7b · La barra del visor es una columna de herramientas y, al lado, la de las
+// opciones de la elegida: un solo lapiz, y elegirlo ya activa el dibujo.
+const fallos7 = [];
+const revisa = (que, cond, extra = '') => {
+  if (!cond) fallos7.push(que + (extra ? ' :: ' + extra : ''));
+  console.log((cond ? 'OK   ' : 'FALLA') + ' ' + que + (extra ? '  (' + extra + ')' : ''));
+};
+{
+  const bar = document.getElementById('viewport-toolbar');
+  const opts = document.getElementById('viewport-options');
+  const herramientas = [...bar.querySelectorAll('[data-tool]')];
+  const visibles = () => [...opts.querySelectorAll('.toolbar-options:not(.hidden) .icon-btn')];
+  const elige = (id) => bar.querySelector('[data-tool="' + id + '"]')
+    ?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+
+  revisa('la barra trae una columna de herramientas', herramientas.length >= 8,
+    herramientas.map((b) => b.dataset.tool).join(', '));
+  revisa('con un solo lapiz',
+    [...bar.querySelectorAll('[title]')].filter((b) => /lapiz/i.test(b.title)).length === 1);
+  revisa('y cada herramienta tiene su columna de opciones',
+    opts.querySelectorAll('.toolbar-options').length === herramientas.length,
+    opts.querySelectorAll('.toolbar-options').length + ' columnas');
+  revisa('solo se ve la de la elegida', opts.querySelectorAll('.toolbar-options:not(.hidden)').length === 1);
+
+  elige('draw');
+  revisa('elegir el lapiz ya activa el dibujo', settings.get('draw.enabled') === true
+    && settings.get('ui.tool') === 'draw');
+  revisa('y sus opciones son las del lapiz', visibles().some((b) => /borrador/i.test(b.title)),
+    visibles().length + ' botones');
+
+  elige('guides');
+  revisa('mirar las guias no suelta el lapiz', settings.get('draw.enabled') === true
+    && settings.get('ui.tool') === 'guides');
+  revisa('el lapiz sigue marcado como modo en marcha',
+    bar.querySelector('[data-tool="draw"]').classList.contains('is-mode')
+    && bar.querySelector('[data-tool="guides"]').classList.contains('is-active'));
+  revisa('y ahora se ven las opciones de guias',
+    visibles().some((b) => /ritmo/i.test(b.title)), visibles().length + ' botones');
+
+  elige('pose');
+  revisa('posar a mano apaga el lapiz', settings.get('ui.manualPosing') === true
+    && settings.get('draw.enabled') === false);
+
+  key('d');
+  revisa('la tecla D vuelve al lapiz y trae sus opciones',
+    settings.get('draw.enabled') === true && settings.get('ui.manualPosing') === false
+    && settings.get('ui.tool') === 'draw');
+  key('Escape');
+  revisa('Escape lo apaga y vuelve a la herramienta de seleccion',
+    settings.get('draw.enabled') === false && settings.get('ui.tool') === 'select');
+}
+
 toast('mensaje de prueba', 'ok');
 console.log('avisos:', document.querySelectorAll('#toasts > *').length);
 // 8 · El panel del elemento seleccionado se construye para TODOS los tipos.
@@ -363,3 +415,7 @@ console.log('firma:', firma ? firma.textContent.replace(/s+/g, ' ').trim() : 'NO
   '· icono:', firma?.querySelectorAll('svg.svg-icon').length ?? 0);
 
 console.log(errors.length ? 'ERRORES: ' + errors.join(' | ') : 'sin errores en el DOM');
+if (fallos7.length) {
+  console.log('FALLOS: ' + fallos7.join(' | '));
+  process.exit(1);
+}

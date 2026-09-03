@@ -352,6 +352,12 @@ export const DEFAULTS = {
 
   ui: {
     section: 'figure',
+    /**
+     * Herramienta elegida en la barra del visor: decide que opciones se ven en la
+     * segunda columna y, en las tres primeras, tambien el modo del puntero
+     * (seleccionar, posar o dibujar).
+     */
+    tool: 'select',             // select | pose | draw | figure | camera | capture | guides | settings
     sidebar: true,
     theme: 'oscuro',            // oscuro | claro
     manualPosing: false,

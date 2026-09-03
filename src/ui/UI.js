@@ -55,6 +55,7 @@ export class UI {
       host: document.getElementById('sidebar-host'),
       viewport: document.getElementById('viewport'),
       toolbar: document.getElementById('viewport-toolbar'),
+      options: document.getElementById('viewport-options'),
       readout: document.getElementById('viewport-readout'),
       hud: document.getElementById('mocap-hud'),
       hudDrag: document.getElementById('mocap-hud-drag'),
@@ -167,155 +168,241 @@ export class UI {
 
   /* ── Barra de herramientas del visor ────────────────────────────────── */
 
+  /**
+   * Barra del visor: una columna con las herramientas y, al lado, otra con las
+   * opciones de la que este elegida. Las tres primeras herramientas son modos del
+   * puntero (seleccionar, posar, dibujar) y elegirlas cambia el modo; las demas
+   * solo cambian la columna de opciones, asi que se puede encender una guia sin
+   * soltar el lapiz.
+   */
   #buildToolbar() {
     const s = this.settings;
-    const { actions } = this.app;
-    const sep = () => el('div', { class: 'toolbar-sep' });
+    this.tools = this.#toolModel();
 
-    // Menus desplegables de acciones. Cambiar de panel ya no vive aqui: eso lo
-    // hace la fila de iconos de lo alto de la barra lateral (`#buildTabs`).
-    const createDropdown = (label, iconName, items) => {
-      const dropdown = el('div', { class: 'toolbar-dropdown' });
-      const btn = el('button', { class: 'toolbar-dropdown-btn', title: label }, [
-        icon(iconName, 16),
-        icon('chevron-down', 12, 'chev'),
-      ]);
-      const menu = el('div', { class: 'toolbar-dropdown-menu' });
-
-      items.forEach((item) => {
-        const itemBtn = el('button', { class: 'toolbar-dropdown-item' }, [
-          icon(item.icon, 16),
-          el('span', { text: item.label }),
-        ]);
-        itemBtn.addEventListener('click', () => {
-          // Una entrada con `path` es un interruptor: se alterna y se queda
-          // marcada, para saber que hay encendido sin abrir el panel.
-          if (item.path) s.set(item.path, s.get(item.path) !== true);
-          item.onClick?.();
-          dropdown.classList.remove('is-open');
-        });
-        if (item.path) {
-          const paint = (v) => itemBtn.classList.toggle('is-active', v === true);
-          s.on(item.path, paint);
-          paint(s.get(item.path));
-        }
-        menu.appendChild(itemBtn);
-      });
-
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const wasOpen = dropdown.classList.contains('is-open');
-        // Cerrar todos los dropdowns
-        document.querySelectorAll('.toolbar-dropdown').forEach((d) => d.classList.remove('is-open'));
-        if (!wasOpen) dropdown.classList.add('is-open');
-      });
-
-      dropdown.append(btn, menu);
-      return dropdown;
-    };
-
-    // Cerrar dropdowns al hacer clic fuera
-    document.addEventListener('click', () => {
-      document.querySelectorAll('.toolbar-dropdown').forEach((d) => d.classList.remove('is-open'));
+    this.toolButtons = this.tools.map((tool) => {
+      const btn = el('button', {
+        class: 'icon-btn', type: 'button', title: tool.title,
+        dataset: { tool: tool.id },
+      }, icon(tool.icon, 16));
+      btn.addEventListener('click', () => this.selectTool(tool.id));
+      return btn;
     });
 
-    const variant = (value, iconName, title) => {
-      const btn = el('button', { class: 'icon-btn', type: 'button', title }, icon(iconName, 16));
-      btn.addEventListener('click', () => s.set('figure.variant', value));
-      const paint = (v) => btn.classList.toggle('is-active', v === value);
-      s.on('figure.variant', paint);
-      paint(s.get('figure.variant'));
-      return btn;
-    };
-
-    const projection = el('button', { class: 'icon-btn', type: 'button' });
-    const paintProj = (v) => {
-      const ortho = v === 'ortografica';
-      projection.title = ortho ? 'Vista ortografica (O)' : 'Vista en perspectiva (O)';
-      projection.classList.toggle('is-active', ortho);
-      projection.replaceChildren(icon(ortho ? 'ratio' : 'camera', 16));
-    };
-    projection.addEventListener('click', () =>
-      s.set('camera.projection', s.get('camera.projection') === 'ortografica' ? 'perspectiva' : 'ortografica'));
-    s.on('camera.projection', paintProj);
-    paintProj(s.get('camera.projection'));
-
-    // Dropdown de figuras (Anatomía/Maniquí/Esqueleto)
-    const figuraDropdown = createDropdown('Figura', 'person-standing', [
-      { label: 'Anatomia', icon: 'person-standing', onClick: () => s.set('figure.variant', 'anatomia') },
-      { label: 'Maniqui', icon: 'box', onClick: () => s.set('figure.variant', 'maniqui') },
-      { label: 'Esqueleto', icon: 'bone', onClick: () => s.set('figure.variant', 'esqueleto') },
-    ]);
-
-    // Dropdown de cámara
-    const camaraDropdown = createDropdown('Camara', 'camera', [
-      { label: 'Perspectiva/Ortografica', icon: 'ratio', onClick: () => s.set('camera.projection', s.get('camera.projection') === 'ortografica' ? 'perspectiva' : 'ortografica') },
-      { label: 'Encuadrar figura', icon: 'maximize', onClick: () => actions.frameFigure() },
-      { label: 'Restablecer camara', icon: 'rotate-ccw', onClick: () => actions.resetCamera() },
-    ]);
-
-    // Dropdown de captura
-    const capturaDropdown = createDropdown('Captura', 'video', [
-      { label: 'Buscar imagen de referencia', icon: 'search', onClick: () => this.toggleSearch() },
-      { label: 'Monitor de captura', icon: 'webcam', path: 'mocap.showHud' },
-      { label: 'Congelar pose', icon: 'snowflake', path: 'mocap.frozen' },
-    ]);
-
-    // Dropdown del lapiz. Ocupa el sitio del antiguo menu de Poses, que solo
-    // repetia el boton de pose manual que hay dos filas mas abajo.
-    const lapizDropdown = createDropdown('Lapiz', 'pencil', [
-      { label: 'Dibujar sobre el visor', icon: 'pencil', path: 'draw.enabled' },
-      { label: 'Lapiz', icon: 'pencil', onClick: () => s.set('draw.tool', 'lapiz') },
-      { label: 'Rotulador', icon: 'highlighter', onClick: () => s.set('draw.tool', 'rotulador') },
-      { label: 'Borrador', icon: 'eraser', onClick: () => s.set('draw.tool', 'borrador') },
-      { label: 'Mostrar el dibujo', icon: 'eye', path: 'draw.visible' },
-      { label: 'Vaciar el dibujo', icon: 'trash-2', onClick: () => actions.clearDrawing?.() },
-    ]);
-
-    // Dropdown de guías
-    const guiasDropdown = createDropdown('Guias', 'pencil-ruler', [
-      { label: 'Linea de accion', icon: 'spline', path: 'guides.action.line' },
-      { label: 'Ritmo de brazo a brazo', icon: 'spline', path: 'guides.action.arms' },
-      { label: 'Ritmo de hombro a pierna', icon: 'spline', path: 'guides.action.legs' },
-      { label: 'Fantasma exagerado', icon: 'ghost', path: 'guides.action.ghost' },
-      { label: 'Caja de lo seleccionado', icon: 'scan', path: 'scene.bounds.selected' },
-      { label: 'Caja de todo', icon: 'scan', path: 'scene.bounds.all' },
-      { label: 'Canon de cabezas', icon: 'ruler', path: 'guides.heads' },
-      { label: 'Regla de tercios', icon: 'columns-3', path: 'guides.thirds' },
-      { label: 'Rejilla del suelo', icon: 'grid-3x3', path: 'stage.grid' },
-    ]);
-
-    // Dropdown de ajustes
-    const ajustesDropdown = createDropdown('Ajustes', 'settings', [
-      { label: 'Captura PNG', icon: 'image', onClick: () => actions.screenshot(false) },
-      { label: 'Pantalla completa', icon: 'maximize', onClick: () => this.#toggleFullscreen() },
-    ]);
-
     this.dom.toolbar.replaceChildren(
-      figuraDropdown,
-      camaraDropdown,
-      capturaDropdown,
-      lapizDropdown,
-      guiasDropdown,
-      ajustesDropdown,
-      sep(),
-      iconToggle(this.settings, { path: 'ui.manualPosing', iconName: 'hand', title: 'Pose manual (G)' }),
-      iconToggle(this.settings, { path: 'draw.enabled', iconName: 'pencil', title: 'Lapiz: dibujar sobre el visor (D)' }),
-      sep(),
-      this.#toolButton('translate', 'move', 'Mover el elemento seleccionado (W)'),
-      this.#toolButton('rotate', 'rotate-3d', 'Girar el elemento seleccionado (E)'),
-      this.#toolButton('scale', 'scaling', 'Escalar el elemento seleccionado (R)'),
-      sep(),
-      this.#perspectiveButton(),
-      sep(),
-      iconButton({
-        id: 'imgsearch-toggle', iconName: 'search',
-        title: 'Buscar una imagen de referencia en la web (Espacio)',
-        onClick: () => this.toggleSearch(),
-      }),
-      this.#captureButton(),
-      iconToggle(this.settings, { path: 'ui.sidebar', iconName: 'panel-left-close', title: 'Panel lateral (H)' }),
+      ...this.toolButtons,
+      el('div', { class: 'toolbar-sep' }),
+      iconToggle(s, { path: 'ui.sidebar', iconName: 'panel-left-close', title: 'Panel lateral (H)' }),
     );
+
+    // Las columnas de opciones se construyen una sola vez y se van mostrando: si
+    // se rehicieran en cada cambio de herramienta, cada boton dejaria detras su
+    // suscripcion al almacen.
+    this.optionBars = new Map(this.tools.map((tool) => [
+      tool.id,
+      el('div', { class: 'toolbar-options', dataset: { tool: tool.id } },
+        (tool.options ?? []).map((item) => this.#optionButton(item))),
+    ]));
+    this.dom.options?.replaceChildren(...this.optionBars.values());
+
+    // Dibujar y posar a mano son modos que se estorban: encender uno apaga el otro.
+    s.on('draw.enabled', (v) => { if (v === true) s.set('ui.manualPosing', false); });
+    s.on('ui.manualPosing', (v) => { if (v === true) s.set('draw.enabled', false); });
+    // El modo puede cambiar desde el teclado o desde los paneles; la barra se pone
+    // al dia y trae a la vista las opciones de ese modo.
+    s.on('ui.tool', () => this.#paintTools());
+    s.on(['draw.enabled', 'ui.manualPosing'], () => {
+      const modo = this.#activeMode();
+      const elegida = s.get('ui.tool');
+      if (modo !== 'select' && elegida !== modo) s.set('ui.tool', modo);
+      else if (modo === 'select' && (elegida === 'pose' || elegida === 'draw')) s.set('ui.tool', 'select');
+      else this.#paintTools();
+    });
+    this.#paintTools();
+  }
+
+  /** Modo del puntero en marcha, deducido de los ajustes que lo mandan. */
+  #activeMode() {
+    if (this.settings.get('draw.enabled') === true) return 'draw';
+    if (this.settings.get('ui.manualPosing') === true) return 'pose';
+    return 'select';
+  }
+
+  /**
+   * Elige una herramienta. Las tres modales encienden su modo y apagan los otros;
+   * el resto solo cambia la columna de opciones.
+   */
+  selectTool(id) {
+    const tool = this.tools?.find((t) => t.id === id);
+    if (!tool) return;
+    if (tool.mode) {
+      this.settings.batch({
+        'draw.enabled': id === 'draw',
+        'ui.manualPosing': id === 'pose',
+        'ui.tool': id,
+      });
+    } else {
+      this.settings.set('ui.tool', id);
+    }
+    this.#paintTools();
+  }
+
+  /** Marca la herramienta elegida y el modo en marcha, y muestra sus opciones. */
+  #paintTools() {
+    const id = this.tools?.some((t) => t.id === this.settings.get('ui.tool'))
+      ? this.settings.get('ui.tool') : 'select';
+    const modo = this.#activeMode();
+    for (const btn of this.toolButtons ?? []) {
+      btn.classList.toggle('is-active', btn.dataset.tool === id);
+      btn.classList.toggle('is-mode', btn.dataset.tool === modo);
+    }
+    for (const [tool, bar] of this.optionBars ?? []) bar.classList.toggle('hidden', tool !== id);
+  }
+
+  /**
+   * Boton de la columna de opciones. Con `value` es una eleccion entre varias
+   * (queda marcado el que coincide), sin `value` un interruptor, y con `onClick`
+   * una accion suelta —en ese caso `path` solo sirve para pintarlo.
+   */
+  #optionButton(item) {
+    if (item.sep) return el('div', { class: 'toolbar-sep' });
+    if (item.make) return item.make();
+    const s = this.settings;
+    const btn = el('button', {
+      class: 'icon-btn', type: 'button', title: item.title, id: item.id,
+    }, icon(item.icon, 16));
+    btn.addEventListener('click', () => {
+      if (item.onClick) { item.onClick(); return; }
+      if (item.value !== undefined) s.set(item.path, item.value);
+      else if (item.path) s.set(item.path, s.get(item.path) !== true);
+    });
+    if (item.path) {
+      const test = item.test ?? ((v) => (item.value !== undefined ? v === item.value : v === true));
+      const paint = (v) => btn.classList.toggle('is-active', !!test(v));
+      s.on(item.path, paint);
+      paint(s.get(item.path));
+    }
+    return btn;
+  }
+
+  /**
+   * Las herramientas de la barra y las opciones de cada una. `mode: true` marca
+   * las que cambian el modo del puntero. La ultima opcion de cada herramienta
+   * abre su panel, que es donde esta todo lo que no cabe en una columna de iconos.
+   */
+  #toolModel() {
+    const s = this.settings;
+    const { actions } = this.app;
+    const panel = (id, title) => ({ icon: 'sliders-horizontal', title, onClick: () => this.revealSection(id) });
+
+    return [
+      {
+        id: 'select', icon: 'move-3d', mode: true, title: 'Seleccionar y transformar',
+        options: [
+          { icon: 'move', title: 'Mover (W)', path: 'scene.tool', value: 'translate' },
+          { icon: 'rotate-3d', title: 'Girar (E)', path: 'scene.tool', value: 'rotate' },
+          { icon: 'scaling', title: 'Escalar (R)', path: 'scene.tool', value: 'scale' },
+          { sep: true },
+          { icon: 'globe', title: 'Ejes del mundo (Alt+X)', path: 'scene.space', value: 'world' },
+          { icon: 'box', title: 'Ejes del propio objeto (Alt+X)', path: 'scene.space', value: 'local' },
+          { icon: 'magnet', title: 'Imantado: 10 cm y 15 grados', path: 'scene.snap',
+            test: (v) => (Number(v) || 0) > 0,
+            onClick: () => s.set('scene.snap', (Number(s.get('scene.snap')) || 0) > 0 ? 0 : 0.1) },
+          { sep: true },
+          { icon: 'scan', title: 'Caja del elemento seleccionado', path: 'scene.bounds.selected' },
+          { icon: 'square-dashed', title: 'Caja de todos los elementos', path: 'scene.bounds.all' },
+          panel('scene', 'Panel de escena'),
+        ],
+      },
+      {
+        id: 'pose', icon: 'hand', mode: true, title: 'Posar los huesos a mano (G)',
+        options: [
+          { icon: 'fingerprint', title: 'Manejadores de falange', path: 'hands.fingers' },
+          { icon: 'snowflake', title: 'Congelar la pose (C)', path: 'mocap.frozen' },
+          { sep: true },
+          { icon: 'undo-2', title: 'Deshacer el ultimo giro (Ctrl+Z)', onClick: () => actions.undo?.() },
+          { icon: 'refresh-cw', title: 'Volver a la pose de reposo (Mayus+R)', onClick: () => actions.resetPose?.() },
+          { icon: 'save', title: 'Guardar esta pose en la biblioteca', onClick: () => actions.capturePose?.('') },
+          panel('poses', 'Panel de poses'),
+        ],
+      },
+      {
+        id: 'draw', icon: 'pencil', mode: true, title: 'Lapiz: dibujar sobre el visor (D)',
+        options: [
+          { icon: 'pencil', title: 'Lapiz: afilado, con presion o velocidad', path: 'draw.tool', value: 'lapiz' },
+          { icon: 'highlighter', title: 'Rotulador: grosor parejo', path: 'draw.tool', value: 'rotulador' },
+          { icon: 'eraser', title: 'Borrador: quita el trazo que toques', path: 'draw.tool', value: 'borrador' },
+          { sep: true },
+          { icon: 'undo-2', title: 'Deshacer el trazo (Ctrl+Z)', onClick: () => actions.undoDrawing?.() },
+          { icon: 'redo-2', title: 'Rehacer (Ctrl+Mayus+Z)', onClick: () => actions.redoDrawing?.() },
+          { icon: 'eye', title: 'Mostrar el dibujo', path: 'draw.visible' },
+          { icon: 'trash-2', title: 'Vaciar el dibujo', onClick: () => actions.clearDrawing?.() },
+          panel('draw', 'Panel del lapiz'),
+        ],
+      },
+      {
+        id: 'figure', icon: 'person-standing', title: 'Figura: malla visible y aspecto',
+        options: [
+          { icon: 'person-standing', title: 'Anatomia (1)', path: 'figure.variant', value: 'anatomia' },
+          { icon: 'box', title: 'Maniqui (2)', path: 'figure.variant', value: 'maniqui' },
+          { icon: 'bone', title: 'Esqueleto (3)', path: 'figure.variant', value: 'esqueleto' },
+          { sep: true },
+          { icon: 'blend', title: 'Silueta de piel superpuesta', path: 'figure.showGhost' },
+          { icon: 'list-tree', title: 'Mostrar los huesos', path: 'figure.showSkeletonHelper' },
+          panel('figure', 'Panel de figura'),
+        ],
+      },
+      {
+        id: 'camera', icon: 'camera', title: 'Camara y encuadre',
+        options: [
+          { icon: 'camera', title: 'Perspectiva (O)', path: 'camera.projection', value: 'perspectiva' },
+          { icon: 'ratio', title: 'Ortografica (O)', path: 'camera.projection', value: 'ortografica' },
+          { sep: true },
+          { icon: 'maximize', title: 'Encuadrar la figura (F)', onClick: () => actions.frameFigure?.() },
+          { icon: 'rotate-ccw', title: 'Restablecer la camara', onClick: () => actions.resetCamera?.() },
+          { icon: 'focus', title: 'Profundidad de campo', path: 'camera.dof' },
+          panel('camera', 'Panel de camara'),
+        ],
+      },
+      {
+        id: 'capture', icon: 'video', title: 'Captura de movimiento',
+        options: [
+          { make: () => this.#captureButton() },
+          { icon: 'search', id: 'imgsearch-toggle', title: 'Buscar una imagen de referencia (Espacio)',
+            onClick: () => this.toggleSearch() },
+          { icon: 'scan-face', title: 'Analizar el fotograma cargado', onClick: () => actions.detectStill?.() },
+          { sep: true },
+          { icon: 'webcam', title: 'Monitor de captura', path: 'mocap.showHud' },
+          { icon: 'flip-horizontal', title: 'Vista en espejo', path: 'mocap.mirror' },
+          { icon: 'snowflake', title: 'Congelar la pose (C)', path: 'mocap.frozen' },
+          panel('mocap', 'Panel de captura'),
+        ],
+      },
+      {
+        id: 'guides', icon: 'pencil-ruler', title: 'Guias de dibujo',
+        options: [
+          { icon: 'spline', title: 'Linea de accion', path: 'guides.action.line' },
+          { icon: 'waves', title: 'Ritmo de brazo a brazo', path: 'guides.action.arms' },
+          { icon: 'footprints', title: 'Ritmo de hombro a pierna', path: 'guides.action.legs' },
+          { icon: 'ghost', title: 'Fantasma con la exageracion', path: 'guides.action.ghost' },
+          { sep: true },
+          { icon: 'ruler', title: 'Canon de cabezas', path: 'guides.heads' },
+          { icon: 'columns-3', title: 'Regla de tercios', path: 'guides.thirds' },
+          { icon: 'grid-3x3', title: 'Rejilla del suelo', path: 'stage.grid' },
+          { make: () => this.#perspectiveButton() },
+          panel('guides', 'Panel de guias'),
+        ],
+      },
+      {
+        id: 'settings', icon: 'settings', title: 'Exportar y ajustes',
+        options: [
+          { icon: 'image', title: 'Captura PNG (Ctrl+S)', onClick: () => actions.screenshot?.(false) },
+          { icon: 'crop', title: 'Captura PNG sin fondo', onClick: () => actions.screenshot?.(true) },
+          { sep: true },
+          { icon: 'maximize', title: 'Pantalla completa', onClick: () => this.#toggleFullscreen() },
+          panel('settings', 'Panel de ajustes'),
+        ],
+      },
+    ];
   }
 
   async #toggleFullscreen() {
@@ -355,15 +442,6 @@ export class UI {
     const next = ids[(i + paso + ids.length) % ids.length];
     this.settings.set('guides.perspective.mode', next);
     toast('Perspectiva: ' + PERSPECTIVE_BY_ID[next].label.toLowerCase());
-  }
-
-  /** Boton de la barra que fija una herramienta del gizmo (`scene.tool`). */
-  #toolButton(value, iconName, title) {
-    const btn = iconButton({ iconName, title, onClick: () => this.settings.set('scene.tool', value) });
-    const paint = (v) => btn.classList.toggle('is-active', v === value);
-    this.settings.on('scene.tool', paint);
-    paint(this.settings.get('scene.tool'));
-    return btn;
   }
 
   /** Botón principal de captura; refleja si la fuente esta corriendo. */

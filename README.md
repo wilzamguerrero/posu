@@ -56,6 +56,7 @@ npm run deploy       # build + wrangler pages deploy dist
 | Acción | Dónde |
 | --- | --- |
 | Cambiar de panel (Figura, Escena, Cámara, Luz, Captura, Poses, Guías, Dibujo, Ajustes) | fila de iconos en lo alto del panel lateral |
+| Elegir herramienta (seleccionar, posar, lápiz…) y sus opciones | las dos columnas que flotan en el borde del visor |
 | Cambiar malla (anatomía / maniquí / esqueleto) | barra del visor o teclas `1` `2` `3` |
 | Opacidad y sombreado (arcilla, toon, rayos X, alambre) | panel **Figura** |
 | Perspectiva ↔ ortográfica | tecla `O` |
@@ -125,6 +126,13 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   al suelo mantiene los pies apoyados aunque la figura se agache, y la **altura en
   metros se mide siempre con la figura en reposo**, así que posarla ya no la
   reescala. Cada variante tiene su propio volumen: se mide la malla que se ve.
+- **Una herramienta, sus opciones al lado.** La barra del visor son dos columnas:
+  la de herramientas y, pegada a ella, la de las opciones de la elegida, que cambia
+  con ella (`UI.#toolModel`). Las tres primeras —seleccionar, posar, lápiz— son
+  **modos del puntero**: elegirlas enciende el modo y apaga los otros dos, y elegir
+  el lápiz ya deja dibujar. Las demás solo cambian las opciones, así que se puede
+  encender una guía sin soltar el lápiz: la herramienta elegida se marca con fondo
+  y el modo en marcha con el acento a la izquierda.
 - **El lápiz no depende de la presión.** Si la pluma la envía, gobierna el grosor
   (y, si se quiere, la opacidad); si no —ratón, trackpad o pluma sin sensor—, el
   grosor sale de la velocidad del trazo y de las rampas de entrada y salida, que

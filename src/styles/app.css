@@ -143,15 +143,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #sketch-live { z-index: 3; }
 .sketch-canvas.is-hidden { display: none; }
 
-.viewport-toolbar {
+/* Las dos columnas de la barra del visor: las herramientas y las opciones de la
+   que este elegida. Centradas en la altura y pegadas al borde izquierdo; con el
+   panel lateral a la vista se apartan su ancho justo. */
+.viewport-tools {
   position: absolute;
-  /* Columna centrada en la altura y pegada al borde izquierdo del visor: con el
-     panel lateral a la vista se aparta su ancho justo, y al ocultarlo se queda
-     al borde mismo de la pagina. */
   top: 50%;
   left: 12px;
-  right: auto;
-  width: auto;
+  display: flex;
+  /* Las dos columnas se centran entre si: la mas corta queda a media altura de la
+     otra, no colgando de arriba. */
+  align-items: center;
+  gap: 6px;
+  z-index: 4;
+  pointer-events: none;      /* solo las barras reciben clics, no el hueco */
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateY(-50%);
+}
+.app:not(.sidebar-hidden) .viewport-tools {
+  transform: translate(var(--sidebar-w), -50%);
+}
+
+.viewport-toolbar {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -162,117 +175,39 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  z-index: 4;
   flex-wrap: nowrap;
-  /* Visible a proposito: los menus se abren hacia el visor y no se pueden
-     recortar. */
   overflow: visible;
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  transform: translateY(-50%);
+  pointer-events: auto;
 }
-.app:not(.sidebar-hidden) .viewport-toolbar {
-  transform: translate(var(--sidebar-w), -50%);
-}
+/* La segunda columna: dentro lleva una lista por herramienta y solo se muestra
+   la de la elegida. */
+.viewport-toolbar.is-options:empty { display: none; }
 .viewport-toolbar > * { flex: 0 0 auto; }
+.toolbar-options {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.toolbar-options.hidden { display: none; }
 .toolbar-sep { width: 20px; height: 1px; background: var(--border-strong); margin: 2px 0; }
 
-/* Menú desplegable en la barra */
-.toolbar-dropdown {
-  position: relative;
-}
-.toolbar-dropdown-btn {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  background: none;
-  border: 0;
-  border-radius: var(--radius);
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: 11px;
-  white-space: nowrap;
-  justify-content: center;
-}
-.toolbar-dropdown-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg-strong);
-}
-.toolbar-dropdown-btn.is-active {
-  background: var(--bg-active);
-  color: var(--fg-strong);
-}
-/* El menu abierto se marca solo: ya no hay ninguna seccion activa que pintar
-   aqui, porque el cambio de panel vive en la fila del panel lateral. */
-.toolbar-dropdown.is-open .toolbar-dropdown-btn {
-  background: var(--bg-active);
-  color: var(--fg-strong);
-}
-.toolbar-dropdown-btn .svg-icon {
-  width: 16px;
-  height: 16px;
-}
-.toolbar-dropdown-btn .chev {
-  width: 8px;
-  height: 8px;
-  color: var(--fg-dim);
-  transition: transform 0.15s ease;
+/* Herramienta elegida (fondo) y modo del puntero en marcha (acento). Casi
+   siempre coinciden; se separan al mirar las opciones de otra herramienta sin
+   soltar el lapiz o los tiradores de pose. */
+.icon-btn.is-mode { color: var(--accent); }
+.icon-btn.is-mode::after {
+  content: '';
   position: absolute;
-  bottom: 2px;
-  right: 2px;
+  left: 1px;
+  top: 50%;
+  width: 2px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 1px;
+  background: var(--accent);
 }
-.toolbar-dropdown.is-open .toolbar-dropdown-btn .chev {
-  transform: rotate(180deg);
-}
-
-.toolbar-dropdown-menu {
-  position: absolute;
-  /* La barra es una columna pegada al borde: los menus se abren hacia el visor,
-     a la derecha del boton y a su misma altura. */
-  top: 0;
-  left: calc(100% + 6px);
-  min-width: 160px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-  padding: 4px;
-  z-index: 10;
-  display: none;
-}
-.toolbar-dropdown.is-open .toolbar-dropdown-menu {
-  display: block;
-}
-
-.toolbar-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  background: none;
-  border: 0;
-  border-radius: var(--radius);
-  color: var(--fg);
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-}
-.toolbar-dropdown-item:hover {
-  background: var(--bg-hover);
-  color: var(--fg-strong);
-}
-.toolbar-dropdown-item.is-active {
-  background: var(--bg-active);
-  color: var(--fg-strong);
-}
-.toolbar-dropdown-item .svg-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--fg-dim);
-}
+.icon-btn { position: relative; }
 
 .viewport-badge {
   display: none;
@@ -897,15 +832,13 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
   /* Mas juntos y algo mas pequenos para que la columna entera siga cabiendo en
      una pantalla baja; sigue centrada en la altura. */
   .viewport-toolbar { gap: 2px; padding: 3px; }
-  .viewport-toolbar .icon-btn,
-  .viewport-toolbar .toolbar-dropdown-btn { width: 24px; height: 24px; }
+  .viewport-toolbar .icon-btn { width: 24px; height: 24px; }
   .viewport-toolbar .toolbar-sep { margin: 0; }
 }
 /* Ventana baja: la columna se aprieta para no salirse por arriba y por abajo. */
 @media (max-height: 620px) {
   .viewport-toolbar { gap: 2px; padding: 3px; }
-  .viewport-toolbar .icon-btn,
-  .viewport-toolbar .toolbar-dropdown-btn { width: 24px; height: 24px; }
+  .viewport-toolbar .icon-btn { width: 24px; height: 24px; }
   .viewport-toolbar .toolbar-sep { margin: 0; }
 }
 @media (prefers-reduced-motion: reduce) {

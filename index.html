@@ -40,7 +40,12 @@
           <canvas id="sketch-canvas" class="overlay-canvas sketch-canvas"></canvas>
           <canvas id="sketch-live" class="overlay-canvas sketch-canvas"></canvas>
 
-          <div class="viewport-toolbar" id="viewport-toolbar"></div>
+          <!-- Dos columnas flotantes: las herramientas y, al lado, las opciones
+               de la que este elegida. Las rellena ui/UI.js. -->
+          <div class="viewport-tools" id="viewport-tools">
+            <div class="viewport-toolbar" id="viewport-toolbar"></div>
+            <div class="viewport-toolbar is-options" id="viewport-options"></div>
+          </div>
           <div class="viewport-badge" id="viewport-badge"></div>
           <div class="viewport-readout" id="viewport-readout"></div>
 
