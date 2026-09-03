@@ -18,9 +18,13 @@
       <div class="workbench">
         <!-- ── Panel lateral ──────────────────────────────────────────── -->
         <aside class="sidebar" id="sidebar">
+          <!-- Cambio de seccion: un icono por panel, sin desplegar nada. La fila
+               la rellena ui/UI.js desde `buildPanels`, asi que anadir o quitar un
+               panel no obliga a tocar este marcado. -->
+          <nav class="sidebar-tabs" id="sidebar-tabs" aria-label="Secciones"></nav>
           <div class="sidebar-header">
             <span id="sidebar-title">Figura</span>
-            <button class="icon-btn" id="sidebar-collapse" title="Ocultar panel (B)" data-icon="panel-left-close"></button>
+            <button class="icon-btn" id="sidebar-collapse" title="Ocultar panel (H)" data-icon="panel-left-close"></button>
           </div>
           <div class="sidebar-scroll" id="sidebar-host"></div>
         </aside>

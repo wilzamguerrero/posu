@@ -112,11 +112,28 @@ console.log('visibles:', visibles.length, '· seccion:', document.getElementById
 console.log('data-icon sin hidratar:', document.querySelectorAll('[data-icon]').length);
 console.log('svg de iconos:', document.querySelectorAll('svg.svg-icon').length);
 
-// 3 · Cada boton de la barra de actividad cambia de seccion.
-for (const btn of document.querySelectorAll('.activity-item')) {
+// 3 · La fila de iconos de lo alto del panel lateral cambia de seccion: un
+// icono por panel, sin menus que desplegar.
+const tabs = [...document.querySelectorAll('#sidebar-tabs .sidebar-tab')];
+console.log('iconos de seccion:', tabs.length, '·', tabs.map((b) => b.dataset.section).join(', '));
+const bienPintadas = [];
+for (const btn of tabs) {
   btn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const marcada = document.querySelector('.sidebar-tab.is-active')?.dataset.section;
+  const alaVista = document.querySelector('#sidebar-host .panel:not(.hidden)')?.dataset.panel;
+  bienPintadas.push(settings.get('ui.section') === btn.dataset.section
+    && marcada === btn.dataset.section && alaVista === btn.dataset.section);
 }
+console.log('cada icono abre su panel y queda marcado:', bienPintadas.every(Boolean));
+// Volver a pulsar el icono activo no puede replegar el panel: la fila vive
+// dentro de el y el usuario se quedaria sin manera de volver.
+tabs.at(-1)?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 console.log('seccion final:', settings.get('ui.section'), '· panel lateral:', settings.get('ui.sidebar'));
+// El cambio de panel ya no esta en los desplegables del visor: alli solo quedan
+// acciones.
+const items = [...document.querySelectorAll('#viewport-toolbar .toolbar-dropdown-item')];
+console.log('desplegables del visor:', document.querySelectorAll('#viewport-toolbar .toolbar-dropdown').length,
+  '· sin entradas de panel:', !items.some((b) => /panel/i.test(b.textContent)));
 
 // 4 · Los controles enlazados escriben en el almacen.
 const range = document.querySelector('#sidebar-host input[type="range"]');

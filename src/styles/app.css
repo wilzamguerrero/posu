@@ -55,47 +55,42 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .workbench { display: flex; flex: 1; min-height: 0; background: var(--bg-editor); }
 
-/* ── Barra de actividad (oculta, solo paneles) ───────────────────────── */
-.activitybar {
-  display: none;
+/* ── Fila de secciones del panel lateral ─────────────────────────────── */
+/* Un icono por panel en lo alto de la barra lateral: cambiar de seccion es un
+   clic, sin desplegar ningun menu. Los botones se reparten el ancho a partes
+   iguales, asi que la fila sigue cabiendo si algun dia hay una seccion mas. */
+.sidebar-tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
 }
-.activity-item {
-  display: none;
-}
-.activity-item:hover { color: var(--fg-strong); }
-.activity-item.is-active { color: var(--fg-strong); }
-.activity-item.is-active::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 2px;
-  background: var(--fg-strong);
-}
-.activity-item .svg-icon { width: 22px; height: 22px; }
-.activity-spacer { flex: 1; }
-.activity-item {
+.sidebar-tab {
   position: relative;
-  width: var(--activitybar-w);
-  height: 48px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 34px;
   display: grid;
   place-items: center;
   background: none;
   border: 0;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color 0.12s ease, background 0.12s ease;
 }
-.activity-item:hover { color: var(--fg-strong); }
-.activity-item.is-active { color: var(--fg-strong); }
-.activity-item.is-active::before {
+.sidebar-tab:hover { color: var(--fg-strong); background: var(--bg-hover); }
+.sidebar-tab:focus-visible { outline: 1px solid var(--focus); outline-offset: -2px; }
+.sidebar-tab.is-active { color: var(--fg-strong); background: var(--bg-active); }
+/* Franja inferior: apunta al panel que se esta viendo justo debajo. */
+.sidebar-tab.is-active::after {
   content: "";
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 2px;
-  background: var(--fg-strong);
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--accent);
 }
-.activity-item .svg-icon { width: 22px; height: 22px; }
-.activity-spacer { flex: 1; }
+.sidebar-tab .svg-icon { width: 17px; height: 17px; }
 
 /* ── Panel lateral ───────────────────────────────────────────────────── */
 .sidebar {
@@ -215,6 +210,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: var(--fg-strong);
 }
 .toolbar-dropdown-btn.is-active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+}
+/* El menu abierto se marca solo: ya no hay ninguna seccion activa que pintar
+   aqui, porque el cambio de panel vive en la fila del panel lateral. */
+.toolbar-dropdown.is-open .toolbar-dropdown-btn {
   background: var(--bg-active);
   color: var(--fg-strong);
 }
@@ -879,9 +880,11 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 
 /* ── Adaptacion a pantallas pequenas ─────────────────────────────────── */
 @media (max-width: 860px) {
-  :root { --sidebar-w: 100%; --activitybar-w: 44px; }
-  .sidebar { position: absolute; top: var(--titlebar-h); bottom: 0; left: var(--activitybar-w);
-    width: min(320px, calc(100% - var(--activitybar-w))); z-index: 30; box-shadow: var(--shadow); }
+  :root { --sidebar-w: 100%; }
+  /* Ya no hay barra de actividad ni barra de titulo de las que apartarse: el
+     panel se pega a la esquina y su fila de secciones queda en lo mas alto. */
+  .sidebar { position: absolute; top: 0; bottom: 0; left: 0;
+    width: min(320px, 100%); z-index: 30; box-shadow: var(--shadow); }
   /* Abajo y con los botones mas juntos, para que la fila entera siga cabiendo;
      por encima de la lectura flotante, que ocupa el borde inferior. */
   .viewport-toolbar { top: auto; bottom: 26px; gap: 2px; padding: 3px; }

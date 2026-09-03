@@ -55,6 +55,7 @@ npm run deploy       # build + wrangler pages deploy dist
 
 | Acción | Dónde |
 | --- | --- |
+| Cambiar de panel (Figura, Escena, Cámara, Luz, Captura, Poses, Guías, Ajustes) | fila de iconos en lo alto del panel lateral |
 | Cambiar malla (anatomía / maniquí / esqueleto) | barra del visor o teclas `1` `2` `3` |
 | Opacidad y sombreado (arcilla, toon, rayos X, alambre) | panel **Figura** |
 | Perspectiva ↔ ortográfica | tecla `O` |

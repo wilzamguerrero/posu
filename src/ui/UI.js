@@ -2,10 +2,10 @@
  * ATOM · Capa de interfaz
  * ---------------------------------------------------------------------------
  * Toma el marcado estatico de index.html y lo convierte en una interfaz viva:
- * barra de actividad, panel lateral con las secciones, barra de herramientas
- * flotante del visor, monitor de captura arrastrable, arrastrar y soltar y
- * atajos de teclado. Todo el estado vive en el almacen de ajustes; aqui solo
- * se pintan y se escuchan cambios.
+ * panel lateral con la fila de secciones, barra de herramientas flotante del
+ * visor, monitor de captura arrastrable, arrastrar y soltar y atajos de teclado.
+ * Todo el estado vive en el almacen de ajustes; aqui solo se pintan y se
+ * escuchan cambios.
  */
 
 import { el, useStore } from './widgets.js';
@@ -49,6 +49,7 @@ export class UI {
     this.dom = {
       app: document.getElementById('app'),
       sidebar: document.getElementById('sidebar'),
+      sidebarTabs: document.getElementById('sidebar-tabs'),
       sidebarTitle: document.getElementById('sidebar-title'),
       sidebarCollapse: document.getElementById('sidebar-collapse'),
       host: document.getElementById('sidebar-host'),
@@ -76,10 +77,11 @@ export class UI {
     hydrateIcons(document);
   }
 
-  /* ── Barra de actividad (eliminada) ─────────────────────────────────── */
+  /* ── Fila de secciones del panel lateral ────────────────────────────── */
 
   #buildSidebar() {
     this.dom.host.replaceChildren(...this.panels.map((p) => p.node));
+    this.#buildTabs();
     this.dom.sidebarCollapse.addEventListener('click', () => this.settings.set('ui.sidebar', false));
     this.settings.on('ui.sidebar', (v) => this.dom.app.classList.toggle('sidebar-hidden', v === false));
     this.dom.app.classList.toggle('sidebar-hidden', this.settings.get('ui.sidebar') === false);
@@ -87,16 +89,38 @@ export class UI {
     this.#paintSection(this.settings.get('ui.section'));
   }
 
+  /**
+   * Un icono por panel en lo alto de la barra lateral: cambiar de seccion es un
+   * solo clic, sin desplegar ningun menu. La fila se genera de `buildPanels`,
+   * que ya trae el titulo y el icono de cada seccion.
+   */
+  #buildTabs() {
+    const host = this.dom.sidebarTabs;
+    if (!host) return;
+    this.tabs = this.panels.map((p) => {
+      const btn = el('button', {
+        class: 'sidebar-tab', type: 'button', title: p.title,
+        dataset: { section: p.id },
+      }, icon(p.icon, 17));
+      btn.setAttribute('aria-label', p.title);
+      // `revealSection` en vez de `showSection`: los iconos viven dentro del
+      // panel, asi que replegarlo al pulsar la seccion activa se los llevaria por
+      // delante y no habria manera de volver sin el atajo.
+      btn.addEventListener('click', () => this.revealSection(p.id));
+      return { id: p.id, btn };
+    });
+    host.replaceChildren(...this.tabs.map((t) => t.btn));
+  }
+
   #paintSection(id) {
     const active = this.panels.find((p) => p.id === id) ?? this.panels[0];
     for (const p of this.panels) p.node.classList.toggle('hidden', p !== active);
     this.dom.sidebarTitle.textContent = active.title;
-    // Actualizar botones dropdown en la barra si existen
-    if (this.toolbarDropdowns) {
-      this.toolbarDropdowns.forEach((dropdown) => {
-        const isActive = dropdown.panelId === active.id;
-        dropdown.btn.classList.toggle('is-active', isActive);
-      });
+    for (const t of this.tabs ?? []) {
+      const on = t.id === active.id;
+      t.btn.classList.toggle('is-active', on);
+      if (on) t.btn.setAttribute('aria-current', 'page');
+      else t.btn.removeAttribute('aria-current');
     }
   }
 
@@ -154,9 +178,9 @@ export class UI {
       el('span', { class: 'brand-name', text: 'ATOM' }),
     ]);
 
-    // Menús desplegables para paneles
-    this.toolbarDropdowns = [];
-    const createDropdown = (label, iconName, items, panelId) => {
+    // Menus desplegables de acciones. Cambiar de panel ya no vive aqui: eso lo
+    // hace la fila de iconos de lo alto de la barra lateral (`#buildTabs`).
+    const createDropdown = (label, iconName, items) => {
       const dropdown = el('div', { class: 'toolbar-dropdown' });
       const btn = el('button', { class: 'toolbar-dropdown-btn', title: label }, [
         icon(iconName, 16),
@@ -185,7 +209,6 @@ export class UI {
       });
 
       dropdown.append(btn, menu);
-      this.toolbarDropdowns.push({ dropdown, btn, panelId });
       return dropdown;
     };
 
@@ -220,63 +243,45 @@ export class UI {
       { label: 'Anatomia', icon: 'person-standing', onClick: () => s.set('figure.variant', 'anatomia') },
       { label: 'Maniqui', icon: 'box', onClick: () => s.set('figure.variant', 'maniqui') },
       { label: 'Esqueleto', icon: 'bone', onClick: () => s.set('figure.variant', 'esqueleto') },
-      { label: 'Panel Figura', icon: 'sliders-horizontal', onClick: () => this.showSection('figure') },
-    ], 'figure');
-
-    // Dropdown de escena
-    const escenaDropdown = createDropdown('Escena', 'shapes', [
-      { label: 'Panel Escena', icon: 'sliders-horizontal', onClick: () => this.showSection('scene') },
-    ], 'scene');
+    ]);
 
     // Dropdown de cámara
     const camaraDropdown = createDropdown('Camara', 'camera', [
       { label: 'Perspectiva/Ortografica', icon: 'ratio', onClick: () => s.set('camera.projection', s.get('camera.projection') === 'ortografica' ? 'perspectiva' : 'ortografica') },
       { label: 'Encuadrar figura', icon: 'maximize', onClick: () => actions.frameFigure() },
       { label: 'Restablecer camara', icon: 'rotate-ccw', onClick: () => actions.resetCamera() },
-      { label: 'Panel Camara', icon: 'sliders-horizontal', onClick: () => this.showSection('camera') },
-    ], 'camera');
-
-    // Dropdown de luz
-    const luzDropdown = createDropdown('Luz', 'lightbulb', [
-      { label: 'Panel Luz', icon: 'sliders-horizontal', onClick: () => this.showSection('light') },
-    ], 'light');
+    ]);
 
     // Dropdown de captura
     const capturaDropdown = createDropdown('Captura', 'video', [
       { label: 'Buscar imagen de referencia', icon: 'search', onClick: () => this.toggleSearch() },
       { label: 'Monitor de captura', icon: 'webcam', onClick: () => s.set('mocap.showHud', !s.get('mocap.showHud')) },
       { label: 'Congelar pose', icon: 'snowflake', onClick: () => s.set('mocap.frozen', !s.get('mocap.frozen')) },
-      { label: 'Panel Captura', icon: 'sliders-horizontal', onClick: () => this.showSection('mocap') },
-    ], 'mocap');
+    ]);
 
     // Dropdown de poses
     const posesDropdown = createDropdown('Poses', 'library', [
       { label: 'Pose manual', icon: 'hand', onClick: () => s.set('ui.manualPosing', !s.get('ui.manualPosing')) },
-      { label: 'Panel Poses', icon: 'sliders-horizontal', onClick: () => this.showSection('poses') },
-    ], 'poses');
+    ]);
 
     // Dropdown de guías
     const guiasDropdown = createDropdown('Guias', 'pencil-ruler', [
       { label: 'Canon de cabezas', icon: 'ruler', onClick: () => s.set('guides.heads', !s.get('guides.heads')) },
       { label: 'Regla de tercios', icon: 'columns-3', onClick: () => s.set('guides.thirds', !s.get('guides.thirds')) },
       { label: 'Rejilla del suelo', icon: 'grid-3x3', onClick: () => s.set('stage.grid', !s.get('stage.grid')) },
-      { label: 'Panel Guias', icon: 'sliders-horizontal', onClick: () => this.showSection('guides') },
-    ], 'guides');
+    ]);
 
     // Dropdown de ajustes
     const ajustesDropdown = createDropdown('Ajustes', 'settings', [
       { label: 'Captura PNG', icon: 'image', onClick: () => actions.screenshot(false) },
       { label: 'Pantalla completa', icon: 'maximize', onClick: () => this.#toggleFullscreen() },
-      { label: 'Panel Ajustes', icon: 'sliders-horizontal', onClick: () => this.showSection('settings') },
-    ], 'settings');
+    ]);
 
     this.dom.toolbar.replaceChildren(
       brand,
       sep(),
       figuraDropdown,
-      escenaDropdown,
       camaraDropdown,
-      luzDropdown,
       capturaDropdown,
       posesDropdown,
       guiasDropdown,
