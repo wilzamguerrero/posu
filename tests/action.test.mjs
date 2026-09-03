@@ -72,7 +72,9 @@ const SITIOS = {
   headTop: [0, 1.75, 0], head: [0, 1.62, 0], neck: [0, 1.5, 0],
   spine2: [0.012, 1.35, 0], spine1: [0.016, 1.2, 0], spine: [0.01, 1.05, 0], hips: [0, 0.95, 0],
   leftShoulder: [0.055, 1.45, 0], leftArm: [0.18, 1.42, 0], leftForeArm: [0.45, 1.42, 0], leftHand: [0.68, 1.42, 0],
+  leftMiddle2: [0.76, 1.42, 0],
   rightShoulder: [-0.055, 1.45, 0], rightArm: [-0.18, 1.38, 0], rightForeArm: [-0.45, 1.38, 0], rightHand: [-0.68, 1.38, 0],
+  rightMiddle2: [-0.76, 1.38, 0],
   leftUpLeg: [0.09, 0.92, 0], leftLeg: [0.11, 0.5, 0], leftFoot: [0.11, 0.1, 0], leftToe: [0.11, 0.03, 0.1],
   rightUpLeg: [-0.09, 0.9, 0], rightLeg: [-0.1, 0.48, 0], rightFoot: [-0.1, 0.04, 0], rightToe: [-0.1, 0.02, 0.1],
 };
@@ -163,9 +165,11 @@ check('el ritmo de brazo a brazo anade una curva', ctx.fills.length === 2,
   const pasaPor = (p, r) => ctx.puntos.some(([x, y]) => Math.hypot(x - p.x, y - p.y) < r);
   check('la curva encadena mano, hombro y el centro del pecho',
     pasaPor(mano, 22) && pasaPor(hombro, 22) && pasaPor(pecho, 30));
-  check('y sale por fuera de la mano',
-    Math.max(...ctx.puntos.map(([x]) => x)) > mano.x + 12,
-    'mano en x=' + mano.x.toFixed(0) + ' · trazo hasta ' + Math.max(...ctx.puntos.map(([x]) => x)).toFixed(0));
+  check('sigue por la mano hasta los dedos', pasaPor(px('leftMiddle2'), 12));
+  check('y sale por fuera de ella',
+    Math.max(...ctx.puntos.map(([x]) => x)) > px('leftMiddle2').x + 10,
+    'dedos en x=' + px('leftMiddle2').x.toFixed(0)
+    + ' · trazo hasta ' + Math.max(...ctx.puntos.map(([x]) => x)).toFixed(0));
 }
 
 settings.set('guides.action.legs', true);

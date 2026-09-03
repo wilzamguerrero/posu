@@ -74,7 +74,7 @@ const check = (name, cond, extra = '') => {
 const { Settings } = await import('../src/core/Settings.js');
 const { DEFAULTS } = await import('../src/config.js');
 const { Sketch } = await import('../src/draw/Sketch.js');
-const { strokePath, taper, streamline, decimate, resample, extend, pathLength } = await import('../src/draw/stroke.js');
+const { strokePath, taper, streamline, decimate, resample, relax, extend, pathLength } = await import('../src/draw/stroke.js');
 
 /* ── 1 · Geometria del trazo ─────────────────────────────────────────── */
 
@@ -131,6 +131,31 @@ const desigual = [
   check('prolongar alarga el trazo por las dos puntas',
     abierta[0].x < 0 && abierta.at(-1).x > 500 && pathLength(abierta) > largo,
     abierta[0].x.toFixed(0) + ' .. ' + abierta.at(-1).x.toFixed(0));
+}
+{
+  // Un giro de noventa grados, como el que hace una cadena en el hombro o en la
+  // muneca: la media movil lo abre sin mover las dos puntas.
+  const codo = resample([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], 61);
+  const suave = relax(codo, 0.22);
+  const giro = (c) => {
+    let max = 0;
+    for (let i = 1; i < c.length - 1; i++) {
+      const a = Math.atan2(c[i].y - c[i - 1].y, c[i].x - c[i - 1].x);
+      const b = Math.atan2(c[i + 1].y - c[i].y, c[i + 1].x - c[i].x);
+      let d = Math.abs(b - a);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      max = Math.max(max, d);
+    }
+    return max;
+  };
+  const esquina = (c) => Math.min(...c.map((p) => Math.hypot(p.x - 100, p.y)));
+  check('la media movil abre el giro y corta la esquina',
+    giro(suave) < giro(codo) * 0.85 && esquina(suave) > esquina(codo) + 2,
+    (giro(codo) * 57.3).toFixed(1) + ' -> ' + (giro(suave) * 57.3).toFixed(1)
+    + ' grados por paso · esquina a ' + esquina(suave).toFixed(1) + ' px');
+  check('y no mueve las dos puntas',
+    Math.hypot(suave[0].x - codo[0].x, suave[0].y - codo[0].y) < 1e-9
+    && Math.hypot(suave.at(-1).x - codo.at(-1).x, suave.at(-1).y - codo.at(-1).y) < 1e-9);
 }
 
 /* ── 2 · Captura del puntero ─────────────────────────────────────────── */

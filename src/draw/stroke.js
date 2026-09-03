@@ -262,6 +262,35 @@ export function extend(points, length, steps = 5) {
   return out;
 }
 
+/**
+ * Redondea los giros de una polilinea densa con una media movil a lo largo de
+ * ella. Es lo que convierte el recorrido exacto de las articulaciones en un
+ * gesto: el hombro y la muneca hacen esquinas de casi noventa grados, y una linea
+ * de ritmo tiene que pasar por ahi sin frenar. La ventana se estrecha al acercarse
+ * a los extremos, asi que las dos puntas no se mueven ni un pixel.
+ * @param {{x:number,y:number,w?:number}[]} points curva ya remuestreada
+ * @param {number} strength fraccion de la curva que abarca la ventana (0 = nada)
+ */
+export function relax(points, strength = 0.12) {
+  const n = points.length;
+  if (n < 5 || strength <= 0) return points;
+  const radio = Math.max(1, Math.round((n * strength) / 2));
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = Math.min(radio, i, n - 1 - i);
+    if (r === 0) { out[i] = { ...points[i] }; continue; }
+    let x = 0;
+    let y = 0;
+    for (let k = i - r; k <= i + r; k++) {
+      x += points[k].x;
+      y += points[k].y;
+    }
+    const m = r * 2 + 1;
+    out[i] = { ...points[i], x: x / m, y: y / m };
+  }
+  return out;
+}
+
 /** Largo total de una polilinea, en pixeles. */
 export function pathLength(points) {
   let total = 0;

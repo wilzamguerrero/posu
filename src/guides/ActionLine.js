@@ -21,7 +21,7 @@
  * esqueleto no se toca.
  */
 import * as THREE from 'three';
-import { strokePath, curvePath, resample, extend, pathLength } from '../draw/stroke.js';
+import { strokePath, curvePath, resample, relax, extend, pathLength } from '../draw/stroke.js';
 
 const _v = new THREE.Vector3();
 
@@ -36,8 +36,8 @@ const COLUMNA = ['head', 'neck', 'spine2', 'spine1', 'spine', 'hips'];
  * rizo justo en el pecho.
  */
 const RITMO_BRAZOS = [
-  ['leftHand', 'leftForeArm', 'leftArm'],
-  ['rightArm', 'rightForeArm', 'rightHand'],
+  ['leftMiddle2', 'leftHand', 'leftForeArm', 'leftArm'],
+  ['rightArm', 'rightForeArm', 'rightHand', 'rightMiddle2'],
 ];
 
 /**
@@ -72,6 +72,16 @@ const PIERNA = {
  * respecto a la recta hombro-cadera: 0 seria una recta y 1 la columna misma.
  */
 const COSTADO = 0.32;
+
+/**
+ * Suavizado de la curva (fraccion de su largo que abarca la media movil). Una
+ * cadena de articulaciones tiene giros de casi noventa grados —el hombro, la
+ * muneca, la cadera— y un trazo de ritmo tiene que pasar por ahi sin frenar: con
+ * este valor el giro por paso baja de 15 a 8 grados y la curva corta la esquina
+ * del hombro unos cinco centimetros, que es lo que hace un dibujante. Mas suave
+ * empieza a comerse el gesto.
+ */
+const SUAVIZADO = 0.26;
 
 /** Huesos del muñeco fantasma, por parejas. */
 const HUESOS = [
@@ -192,7 +202,7 @@ export class ActionLine {
    */
   #flow(ctx, puntos, grosor, color, alfa) {
     if (puntos.length < 3) return;
-    const curva = resample(puntos, 64);
+    const curva = relax(resample(puntos, 64), SUAVIZADO);
     const largo = pathLength(curva);
     if (largo < 8) return;
     // La prolongacion crece con el trazo, pero con tope: en un trazo corto una
@@ -205,7 +215,7 @@ export class ActionLine {
   /** La misma curva, a puntos: es la que muestra la exageracion. */
   #dashed(ctx, puntos, grosor, color, alfa) {
     if (puntos.length < 3) return;
-    const curva = resample(puntos, 64);
+    const curva = relax(resample(puntos, 64), SUAVIZADO);
     const largo = pathLength(curva);
     if (largo < 8) return;
     const abierta = extend(curva, Math.min(largo * 0.13, grosor * 22));
@@ -217,12 +227,19 @@ export class ActionLine {
     ctx.restore();
   }
 
-  /** Puntos de una cadena de huesos que esten a la vista. */
-  #chain(P, keys) {
+  /**
+   * Puntos de una cadena de huesos que esten a la vista. Se descartan los que
+   * caen encima del anterior: un miembro en escorzo proyecta dos articulaciones
+   * en el mismo pixel, y ese tramo de largo cero desviaria la curva.
+   */
+  #chain(P, keys, min = 4) {
     const out = [];
     for (const key of keys) {
       const p = P.get(key);
-      if (p) out.push(p);
+      if (!p) continue;
+      const previo = out[out.length - 1];
+      if (previo && Math.hypot(p.x - previo.x, p.y - previo.y) < min) continue;
+      out.push(p);
     }
     return out;
   }
