@@ -15,6 +15,7 @@
 
 import * as THREE from 'three';
 import { Perspective } from './Perspective.js';
+import { ActionLine } from './ActionLine.js';
 
 const _v = new THREE.Vector3();
 const _box = new THREE.Box3();
@@ -42,13 +43,16 @@ export class Guides {
     this.dpr = 1;
     /** ¿Queda algo dibujado en el lienzo? Evita borrarlo una y otra vez. */
     this.painted = false;
-    // Modulo hermano: la reticula de fugas, que necesita la camara para calcular
-    // los puntos de fuga y por eso vive aqui, sobre el mismo lienzo 2D.
+    // Modulos hermanos que comparten este lienzo 2D: la reticula de fugas (que
+    // necesita la camara para calcular los puntos de fuga) y los trazos que
+    // resumen la pose (que necesitan los huesos proyectados).
     this.perspective = new Perspective(settings, viewport);
+    this.action = new ActionLine(settings, viewport);
   }
 
   setCharacter(character) {
     this.character = character;
+    this.action.setCharacter(character);
   }
 
   /** ¿Hay alguna guia activa? Evita repintar cuando todo esta apagado. */
@@ -56,7 +60,7 @@ export class Guides {
     const g = this.settings.get('guides');
     return !!(g.heads || g.thirds || g.golden || g.symmetry || g.horizon
       || g.diagonals || g.grid > 0 || (g.safeFrame && g.safeFrame !== 'ninguno')
-      || this.perspective.active);
+      || this.perspective.active || this.action.active);
   }
 
   #fit() {
@@ -128,6 +132,8 @@ export class Guides {
     if (g.horizon) this.#horizon(ctx, W, H);
     if (g.symmetry) this.#symmetry(ctx, W, H);
     if (g.heads) this.#heads(ctx, W, H, Math.max(2, Math.round(g.headCount)));
+    // Los trazos de la pose van encima de todo: son el dibujo, no la reticula.
+    if (this.action.active) this.action.draw(ctx, W, H, this.dpr);
 
     ctx.globalAlpha = 1;
   }

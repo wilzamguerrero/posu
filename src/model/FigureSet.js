@@ -8,14 +8,15 @@
  * `scene.objects` y `scene.lights` (asi persiste, se exporta y se restablece
  * sin codigo extra):
  *
- *   { id, name, model, visible, position, rotation (grados), height, anchor, pose }
+ *   { id, name, model, visible, position, rotation (grados), scale, height,
+ *     anchor, pose }
  *
  * Y `figure.active` guarda el id de la figura que reciben la captura por
  * camara, las poses, el posado manual y las manos.
  *
- * Reparto de responsabilidades: el sitio y el giro van en `character.root` (los
- * escribe el gizmo de SceneEditor); la altura y el anclaje deforman el
- * contenido y los aplica el propio `Character` con `setPlacement`.
+ * Reparto de responsabilidades: el sitio, el giro y la escala van en
+ * `character.root` (los escribe el gizmo de SceneEditor); la altura y el anclaje
+ * deforman el contenido y los aplica el propio `Character` con `setPlacement`.
  */
 import * as THREE from 'three';
 import { Character } from './Character.js';
@@ -35,6 +36,8 @@ const PASO = 0.7;
 
 const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const redondea = (n) => Math.round((Number(n) || 0) * 1000) / 1000;
+/** Una escala de cero aplasta la figura y deja la matriz sin invertir. */
+const escalaValida = (n) => (Number.isFinite(n) && Math.abs(n) > 0.01 ? n : 1);
 
 /** URL del modelo de la biblioteca; el id vacio cae en el modelo por defecto. */
 export const libraryUrl = (id) => MODEL_LIBRARY.find((entry) => entry.id === id)?.url ?? DEFAULT_MODEL_URL;
@@ -306,10 +309,24 @@ export class FigureSet {
     ch.root.visible = def.visible !== false;
     const p = def.position ?? vec();
     const r = def.rotation ?? vec();
+    const e = def.scale ?? vec(1, 1, 1);
     ch.root.position.set(p.x ?? 0, p.y ?? 0, p.z ?? 0);
     ch.root.rotation.set((r.x ?? 0) * DEG, (r.y ?? 0) * DEG, (r.z ?? 0) * DEG);
+    // La altura da el tamano en metros; la escala es una deformacion aparte
+    // (achatar, estirar) que se aplica sobre el conjunto ya anclado.
+    ch.root.scale.set(escalaValida(e.x), escalaValida(e.y), escalaValida(e.z));
     // Recalcula la escala y el anclaje, y con ellos el volumen envolvente.
     ch.setPlacement({ height: def.height, anchor: def.anchor });
+  }
+
+  /**
+   * Latido por fotograma: cada figura vuelve a medirse y corrige su apoyo en el
+   * suelo si la pose ha cambiado. Es barato (unos puntos por hueso, ver
+   * `Character.tick`) y es lo que mantiene la caja envolvente y el anclaje al
+   * dia mientras se posa, se captura o se reproduce una pose guardada.
+   */
+  tick() {
+    for (const ch of this.characters.values()) ch.tick();
   }
 
   /**
@@ -392,6 +409,7 @@ export class FigureSet {
       visible: true,
       position: position ?? this.#spawn(),
       rotation: vec(0, base ? (base.rotation?.y ?? 0) : (s.get('figure.turn') ?? 0), 0),
+      scale: base?.scale ? { ...base.scale } : vec(1, 1, 1),
       height: base?.height ?? s.get('figure.height') ?? 1.75,
       anchor: base?.anchor ?? s.get('figure.anchor') ?? 'suelo',
       pose: null,

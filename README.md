@@ -55,7 +55,7 @@ npm run deploy       # build + wrangler pages deploy dist
 
 | Acción | Dónde |
 | --- | --- |
-| Cambiar de panel (Figura, Escena, Cámara, Luz, Captura, Poses, Guías, Ajustes) | fila de iconos en lo alto del panel lateral |
+| Cambiar de panel (Figura, Escena, Cámara, Luz, Captura, Poses, Guías, Dibujo, Ajustes) | fila de iconos en lo alto del panel lateral |
 | Cambiar malla (anatomía / maniquí / esqueleto) | barra del visor o teclas `1` `2` `3` |
 | Opacidad y sombreado (arcilla, toon, rayos X, alambre) | panel **Figura** |
 | Perspectiva ↔ ortográfica | tecla `O` |
@@ -65,11 +65,16 @@ npm run deploy       # build + wrangler pages deploy dist
 | Buscar una imagen de referencia en la web | tecla `Espacio` o la lupa de la barra del visor |
 | Congelar la pose | tecla `C` |
 | Posar huesos a mano con el gizmo | tecla `G`; deshacer con `Ctrl+Z` |
+| Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Escena › Manipulador** o `Alt+X` |
+| Caja envolvente al pasar el ratón, del elemento elegido o de todos | panel **Escena › Caja envolvente** o el botón **Caja** |
+| Línea de acción, ritmos brazo a brazo y hombro a pierna, fantasma exagerado | panel **Guías › Línea de acción** |
+| Dibujar sobre el visor con presión de pluma | tecla `D`; `Alt` para orbitar sin salir |
 | Gestos de mano, curvatura por dedo, apertura y pulgar | panel **Figura › Manos** |
 | Mover las falanges con tus propios dedos | panel **Captura › Dedos por cámara** |
 | Delegado GPU/CPU, ritmo de análisis y recorte cuadrado | panel **Captura › Detector** |
 | Guardar, aplicar, exportar e importar poses | panel **Poses** |
 | Canon de cabezas, tercios, dorada, diagonales, encuadre seguro | panel **Guías** |
+| Grosor del lápiz, borrador, deshacer el trazo | panel **Dibujo** o `[` `]` y `Ctrl+Z` |
 | Captura PNG (con o sin fondo) | `Ctrl+S` / panel **Ajustes** |
 
 Arrastra sobre el visor un `.glb`/`.fbx` para cargar tu propia figura, o una
@@ -97,8 +102,9 @@ src/
   pose/                DirectRetargeter, KalidokitRetargeter, PoseEngine, OneEuroFilter, PoseLibrary
   mocap/               PoseDetector y HandTracker (MediaPipe), SquarePad, MocapSource, Overlay2D
   posing/              ManualPosing (gizmo de huesos con historial)
-  scene/               SceneEditor, primitivas geométricas, luces insertables
-  guides/              Guides y Perspective (reglas de proporción, composición y fuga)
+  draw/                Sketch (lápiz sobre el visor) y stroke.js (geometría del trazo)
+  scene/               SceneEditor, Bounds (cajas envolventes), primitivas, luces insertables
+  guides/              Guides, Perspective y ActionLine (acción, ritmos y fantasma)
   search/              ImageSearch (cliente del buscador de imágenes)
   ui/                  panels, UI, Readout, widgets, icons (Lucide), Toast, SearchBar
   styles/              theme.css (tokens de VS Code Dark Modern) + app.css
@@ -110,6 +116,21 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
 - **Un solo esqueleto, tres mallas.** Las variantes se generan sobre el
   `THREE.Skeleton` del archivo con `AttachedBindMode` y `bindMatrix` identidad,
   así que cambiar de malla nunca pierde la pose.
+- **La figura se mide en cada fotograma.** Al cargar el modelo se reparte la piel
+  entre los huesos que la mueven y se guardan, por hueso, sus vértices extremos en
+  26 direcciones (envoltorio de 26 caras, ver `Character.#buildBoneBounds`). Con
+  eso el volumen envolvente se recalcula transformando unos mil puntos —0,07 ms
+  por figura— en vez de recorrer la piel deformada, que cuesta milisegundos. De
+  ahí salen tres cosas que antes no cuadraban: la caja sigue a la pose, el anclaje
+  al suelo mantiene los pies apoyados aunque la figura se agache, y la **altura en
+  metros se mide siempre con la figura en reposo**, así que posarla ya no la
+  reescala. Cada variante tiene su propio volumen: se mide la malla que se ve.
+- **El lápiz no depende de la presión.** Si la pluma la envía, gobierna el grosor
+  (y, si se quiere, la opacidad); si no —ratón, trackpad o pluma sin sensor—, el
+  grosor sale de la velocidad del trazo y de las rampas de entrada y salida, que
+  es lo que hace que una línea de ratón no parezca un tubo. El puntero se atrapa
+  en la fase de captura del documento, de modo que el lápiz se adelanta a la
+  órbita y a la selección sin desconectarlas (`Alt` las devuelve).
 - **Dos motores de retargeting.** El *directo* deduce cada rotación de la
   dirección medida entre puntos respecto a la pose de reposo (independiente del
   rig); *Kalidokit* aporta sus ángulos para torso, brazos, piernas y manos y usa

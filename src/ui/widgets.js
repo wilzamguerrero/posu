@@ -218,9 +218,18 @@ export function vector3(o) {
 
 /* -- Controles sin estado ---------------------------------------------- */
 
-/** Fila o rejilla de botones de accion. */
+/**
+ * Fila o rejilla de botones. Un elemento con `path` sale como interruptor
+ * marcado (ver `toggleButton`), para poder mezclar acciones y conmutadores en la
+ * misma fila.
+ */
 export function buttons(list, { cols = 0, compact = false } = {}) {
   const nodes = list.filter(Boolean).map((b) => {
+    if (b.path) {
+      const t = toggleButton(b);
+      b.ref?.(t);
+      return t;
+    }
     const node = el(
       'button',
       {
@@ -236,6 +245,44 @@ export function buttons(list, { cols = 0, compact = false } = {}) {
   });
   if (cols) return el('div', { class: 'btn-grid', style: { '--cols': String(cols) } }, nodes);
   return el('div', { class: 'field-row' }, nodes);
+}
+
+/**
+ * Boton de accion que refleja (y alterna) un interruptor del almacen. Es el
+ * mismo aspecto que `buttons`, para poder ponerlo en la misma fila que Duplicar
+ * o Eliminar, pero se queda marcado mientras el ajuste este encendido.
+ * @param {{path:string,label:string,icon?:string,title?:string}} o
+ */
+export function toggleButton(o) {
+  const node = el('button', { class: 'btn', type: 'button', title: o.title ?? o.label }, [
+    o.icon ? icon(o.icon, 13) : null,
+    el('span', { text: o.label }),
+  ]);
+  const paint = (v) => node.classList.toggle('is-active', v === true);
+  node.addEventListener('click', () => store.set(o.path, store.get(o.path) !== true));
+  store.on(o.path, paint);
+  paint(store.get(o.path));
+  return node;
+}
+
+/**
+ * Texto que se refresca con el visor (medidas vivas, contadores). Se actualiza a
+ * 5 Hz: mas a menudo obligaria al navegador a recalcular la maqueta del panel en
+ * cada fotograma sin que se note la diferencia.
+ * @param {object} app
+ * @param {() => string} read
+ */
+export function liveValue(app, read) {
+  const node = el('span', { class: 'value', text: read() ?? '—' });
+  let last = 0;
+  app.viewport?.onFrame?.(() => {
+    const now = performance.now();
+    if (now - last < 200) return;
+    last = now;
+    const texto = read() ?? '—';
+    if (node.textContent !== texto) node.textContent = texto;
+  });
+  return node;
 }
 
 /** Aviso informativo en linea. */

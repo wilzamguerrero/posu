@@ -21,6 +21,7 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { buildGeometry, PRIMITIVE_BY_ID, PRIMITIVES } from './primitives.js';
 import { LIGHT_BY_ID, LIGHT_TYPES, lightDefaults } from './lights.js';
+import { Bounds } from './Bounds.js';
 import { crearMaterial, aplicarParametros, materialDefaults, proyectaSombra } from '../model/MaterialLibrary.js';
 import { nuevoId } from '../core/ids.js';
 
@@ -62,14 +63,11 @@ export class SceneEditor {
     /** Id del elemento bajo el raton, para el contorno de aviso. */
     this.hovered = '';
 
-    // Contorno del elemento apuntado: hace visible que la escena se puede
-    // seleccionar pinchando, sin tocar los materiales del usuario.
-    this.outline = new THREE.BoxHelper(new THREE.Object3D(), 0x4fc1ff);
-    this.outline.material.depthTest = false;
-    this.outline.material.transparent = true;
-    this.outline.material.opacity = 0.9;
-    this.outline.renderOrder = 997;
-    this.outline.visible = false;
+    // Cajas envolventes: el contorno del elemento apuntado (hace visible que la
+    // escena se puede seleccionar pinchando, sin tocar los materiales del
+    // usuario) y la caja fija del seleccionado. Se recalculan por fotograma, asi
+    // que siguen a la pose del personaje y al gizmo.
+    this.bounds = new Bounds({ viewport, settings });
 
     this.gizmo = new TransformControls(viewport.cameras.active, viewport.renderer.domElement);
     this.gizmo.size = 0.9;
@@ -83,7 +81,7 @@ export class SceneEditor {
     this.gizmoHelper = this.gizmo.getHelper?.() ?? this.gizmo;
     this.gizmoHelper.visible = false;
 
-    viewport.add(this.group, this.helpers, this.gizmoHelper, this.outline);
+    viewport.add(this.group, this.helpers, this.gizmoHelper);
 
     this._onPointerDown = (e) => this.#onPointerDown(e);
     this._onPointerMove = (e) => this.#onPointerMove(e);
@@ -113,6 +111,8 @@ export class SceneEditor {
     s.on('scene.figures', () => this.rebuild());
     // Edicion de una propiedad concreta: "scene.lights.1.intensity".
     s.on('scene.*', (_v, _p, path) => this.#onPath(path));
+    // Aspecto de las cajas envolventes: se repintan en el acto.
+    s.on('scene.bounds.*', () => this.#paintBounds());
     this.#applySnap(s.get('scene.snap'));
   }
 
@@ -473,8 +473,6 @@ export class SceneEditor {
     }
     // Un cambio de nombre o de visibilidad cambia la lista de la interfaz.
     if (resto === 'name' || resto === 'visible') this.onSelect?.(this.settings.get('scene.selected'));
-    // Si se esta editando justo lo que el raton senala, el contorno le sigue.
-    if (this.hovered === def.id) this.outline.setFromObject(item.object);
   }
 
   /* ── Gizmo y seleccion ──────────────────────────────────────────────── */
@@ -484,12 +482,14 @@ export class SceneEditor {
     if (!item) {
       this.gizmo.detach();
       this.gizmoHelper.visible = false;
+      this.#paintBounds();
       this.onSelect?.('');
       return;
     }
     this.gizmo.attach(item.object);
     // El contorno de aviso sobra sobre lo ya seleccionado: manda el gizmo.
     if (this.hovered === id) this.#setHover('');
+    else this.#paintBounds();
     this.gizmo.showX = this.gizmo.showY = this.gizmo.showZ = true;
     this.gizmo.setMode(this.#modeFor(item));
     this.gizmoHelper.visible = true;
@@ -508,8 +508,6 @@ export class SceneEditor {
     const modo = this.settings.get('scene.tool') ?? 'translate';
     // Girar o escalar una luz puntual no significa nada: solo se mueve.
     if (item?.object?.isLight && !item.object.isRectAreaLight) return 'translate';
-    // Una figura no se escala: su tamano es el deslizador de Altura.
-    if (item?.kind === 'figura' && modo === 'scale') return 'translate';
     return modo;
   }
 
@@ -535,12 +533,11 @@ export class SceneEditor {
       cambios[`${base}.rotation.x`] = round(o.rotation.x / DEG, 1);
       cambios[`${base}.rotation.y`] = round(o.rotation.y / DEG, 1);
       cambios[`${base}.rotation.z`] = round(o.rotation.z / DEG, 1);
-      // Las figuras no guardan escala: la altura es su deslizador.
-      if (at.branch !== 'figures') {
-        cambios[`${base}.scale.x`] = round(o.scale.x);
-        cambios[`${base}.scale.y`] = round(o.scale.y);
-        cambios[`${base}.scale.z`] = round(o.scale.z);
-      }
+      // La escala de una figura es una deformacion aparte: su tamano en metros
+      // lo sigue mandando el deslizador de Altura.
+      cambios[`${base}.scale.x`] = round(o.scale.x);
+      cambios[`${base}.scale.y`] = round(o.scale.y);
+      cambios[`${base}.scale.z`] = round(o.scale.z);
     }
     this.settings.batch(cambios);
   }
@@ -580,7 +577,11 @@ export class SceneEditor {
 
     for (const item of this.items.values()) {
       if (item.kind !== 'figura' || !item.object.visible) continue;
-      const caja = item.box.setFromObject(item.object);
+      // El volumen lo mantiene al dia el propio personaje (sigue a la pose), asi
+      // que apuntar una figura no cuesta recorrer su piel.
+      const caja = item.character?.box && !item.character.box.isEmpty()
+        ? item.box.copy(item.character.box)
+        : item.box.setFromObject(item.object);
       if (caja.isEmpty()) continue;
       if (!this.raycaster.ray.intersectBox(caja, _p)) continue;
       const d = this.raycaster.ray.origin.distanceTo(_p);
@@ -628,16 +629,29 @@ export class SceneEditor {
     else if (dom.style.cursor === 'pointer') dom.style.cursor = '';
     if (marcado === this.hovered) return;
     this.hovered = marcado;
-
-    const item = marcado ? this.items.get(marcado) : null;
-    if (item) this.outline.setFromObject(item.object);
-    this.outline.visible = !!item;
+    this.#paintBounds();
   }
 
-  /** Por fotograma: la camara del gizmo y los ayudantes que siguen a la luz. */
+  /** Redibuja las cajas envolventes del elemento apuntado y del seleccionado. */
+  #paintBounds() {
+    this.bounds.update({
+      hover: this.hovered ? this.items.get(this.hovered) ?? null : null,
+      selected: this.items.get(this.settings.get('scene.selected')) ?? null,
+      all: this.items.values(),
+    });
+  }
+
+  /** Medidas del elemento indicado, en metros. Las lee el panel. */
+  sizeOf(id) {
+    const item = id ? this.items.get(id) : null;
+    return item ? this.bounds.size(item) : null;
+  }
+
+  /** Por fotograma: la camara del gizmo, las cajas y los ayudantes de luz. */
   #sync() {
     const cam = this.viewport.cameras.active;
     if (this.gizmo.camera !== cam) this.gizmo.camera = cam;
+    this.#paintBounds();
     // Mientras se arrastra el gizmo, el elemento se mueve fuera del almacen: hay
     // que pedir el repintado de la sombra en cada fotograma.
     if (this.dragging) this.viewport.invalidateShadows?.();
@@ -677,9 +691,7 @@ export class SceneEditor {
     this.gizmo.detach();
     this.gizmo.dispose?.();
     this.gizmoHelper.parent?.remove(this.gizmoHelper);
-    this.outline.parent?.remove(this.outline);
-    this.outline.geometry.dispose();
-    this.outline.material.dispose();
+    this.bounds.dispose();
     this.group.parent?.remove(this.group);
     this.helpers.parent?.remove(this.helpers);
   }

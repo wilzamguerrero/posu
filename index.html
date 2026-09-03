@@ -34,6 +34,11 @@
         <main class="viewport" id="viewport">
           <canvas id="gl-canvas"></canvas>
           <canvas id="guide-canvas" class="overlay-canvas"></canvas>
+          <!-- Lapiz: un lienzo con lo ya trazado y otro con el trazo en curso.
+               No reciben eventos: el puntero lo atrapa draw/Sketch.js en la fase
+               de captura del documento, para adelantarse a la orbita. -->
+          <canvas id="sketch-canvas" class="overlay-canvas sketch-canvas"></canvas>
+          <canvas id="sketch-live" class="overlay-canvas sketch-canvas"></canvas>
 
           <div class="viewport-toolbar" id="viewport-toolbar"></div>
           <div class="viewport-badge" id="viewport-badge"></div>

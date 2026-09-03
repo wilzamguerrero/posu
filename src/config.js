@@ -123,8 +123,8 @@ export const DEFAULTS = {
   scene: {
     /**
      * Figuras de la escena. Cada una: { id, name, model, visible, position,
-     * rotation (grados), height, anchor, pose }. Se siembra al arrancar desde
-     * los valores de `figure`, asi que nunca esta vacia en marcha.
+     * rotation (grados), scale, height, anchor, pose }. Se siembra al arrancar
+     * desde los valores de `figure`, asi que nunca esta vacia en marcha.
      */
     figures: [],
     objects: [],
@@ -134,6 +134,22 @@ export const DEFAULTS = {
     space: 'world',             // world | local
     snap: 0,                    // 0 = libre
     helpers: true,
+
+    /**
+     * Caja envolvente. `hover` es el contorno que avisa de lo que hay bajo el
+     * raton; `selected` la deja fija sobre el elemento elegido y `all` la pone
+     * sobre todos, este o no seleccionado. `live` la recalcula con la pose del
+     * personaje (apagado, se mide la figura en reposo) y `space` decide si se
+     * alinea con los ejes del objeto o con los del mundo.
+     */
+    bounds: {
+      hover: true,
+      selected: false,
+      all: false,
+      live: true,
+      space: 'objeto',          // objeto | mundo
+      floor: false,             // huella proyectada en el suelo
+    },
   },
 
   camera: {
@@ -276,6 +292,26 @@ export const DEFAULTS = {
     },
     color: '#4daafc',
     opacity: 0.45,
+
+    /**
+     * Trazos que resumen la pose: la linea de accion (el recorrido del
+     * movimiento, de la coronilla al pie de apoyo) y las lineas de ritmo, que
+     * encadenan el cuerpo en curvas continuas — de mano a mano por encima de los
+     * hombros (`arms`) y de cada hombro, cruzando el torso, hasta el pie del lado
+     * contrario (`legs`). `exaggeration` amplifica la curva de la linea de accion
+     * y, con `ghost` encendido, dibuja el mismo personaje llevado a esa
+     * exageracion.
+     */
+    action: {
+      line: false,
+      arms: false,
+      legs: false,
+      ghost: false,
+      exaggeration: 0.4,        // 0 = tal cual esta posado
+      width: 5,                 // grosor del trazo en px
+      color: '#ff6b57',
+      opacity: 0.9,
+    },
   },
 
   quality: {
@@ -289,6 +325,28 @@ export const DEFAULTS = {
     // enciende sola si el contexto WebGL se pierde al arrancar, que es lo que
     // ocurre con algunos controladores de Linux.
     compat: false,
+  },
+
+  /**
+   * Lapiz: dibujo a mano alzada sobre el visor, para practicar encima de la
+   * figura. El grosor sale de la presion de la pluma cuando el lapiz digital la
+   * envia, y de la velocidad del trazo cuando no (raton, trackpad o pluma sin
+   * presion), de modo que el trazo entra y sale fino igual que a mano.
+   */
+  draw: {
+    enabled: false,
+    tool: 'lapiz',              // lapiz | rotulador | borrador
+    color: '#e9e9ea',
+    size: 4,                    // grosor base en pixeles
+    opacity: 1,
+    pressureSize: 0.85,         // cuanto manda la presion en el grosor
+    pressureAlpha: 0.2,         // ...y en la opacidad
+    speed: 0.6,                 // grosor por velocidad cuando no hay presion
+    smoothing: 0.45,            // estabilizador del trazo
+    taper: true,                // entradas y salidas afiladas
+    touch: false,               // dibujar con el dedo (por defecto el dedo navega)
+    visible: true,              // mostrar lo dibujado
+    inShot: true,               // incluir el dibujo en la captura PNG
   },
 
   ui: {

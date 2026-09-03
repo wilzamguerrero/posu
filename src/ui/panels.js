@@ -9,7 +9,7 @@
 
 import {
   el, group, field, slider, toggle, segmented, select, color, vector3, buttons, notice, meter, listView, enableWhen,
-  presetGrid, reactive,
+  presetGrid, reactive, liveValue,
 } from './widgets.js';
 import { icon } from './icons.js';
 import { humanBytes } from '../model/FbxToGlb.js';
@@ -297,13 +297,21 @@ function figureControls(app, id, { modelo = false, posar = false } = {}) {
     toggle({ path: base + '.visible', label: 'Visible' }),
     vector3({ label: 'Posicion', path: base + '.position', min: -8, max: 8, step: 0.01, unit: ' m' }),
     vector3({ label: 'Rotacion', path: base + '.rotation', min: -180, max: 180, step: 1, unit: '°' }),
-    slider({ label: 'Altura', path: base + '.height', min: 1.2, max: 2.2, step: 0.01, unit: ' m' }),
+    vector3({
+      label: 'Escala', path: base + '.scale', min: 0.2, max: 3, step: 0.01,
+      hint: 'Deformacion aparte de la altura: achatar o estirar la figura. 1 = sin deformar.',
+    }),
+    slider({ label: 'Altura', path: base + '.height', min: 1.2, max: 2.2, step: 0.01, unit: ' m',
+      hint: 'Se mide con la figura de pie, no con la pose puesta: agacharse no la reescala.' }),
     segmented({
       label: 'Anclaje', path: base + '.anchor',
       options: [
         { value: 'suelo', label: 'Al suelo' },
         { value: 'centro', label: 'Centrado' },
+        { value: 'libre', label: 'Libre' },
       ],
+      hint: 'Al suelo apoya la pose en y = 0 fotograma a fotograma (una figura en cuclillas '
+        + 'sigue tocando el suelo). Centrado deja el volumen en el origen. Libre no toca el archivo.',
     }),
   ];
   if (modelo) {
@@ -453,7 +461,9 @@ function itemControls(app) {
         { label: 'Duplicar', icon: 'copy', title: 'Copia esta figura con su pose',
           onClick: () => app.actions.duplicateFigure?.(id) },
         { label: 'Eliminar', icon: 'trash-2', onClick: () => app.actions.removeFigure?.(id) },
-      ], { cols: 2, compact: true }),
+        { path: 'scene.bounds.selected', label: 'Caja', icon: 'scan',
+          title: 'Deja puesta la caja envolvente de lo seleccionado' },
+      ], { cols: 3, compact: true }),
     ];
   }
   const base = 'scene.' + at.branch + '.' + at.index;
@@ -519,7 +529,9 @@ function itemControls(app) {
   out.push(buttons([
     { label: 'Duplicar', icon: 'copy', onClick: () => app.actions.duplicateItem?.(id) },
     { label: 'Eliminar', icon: 'trash-2', onClick: () => app.actions.removeItem?.(id) },
-  ], { cols: 2, compact: true }));
+    { path: 'scene.bounds.selected', label: 'Caja', icon: 'scan',
+      title: 'Deja puesta la caja envolvente de lo seleccionado' },
+  ], { cols: 3, compact: true }));
   return out;
 }
 
@@ -563,7 +575,7 @@ function scenePanel(app) {
           { value: 'rotate', label: 'Girar', icon: 'rotate-3d' },
           { value: 'scale', label: 'Escalar', icon: 'scaling' },
         ],
-        hint: 'Atajos: W mover, E girar, R escalar, Supr eliminar, Esc deseleccionar. Las figuras se mueven y se giran; su tamano es el deslizador de Altura.',
+        hint: 'Atajos: W mover, E girar, R escalar, Supr eliminar, Esc deseleccionar. En una figura, el tamano en metros lo manda el deslizador de Altura y la escala es una deformacion aparte.',
       }),
       segmented({
         label: 'Ejes', path: 'scene.space',
@@ -571,7 +583,7 @@ function scenePanel(app) {
           { value: 'world', label: 'Mundo', icon: 'globe' },
           { value: 'local', label: 'Local', icon: 'box' },
         ],
-        hint: 'Alt+X alterna entre los ejes del mundo y los del propio objeto.',
+        hint: 'Alt+X alterna entre los ejes del mundo y los del propio objeto. Vale tambien para el giroscopio del posado manual: "Mundo" gira el hueso sobre los ejes de la escena.',
       }),
       select({
         label: 'Imantado', path: 'scene.snap',
@@ -597,6 +609,40 @@ function scenePanel(app) {
       reactive(['scene.selected', 'scene.objects', 'scene.lights', 'scene.figures', 'figure.active'],
         () => itemControls(app)),
     ]),
+    group({ id: 'esc-caja', title: 'Caja envolvente', icon: 'scan' }, boundsControls(app)),
+  ];
+}
+
+/**
+ * Caja envolvente: el contorno que avisa de lo que hay bajo el raton y la caja
+ * fija del elemento elegido. Se recalculan en cada fotograma, asi que siguen a la
+ * pose del personaje; con `live` apagado se mide la figura en reposo, que es el
+ * area del modelo sin posar.
+ */
+function boundsControls(app) {
+  const medidas = () => {
+    const v = app.scene?.sizeOf?.(app.settings.get('scene.selected'));
+    if (!v) return '—';
+    return [v.x, v.y, v.z].map((n) => n.toFixed(2)).join(' × ') + ' m';
+  };
+  return [
+    toggle({ path: 'scene.bounds.hover', label: 'Contorno al pasar el raton' }),
+    toggle({ path: 'scene.bounds.selected', label: 'Caja del elemento seleccionado' }),
+    toggle({ path: 'scene.bounds.all', label: 'Caja de todos los elementos',
+      hint: 'Deja la caja puesta en cada figura, solido y luz de la escena, aunque no esten seleccionados. La del elemento elegido se sigue viendo en ambar.' }),
+    toggle({ path: 'scene.bounds.live', label: 'Ajustarla a la pose',
+      hint: 'Encendida, la caja se rehace en cada fotograma y sigue a la pose. Apagada, mide la figura en reposo (el area del modelo de pie).' }),
+    segmented({
+      label: 'Ejes de la caja', path: 'scene.bounds.space',
+      options: [
+        { value: 'objeto', label: 'Del objeto', icon: 'box' },
+        { value: 'mundo', label: 'Del mundo', icon: 'globe' },
+      ],
+      hint: 'Con los ejes del objeto la caja se pega a la forma aunque este girada; con los del mundo se alinea con la escena.',
+    }),
+    toggle({ path: 'scene.bounds.floor', label: 'Huella en el suelo',
+      hint: 'Proyecta la base de la caja en y = 0: sirve para ver donde apoya la figura.' }),
+    field('Medidas de lo seleccionado', liveValue(app, medidas)),
   ];
 }
 
@@ -1048,6 +1094,24 @@ function guidesPanel(app) {
       toggle({ path: 'guides.perspective.fade', label: 'Degradar los radios',
         hint: 'Baja la opacidad de los radios extremos para no ensuciar el encuadre.' }),
     ]),
+    group({ id: 'gu-accion', title: 'Linea de accion', icon: 'spline' }, [
+      toggle({ path: 'guides.action.line', label: 'Linea de accion',
+        hint: 'El recorrido del movimiento: de la coronilla a la pierna que aguanta el peso, pasando por la columna.' }),
+      toggle({ path: 'guides.action.arms', label: 'Ritmo de brazo a brazo',
+        hint: 'Una sola curva de una mano a la otra, arqueada por encima de los hombros.' }),
+      toggle({ path: 'guides.action.legs', label: 'Ritmo de hombro a pierna',
+        hint: 'Dos curvas que bajan cruzando el torso hasta el pie del lado contrario, y se cruzan en la pelvis: el contrapposto de un trazo.' }),
+      slider({ label: 'Exageracion', path: 'guides.action.exaggeration', min: 0, max: 1.5, step: 0.05,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Amplifica la curva del movimiento. El trazo exagerado sale de puntos junto al real.' }),
+      toggle({ path: 'guides.action.ghost', label: 'Fantasma con la exageracion',
+        hint: 'Dibuja el mismo personaje llevado a esa exageracion, con los hombros y la cadera mas volcados: es la pose hacia la que apunta su linea de movimiento.' }),
+      slider({ label: 'Grosor del trazo', path: 'guides.action.width', min: 1, max: 16, step: 0.5,
+        format: (v) => v.toFixed(1) + ' px' }),
+      color({ path: 'guides.action.color', label: 'Color del trazo' }),
+      slider({ label: 'Opacidad', path: 'guides.action.opacity', min: 0.1, max: 1, step: 0.01 }),
+      notice('info', 'Los trazos se calculan sobre la figura que <b>posa</b> y se rehacen con la pose. Cada uno se prolonga un poco mas alla de las articulaciones y se <b>desvanece</b> afilandose en las dos puntas, como un gesto de lapiz.', 'spline'),
+    ]),
     group({ id: 'gu-prop', title: 'Proporcion', icon: 'ruler' }, [
       toggle({ path: 'guides.heads', label: 'Canon de cabezas' }),
       slider({ label: 'Numero de cabezas', path: 'guides.headCount', min: 5, max: 10, step: 0.5,
@@ -1077,7 +1141,80 @@ function guidesPanel(app) {
   ];
 }
 
-/* ── 7 · Ajustes y rendimiento ─────────────────────────────────────────── */
+/* ── 7 · Lapiz sobre el visor ──────────────────────────────────────────── */
+
+/**
+ * Lapiz para practicar encima de la escena. El grosor sale de la presion de la
+ * pluma; sin pluma, de la velocidad del trazo (lento = grueso, rapido = fino),
+ * con las entradas y salidas afiladas.
+ */
+function drawPanel(app) {
+  const { actions } = app;
+  const cuenta = () => {
+    const n = app.sketch?.count ?? 0;
+    return n === 0 ? 'nada dibujado' : n === 1 ? '1 trazo' : n + ' trazos';
+  };
+  const pluma = () => (app.sketch?.pen ? 'presion de la pluma' : 'velocidad del trazo');
+
+  return [
+    group({ id: 'dib-lapiz', title: 'Lapiz', icon: 'pencil' }, [
+      toggle({ path: 'draw.enabled', label: 'Dibujar sobre el visor (D)',
+        hint: 'Mientras esta encendido el puntero dibuja. Con Alt pulsado se orbita sin apagarlo, y la rueda hace zoom como siempre.' }),
+      segmented({
+        label: 'Herramienta', path: 'draw.tool',
+        options: [
+          { value: 'lapiz', label: 'Lapiz', icon: 'pencil', title: 'Trazo afilado, con presion o velocidad' },
+          { value: 'rotulador', label: 'Rotulador', icon: 'highlighter', title: 'Grosor parejo, sin afilar las puntas' },
+          { value: 'borrador', label: 'Borrador', icon: 'eraser', title: 'Quita el trazo que toques' },
+        ],
+      }),
+      color({ path: 'draw.color', label: 'Color del trazo' }),
+      slider({ label: 'Grosor', path: 'draw.size', min: 0.5, max: 40, step: 0.5, unit: ' px' }),
+      slider({ label: 'Opacidad', path: 'draw.opacity', min: 0.05, max: 1, step: 0.01 }),
+      buttons([
+        { label: 'Deshacer', icon: 'undo-2', title: 'Deshacer el ultimo trazo (Ctrl+Z)',
+          onClick: () => actions.undoDrawing?.() },
+        { label: 'Rehacer', icon: 'redo-2', title: 'Rehacer (Ctrl+Mayus+Z)',
+          onClick: () => actions.redoDrawing?.() },
+      ], { cols: 2, compact: true }),
+      buttons([
+        { label: 'Vaciar el dibujo', icon: 'trash-2', variant: 'danger',
+          title: 'Quita todos los trazos (se puede deshacer)', onClick: () => actions.clearDrawing?.() },
+      ], { cols: 1 }),
+      field('En el lienzo', liveValue(app, cuenta)),
+    ]),
+    group({ id: 'dib-presion', title: 'Presion y tacto del trazo', icon: 'pen-tool' }, [
+      field('Grosor gobernado por', liveValue(app, pluma)),
+      slider({ label: 'Influencia de la presion', path: 'draw.pressureSize', min: 0, max: 1, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Cuanto adelgaza el trazo al apoyar flojo con una pluma digital.' }),
+      slider({ label: 'Presion sobre la opacidad', path: 'draw.pressureAlpha', min: 0, max: 1, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Los trazos suaves salen mas claros. Se aplica al trazo entero para no dejar costuras.' }),
+      slider({ label: 'Grosor por velocidad', path: 'draw.speed', min: 0, max: 1, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Lo que manda cuando no hay presion: raton, trackpad o pluma sin sensor.' }),
+      slider({ label: 'Estabilizador', path: 'draw.smoothing', min: 0, max: 0.9, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Suaviza el pulso. Mucho estabilizador retrasa la punta.' }),
+      toggle({ path: 'draw.taper', label: 'Entradas y salidas afiladas' }),
+      toggle({ path: 'draw.touch', label: 'Dibujar con el dedo',
+        hint: 'Apagado, el dedo mueve la camara y solo la pluma dibuja (lo comodo en tableta).' }),
+      notice('info', 'Si tu pluma trae boton de borrar, funciona como el borrador sin cambiar de herramienta.', 'eraser'),
+    ]),
+    group({ id: 'dib-salida', title: 'Ver y exportar', icon: 'image' }, [
+      toggle({ path: 'draw.visible', label: 'Mostrar el dibujo' }),
+      toggle({ path: 'draw.inShot', label: 'Incluirlo en la captura PNG' }),
+      buttons([
+        { label: 'Captura PNG', icon: 'image', onClick: () => actions.screenshot(false) },
+        { label: 'Sin fondo', icon: 'crop', title: 'Fondo transparente', onClick: () => actions.screenshot(true) },
+      ], { cols: 2 }),
+      notice('info', 'El dibujo se queda pegado a la pantalla, no a la escena: al orbitar la camara los trazos no se mueven, como un papel de calco sobre el visor. No se guarda al recargar la pagina: exportalo con la captura PNG.', 'pencil'),
+    ]),
+  ];
+}
+
+/* ── 8 · Ajustes y rendimiento ─────────────────────────────────────────── */
 
 function settingsPanel(app) {
   const { actions } = app;
@@ -1132,6 +1269,9 @@ function settingsPanel(app) {
         kbd('B', 'Iniciar o detener la captura'),
         kbd('F', 'Encuadrar la figura'),
         kbd('G', 'Pose manual con tiradores'),
+        kbd('D', 'Lapiz para dibujar sobre el visor'),
+        kbd('Alt + arrastrar', 'Orbitar sin apagar el lapiz'),
+        kbd('[ + ]', 'Grosor del lapiz'),
         kbd('H', 'Ocultar el panel lateral'),
         kbd('W + E + R', 'Gizmo: mover · girar · escalar'),
         kbd('Supr', 'Eliminar el elemento seleccionado'),
@@ -1175,6 +1315,7 @@ export function buildPanels(app) {
     { id: 'mocap', title: 'Captura', icon: 'video', build: mocapPanel },
     { id: 'poses', title: 'Poses', icon: 'library', build: posesPanel },
     { id: 'guides', title: 'Guias', icon: 'pencil-ruler', build: guidesPanel },
+    { id: 'draw', title: 'Dibujo', icon: 'pencil', build: drawPanel },
     { id: 'settings', title: 'Ajustes', icon: 'settings', build: settingsPanel },
   ];
   return sections.map(({ id, title, icon: ico, build }) => ({

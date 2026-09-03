@@ -27,6 +27,7 @@ import { boneForLandmark } from './pose/landmarks.js';
 import { BONE_LABELS } from './model/boneMap.js';
 import { HandRig, HAND_PRESET_BY_ID } from './model/HandRig.js';
 import { Guides } from './guides/Guides.js';
+import { Sketch } from './draw/Sketch.js';
 import { SceneEditor } from './scene/SceneEditor.js';
 import { ImageSearch } from './search/ImageSearch.js';
 import { UI } from './ui/UI.js';
@@ -198,6 +199,11 @@ async function main() {
   // Sesion nueva (o anterior a las figuras multiples): se siembra una figura con
   // los ajustes heredados, asi que la escena nunca esta vacia.
   figures.seed();
+
+  // Cada figura vuelve a medirse al empezar el fotograma: es lo que mantiene la
+  // caja envolvente pegada a la pose y los pies apoyados en el suelo al posar.
+  // Va antes que el resto de los ganchos para que todos vean la medida fresca.
+  viewport.onFrame(() => figures.tick());
 
   // El autofoco pregunta a la figura activa donde esta la cabeza, las manos, etc.
   viewport.cameras.focusProvider = (target, out) => {
@@ -553,13 +559,38 @@ async function main() {
     try {
       const blob = await viewport.screenshot({ scale: 2, transparent });
       if (!blob) throw new Error('sin datos');
-      download(blob, `atom-${stamp()}.png`);
+      download(await conDibujo(blob), `atom-${stamp()}.png`);
       toast('Captura guardada', 'ok');
     } catch (err) {
       console.error('[Captura de pantalla]', err);
       toast('No se pudo generar la imagen', 'err');
     }
   };
+
+  /**
+   * Pega el dibujo del lapiz sobre la lamina exportada. Se compone aqui y no en
+   * el visor porque el trazo vive en un lienzo 2D aparte, que el render de WebGL
+   * no ve. Si algo falla se devuelve la lamina tal cual: mejor una captura sin
+   * los trazos que ninguna captura.
+   */
+  async function conDibujo(blob) {
+    if (settings.get('draw.inShot') === false || !(app.sketch?.count > 0)) return blob;
+    try {
+      const bitmap = await createImageBitmap(blob);
+      const lienzo = document.createElement('canvas');
+      lienzo.width = bitmap.width;
+      lienzo.height = bitmap.height;
+      const ctx = lienzo.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0);
+      app.sketch.renderTo(ctx, lienzo.width, lienzo.height);
+      bitmap.close?.();
+      return (await new Promise((r) => lienzo.toBlob(r, 'image/png'))) ?? blob;
+    } catch (err) {
+      console.warn('[Captura] no se pudo pegar el dibujo:', err);
+      return blob;
+    }
+  }
+
   actions.copySettings = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(settings.state, null, 2));
@@ -587,8 +618,10 @@ async function main() {
     figures,
     // El posado manual solo se queda el clic si hay un manejador de
     // articulacion debajo; en el resto del visor se puede seguir eligiendo
-    // figuras, solidos y luces con el raton.
-    blocked: (event) => settings.get('ui.manualPosing') === true && !!event && posing.picks(event),
+    // figuras, solidos y luces con el raton. Con el lapiz encendido no se
+    // selecciona nada: el visor es papel.
+    blocked: (event) => settings.get('draw.enabled') === true
+      || (settings.get('ui.manualPosing') === true && !!event && posing.picks(event)),
     onSelect: () => app.hooks.refreshScene?.(),
     // Al elegir un elemento pinchandolo en el visor se abre su panel: si no, la
     // seleccion se hacia a ciegas y habia que ir a la lista de escena.
@@ -665,6 +698,31 @@ async function main() {
     sceneEditor.clearAll();
     toast('Solidos y luces eliminados');
   };
+
+  /* ── Lapiz sobre el visor ───────────────────────────────────────────── */
+
+  // Dos lienzos 2D encima del 3D: uno con lo ya trazado y otro con el trazo en
+  // curso. El lapiz atrapa el puntero antes que la orbita y que la seleccion.
+  const sketch = new Sketch({
+    settings,
+    viewport,
+    canvas: document.getElementById('sketch-canvas'),
+    live: document.getElementById('sketch-live'),
+  });
+  app.sketch = sketch;
+
+  // Deshacer y rehacer del dibujo. Quien decide si Ctrl+Z va al dibujo o a la
+  // pose es la interfaz, segun este el lapiz encendido; desde el panel del lapiz
+  // los botones actuan siempre.
+  actions.undoDrawing = () => sketch.undo();
+  actions.redoDrawing = () => sketch.redo();
+  actions.clearDrawing = () => {
+    if (sketch.clear()) toast('Dibujo vaciado');
+    else toast('No hay nada dibujado');
+  };
+  settings.on('draw.enabled', (v) => {
+    if (v === true) toast('Lapiz: dibuja sobre el visor · Alt para orbitar · Esc para salir');
+  });
 
   /* ── Interfaz ───────────────────────────────────────────────────────── */
 

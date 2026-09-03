@@ -188,9 +188,17 @@ export class UI {
           el('span', { text: item.label }),
         ]);
         itemBtn.addEventListener('click', () => {
-          item.onClick();
+          // Una entrada con `path` es un interruptor: se alterna y se queda
+          // marcada, para saber que hay encendido sin abrir el panel.
+          if (item.path) s.set(item.path, s.get(item.path) !== true);
+          item.onClick?.();
           dropdown.classList.remove('is-open');
         });
+        if (item.path) {
+          const paint = (v) => itemBtn.classList.toggle('is-active', v === true);
+          s.on(item.path, paint);
+          paint(s.get(item.path));
+        }
         menu.appendChild(itemBtn);
       });
 
@@ -249,20 +257,32 @@ export class UI {
     // Dropdown de captura
     const capturaDropdown = createDropdown('Captura', 'video', [
       { label: 'Buscar imagen de referencia', icon: 'search', onClick: () => this.toggleSearch() },
-      { label: 'Monitor de captura', icon: 'webcam', onClick: () => s.set('mocap.showHud', !s.get('mocap.showHud')) },
-      { label: 'Congelar pose', icon: 'snowflake', onClick: () => s.set('mocap.frozen', !s.get('mocap.frozen')) },
+      { label: 'Monitor de captura', icon: 'webcam', path: 'mocap.showHud' },
+      { label: 'Congelar pose', icon: 'snowflake', path: 'mocap.frozen' },
     ]);
 
-    // Dropdown de poses
-    const posesDropdown = createDropdown('Poses', 'library', [
-      { label: 'Pose manual', icon: 'hand', onClick: () => s.set('ui.manualPosing', !s.get('ui.manualPosing')) },
+    // Dropdown del lapiz. Ocupa el sitio del antiguo menu de Poses, que solo
+    // repetia el boton de pose manual que hay dos filas mas abajo.
+    const lapizDropdown = createDropdown('Lapiz', 'pencil', [
+      { label: 'Dibujar sobre el visor', icon: 'pencil', path: 'draw.enabled' },
+      { label: 'Lapiz', icon: 'pencil', onClick: () => s.set('draw.tool', 'lapiz') },
+      { label: 'Rotulador', icon: 'highlighter', onClick: () => s.set('draw.tool', 'rotulador') },
+      { label: 'Borrador', icon: 'eraser', onClick: () => s.set('draw.tool', 'borrador') },
+      { label: 'Mostrar el dibujo', icon: 'eye', path: 'draw.visible' },
+      { label: 'Vaciar el dibujo', icon: 'trash-2', onClick: () => actions.clearDrawing?.() },
     ]);
 
     // Dropdown de guías
     const guiasDropdown = createDropdown('Guias', 'pencil-ruler', [
-      { label: 'Canon de cabezas', icon: 'ruler', onClick: () => s.set('guides.heads', !s.get('guides.heads')) },
-      { label: 'Regla de tercios', icon: 'columns-3', onClick: () => s.set('guides.thirds', !s.get('guides.thirds')) },
-      { label: 'Rejilla del suelo', icon: 'grid-3x3', onClick: () => s.set('stage.grid', !s.get('stage.grid')) },
+      { label: 'Linea de accion', icon: 'spline', path: 'guides.action.line' },
+      { label: 'Ritmo de brazo a brazo', icon: 'spline', path: 'guides.action.arms' },
+      { label: 'Ritmo de hombro a pierna', icon: 'spline', path: 'guides.action.legs' },
+      { label: 'Fantasma exagerado', icon: 'ghost', path: 'guides.action.ghost' },
+      { label: 'Caja de lo seleccionado', icon: 'scan', path: 'scene.bounds.selected' },
+      { label: 'Caja de todo', icon: 'scan', path: 'scene.bounds.all' },
+      { label: 'Canon de cabezas', icon: 'ruler', path: 'guides.heads' },
+      { label: 'Regla de tercios', icon: 'columns-3', path: 'guides.thirds' },
+      { label: 'Rejilla del suelo', icon: 'grid-3x3', path: 'stage.grid' },
     ]);
 
     // Dropdown de ajustes
@@ -275,11 +295,12 @@ export class UI {
       figuraDropdown,
       camaraDropdown,
       capturaDropdown,
-      posesDropdown,
+      lapizDropdown,
       guiasDropdown,
       ajustesDropdown,
       sep(),
       iconToggle(this.settings, { path: 'ui.manualPosing', iconName: 'hand', title: 'Pose manual (G)' }),
+      iconToggle(this.settings, { path: 'draw.enabled', iconName: 'pencil', title: 'Lapiz: dibujar sobre el visor (D)' }),
       sep(),
       this.#toolButton('translate', 'move', 'Mover el elemento seleccionado (W)'),
       this.#toolButton('rotate', 'rotate-3d', 'Girar el elemento seleccionado (E)'),
@@ -656,8 +677,21 @@ export class UI {
 
       if (ev.ctrlKey || ev.metaKey) {
         const k = ev.key.toLowerCase();
-        if (k === 'z') { ev.preventDefault(); actions.undo(); }
-        else if (k === 's') { ev.preventDefault(); actions.screenshot(false); }
+        // Con el lapiz encendido, deshacer es cosa del dibujo: es lo ultimo que
+        // ha hecho el usuario. Sin el, se deshace el ultimo giro de hueso.
+        const dibujando = s.get('draw.enabled') === true;
+        if (k === 'z' && ev.shiftKey) { ev.preventDefault(); if (dibujando) actions.redoDrawing?.(); }
+        else if (k === 'z') {
+          ev.preventDefault();
+          if (!(dibujando && actions.undoDrawing?.())) actions.undo();
+        } else if (k === 's') { ev.preventDefault(); actions.screenshot(false); }
+        return;
+      }
+      // Grosor del lapiz, como en cualquier programa de dibujo.
+      if (ev.key === '[' || ev.key === ']') {
+        const paso = ev.key === '[' ? -1 : 1;
+        const actual = Number(s.get('draw.size')) || 4;
+        s.set('draw.size', Math.max(0.5, Math.min(40, Math.round((actual + paso * Math.max(0.5, actual * 0.2)) * 2) / 2)));
         return;
       }
       // El buscador abierto se queda con Escape: cerrarlo es lo que espera
@@ -665,6 +699,12 @@ export class UI {
       if (ev.key === 'Escape' && this.searchBar?.open) {
         ev.preventDefault();
         this.searchBar.hide();
+        return;
+      }
+      // Y luego el lapiz: Escape lo apaga y el visor vuelve a responder al raton.
+      if (ev.key === 'Escape' && s.get('draw.enabled') === true) {
+        ev.preventDefault();
+        s.set('draw.enabled', false);
         return;
       }
       // El editor de escena tiene prioridad: W/E/R cambian de herramienta y
@@ -696,6 +736,7 @@ export class UI {
             case 'c': s.set('mocap.frozen', s.get('mocap.frozen') !== true); break;
             case 'f': actions.frameFigure(); break;
             case 'g': s.set('ui.manualPosing', s.get('ui.manualPosing') !== true); break;
+            case 'd': s.set('draw.enabled', s.get('draw.enabled') !== true); break;
             case 'h': s.set('ui.sidebar', s.get('ui.sidebar') === false); break;
             default: return;
           }

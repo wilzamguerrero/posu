@@ -13,6 +13,9 @@
  *   - El giroscopio trabaja en coordenadas de mundo; la rotacion se convierte a
  *     local con  local = padreMundo⁻¹ * mundo, que es la misma algebra que usan
  *     los motores de retargeting.
+ *   - Los ejes del giroscopio y el imantado son los mismos ajustes del editor de
+ *     escena (`scene.space` y `scene.snap`): "Mundo" gira el hueso sobre los ejes
+ *     de la escena y "Local" sobre los del propio hueso.
  *   - Cada gesto completo (pointerdown -> pointerup) es un paso de deshacer.
  */
 
@@ -67,8 +70,15 @@ export class ManualPosing {
 
     this.gizmo = new TransformControls(viewport.cameras.active, viewport.renderer.domElement);
     this.gizmo.setMode('rotate');
-    this.gizmo.setSpace('local');
     this.gizmo.size = 0.85;
+    // Ejes e imantado compartidos con el gizmo de la escena: girar un hueso "en
+    // el mundo" es lo que se espera al haber elegido esos ejes en el panel.
+    this.gizmo.setSpace(settings.get('scene.space') === 'local' ? 'local' : 'world');
+    this.#applySnap(settings.get('scene.snap'));
+    this.offs = [
+      settings.on('scene.space', (v) => this.gizmo.setSpace(v === 'local' ? 'local' : 'world')),
+      settings.on('scene.snap', (v) => this.#applySnap(v)),
+    ];
     this.gizmo.addEventListener('dragging-changed', (e) => {
       this.dragging = e.value;
       viewport.cameras.controls.enabled = !e.value;
@@ -87,6 +97,15 @@ export class ManualPosing {
     viewport.renderer.domElement.addEventListener('pointermove', this._onPointerMove);
 
     this.unsubscribe = viewport.onFrame(() => this.#sync());
+  }
+
+  /**
+   * Imantado de la rotacion: el mismo valor que usa el gizmo de la escena. Con
+   * imantado activo los huesos giran de 15 en 15 grados, que es como se ajusta un
+   * maniqui de madera de verdad.
+   */
+  #applySnap(v) {
+    this.gizmo.rotationSnap = (Number(v) || 0) > 0 ? 15 * Math.PI / 180 : null;
   }
 
   /** Reconstruye los manejadores a partir de los huesos posables del modelo. */
@@ -286,6 +305,8 @@ export class ManualPosing {
 
   dispose() {
     this.unsubscribe?.();
+    for (const off of this.offs ?? []) off?.();
+    this.offs = [];
     const dom = this.viewport.renderer.domElement;
     dom.removeEventListener('pointerdown', this._onPointerDown);
     dom.removeEventListener('pointermove', this._onPointerMove);

@@ -115,6 +115,15 @@ import HandMetal from 'lucide/dist/esm/icons/hand-metal.js';
 import PenTool from 'lucide/dist/esm/icons/pen-tool.js';
 import Fingerprint from 'lucide/dist/esm/icons/fingerprint.js';
 import Link2 from 'lucide/dist/esm/icons/link-2.js';
+import Pencil from 'lucide/dist/esm/icons/pencil.js';
+import Eraser from 'lucide/dist/esm/icons/eraser.js';
+import Highlighter from 'lucide/dist/esm/icons/highlighter.js';
+import Spline from 'lucide/dist/esm/icons/spline.js';
+import Scan from 'lucide/dist/esm/icons/scan.js';
+import Ghost from 'lucide/dist/esm/icons/ghost.js';
+import Minus from 'lucide/dist/esm/icons/minus.js';
+import Undo2 from 'lucide/dist/esm/icons/undo-2.js';
+import Redo2 from 'lucide/dist/esm/icons/redo-2.js';
 
 /** Nombre kebab-case -> nodo de icono de Lucide. */
 export const ICONS = {
@@ -174,6 +183,17 @@ export const ICONS = {
   'pen-tool': PenTool,
   'fingerprint': Fingerprint,
   'link-2': Link2,
+
+  // Cuarta tanda: lapiz del visor, cajas envolventes y trazos de la pose.
+  'pencil': Pencil,
+  'eraser': Eraser,
+  'highlighter': Highlighter,
+  'spline': Spline,
+  'scan': Scan,
+  'ghost': Ghost,
+  'minus': Minus,
+  'undo-2': Undo2,
+  'redo-2': Redo2,
 };
 
 /**

@@ -76,7 +76,18 @@ let elegidos = [];
 const figRoot = new THREE.Object3D();
 figRoot.name = 'Figura 1';
 figRoot.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.7, 0.35)));
-const personaje = { loaded: true, root: figRoot };
+// El personaje de verdad mide su propio volumen; aqui basta con la caja de la
+// malla de prueba y una firma compatible con `Character.bounds`.
+const personaje = {
+  loaded: true,
+  root: figRoot,
+  box: new THREE.Box3(),
+  bounds() {
+    figRoot.updateMatrixWorld(true);
+    this.box.setFromObject(figRoot);
+    return { box: this.box, matrix: null };
+  },
+};
 const figures = {
   bajas: [],
   copias: [],
@@ -139,9 +150,11 @@ const cubo = editor.addObject('cubo');
 alOrigen('objects', 0);
 settings.set('scene.selected', '');
 
+const contorno = () => editor.bounds.hover.object.visible;
+const cajaFija = () => editor.bounds.selected.object.visible;
 puntero('pointermove', ...centro());
 check('el contorno avisa de que hay algo seleccionable debajo',
-  editor.hovered === cubo && editor.outline.visible === true, editor.hovered || '(nada)');
+  editor.hovered === cubo && contorno() === true, editor.hovered || '(nada)');
 check('el cursor cambia sobre un elemento', canvas.style.cursor === 'pointer', canvas.style.cursor || '(sin cursor)');
 
 clic(...centro());
@@ -149,12 +162,33 @@ check('pinchar en el visor selecciona el solido',
   settings.get('scene.selected') === cubo, settings.get('scene.selected') || '(nada)');
 check('la interfaz recibe el aviso para abrir el panel',
   elegidos.length === 1 && elegidos[0] === cubo, elegidos.join(','));
-check('el contorno se retira: manda el gizmo', editor.outline.visible === false);
+check('el contorno se retira: manda el gizmo', contorno() === false);
 
 // Sobre lo ya seleccionado no se repite el contorno.
 puntero('pointermove', ...centro());
 check('lo seleccionado no lleva contorno de aviso',
-  editor.hovered === '' && editor.outline.visible === false, editor.hovered || '(nada)');
+  editor.hovered === '' && contorno() === false, editor.hovered || '(nada)');
+
+// La caja del elemento seleccionado es opcional, y el contorno de aviso se
+// puede apagar del todo.
+settings.set('scene.selected', cubo);
+settings.set('scene.bounds.selected', true);
+check('la caja fija se pone sobre lo seleccionado', cajaFija() === true);
+settings.set('scene.bounds.selected', false);
+check('y se puede quitar', cajaFija() === false);
+settings.set('scene.bounds.hover', false);
+puntero('pointermove', 6, 6);
+puntero('pointermove', ...centro());
+check('el contorno al pasar el raton tambien se puede apagar', contorno() === false);
+settings.set('scene.bounds.hover', true);
+settings.set('scene.selected', '');
+
+// Y se puede dejar la caja puesta en todos los elementos, sin seleccionar nada.
+const conCaja = () => editor.bounds.pool.filter((b) => b.object.visible).length;
+settings.set('scene.bounds.all', true);
+check('la caja de todos pone una por elemento', conCaja() === 1, conCaja() + ' cajas');
+settings.set('scene.bounds.all', false);
+check('y se retiran al apagarla', conCaja() === 0, conCaja() + ' cajas');
 
 // ------------------------------------------------------------------- vacio ---
 puntero('pointermove', 6, 6);
@@ -167,7 +201,7 @@ check('el cursor vuelve a la normalidad', canvas.style.cursor === '', canvas.sty
 // ------------------------------------------------------- clic de otro modulo ---
 bloqueado = true;
 puntero('pointermove', ...centro());
-check('bloqueado: no se pinta contorno', editor.hovered === '' && editor.outline.visible === false);
+check('bloqueado: no se pinta contorno', editor.hovered === '' && contorno() === false);
 clic(...centro());
 check('bloqueado: el clic no selecciona',
   settings.get('scene.selected') === '', settings.get('scene.selected') || '(nada)');
@@ -196,7 +230,7 @@ puntero('pointermove', ...centro());
 check('la luz vuelve a marcarse al pasar por encima', editor.hovered === luz, editor.hovered || '(nada)');
 editor.clearAll();
 check('al borrar el elemento el contorno desaparece',
-  editor.hovered === '' && editor.outline.visible === false, editor.hovered || '(nada)');
+  editor.hovered === '' && contorno() === false, editor.hovered || '(nada)');
 
 // ---------------------------------------------------------------- figuras ---
 // Una figura se selecciona y se recoloca como cualquier otro elemento, pero es
@@ -208,7 +242,7 @@ settings.batch({
   'scene.figures': [{
     id: 'fig1', name: 'Figura 1', model: 'character', visible: true,
     position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 },
-    height: 1.75, anchor: 'suelo', pose: null,
+    scale: { x: 1, y: 1, z: 1 }, height: 1.75, anchor: 'suelo', pose: null,
   }],
   'figure.active': 'fig1',
   'scene.selected': '',
@@ -228,10 +262,9 @@ check('y de paso la hace la figura que posa',
 check('la interfaz recibe el aviso, como con un solido',
   elegidos.length === 1 && elegidos[0] === 'fig1', elegidos.join(','));
 
-// La altura tiene su propio deslizador: escalar el root deformaria la figura.
+// La escala de una figura es una deformacion aparte de su altura en metros.
 settings.set('scene.tool', 'scale');
-check('con una figura seleccionada el gizmo no ofrece escala',
-  editor.gizmo.mode === 'translate', editor.gizmo.mode);
+check('una figura tambien se puede escalar', editor.gizmo.mode === 'scale', editor.gizmo.mode);
 settings.set('scene.tool', 'rotate');
 check('girar si se puede', editor.gizmo.mode === 'rotate', editor.gizmo.mode);
 settings.set('scene.tool', 'translate');
@@ -247,8 +280,13 @@ check('al soltar el gizmo se escribe la posicion de la figura',
   settings.get('scene.figures.0.position.x') + ' / ' + settings.get('scene.figures.0.position.z'));
 check('y el giro en grados', Math.abs(settings.get('scene.figures.0.rotation.y') - 45) < 0.2,
   String(settings.get('scene.figures.0.rotation.y')));
-check('la figura nunca guarda escala',
-  settings.get('scene.figures.0.scale') === undefined, JSON.stringify(settings.get('scene.figures.0.scale')));
+figRoot.scale.set(1, 1.08, 1);
+editor.gizmo.dispatchEvent({ type: 'dragging-changed', value: true });
+editor.gizmo.dispatchEvent({ type: 'dragging-changed', value: false });
+check('y la escala de la figura tambien se guarda',
+  Math.abs(settings.get('scene.figures.0.scale.y') - 1.08) < 1e-6,
+  JSON.stringify(settings.get('scene.figures.0.scale')));
+figRoot.scale.set(1, 1, 1);
 
 // La figura activa es pegajosa: el gizmo salta al cubo, la captura no.
 figRoot.position.set(-1.8, 0, 0);

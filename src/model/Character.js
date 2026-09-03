@@ -44,6 +44,40 @@ const ESTILO_A_PRESET = {
 /** Estilos cuyo color decide el usuario con `figure.clayColor`. */
 const ESTILO_TENIDO = new Set(['arcilla', 'toon']);
 
+/**
+ * Puntos extremos por hueso, cacheados por geometria: duplicar una figura
+ * comparte las mallas del archivo, asi que el recorrido de vertices se hace una
+ * sola vez por modelo y no una por personaje.
+ * @type {WeakMap<import('three').BufferGeometry, (Float32Array|null)[]>}
+ */
+const BONE_BOUNDS_CACHE = new WeakMap();
+
+/**
+ * Peso minimo para que un vertice cuente como piel de un hueso. Los pesos
+ * residuales (un 2 % de la mano en el hombro) inflaban la caja varios
+ * centimetros al mover ese hueso sin mover la piel de verdad.
+ */
+const WEIGHT_MIN = 0.12;
+
+/**
+ * Direcciones del envoltorio de 26 caras (las 13 rectas y sus opuestas). Se
+ * guarda el vertice mas lejano en cada una: son los puntos que dibujan la
+ * silueta del trozo de piel que mueve un hueso, y con ellos la caja se recalcula
+ * sin volver a mirar la malla.
+ */
+const HULL_DIRS = [
+  [1, 0, 0], [0, 1, 0], [0, 0, 1],
+  [1, 1, 0], [1, -1, 0], [1, 0, 1], [1, 0, -1], [0, 1, 1], [0, 1, -1],
+  [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
+];
+
+const _m = new THREE.Matrix4();
+const _mm = new THREE.Matrix4();
+const _cajaTmp = new THREE.Box3();
+const _vTmp = new THREE.Vector3();
+const _i4 = new THREE.Vector4();
+const _w4 = new THREE.Vector4();
+
 
 export class Character {
   constructor(settings) {
@@ -78,7 +112,17 @@ export class Character {
     this.basis = new THREE.Quaternion();
     this.helper = null;
     this.ghost = null;
+    /** Volumen envolvente en coordenadas de mundo (sigue a la pose). */
     this.box = new THREE.Box3();
+    /** El mismo volumen en el espacio del `root`: caja alineada con la figura. */
+    this.localBox = new THREE.Box3();
+    /** Y en el espacio del contenido, sin la altura ni el anclaje aplicados. */
+    this.contentBox = new THREE.Box3();
+    /** Figura en reposo, para medir la altura y para la caja «sin pose». */
+    this.restBox = new THREE.Box3();
+    this.restHeight = 1;
+    /** Por variante: [{ bone, points }] con la piel que mueve cada hueso. */
+    this.boneBounds = { anatomia: [], maniqui: [], esqueleto: [] };
     this.loaded = false;
     this.sourceScale = 1;
 
@@ -107,7 +151,7 @@ export class Character {
   /**
    * Altura y anclaje de esta figura. Se llama al crearla y cada vez que cambia
    * su definicion en `scene.figures`.
-   * @param {{height?: number, anchor?: string}} placement
+   * @param {{height?: number, anchor?: 'suelo'|'centro'|'libre'}} placement
    */
   setPlacement({ height, anchor } = {}) {
     if (Number.isFinite(height)) this.placement.height = height;
@@ -198,6 +242,8 @@ export class Character {
     this.#captureRest();
     this.#assignMeshes(skins);
     this.#buildVariants();
+    this.#buildBoneBounds();
+    this.#measureRest();
 
     this.loaded = true;
     this.applyTransform();
@@ -309,39 +355,285 @@ export class Character {
     return this.meshes[this.settings.get('figure.variant')] ?? this.meshes.anatomia;
   }
 
+  /**
+   * Piel por hueso de la variante que se esta viendo: es la que mide la caja
+   * envolvente y decide el apoyo en el suelo. Si esa variante no trajo pesos se
+   * usa la primera que si.
+   */
+  get skinBounds() {
+    const b = this.boneBounds ?? {};
+    const variant = this.settings.get('figure.variant');
+    return b[variant]?.length ? b[variant]
+      : (b.anatomia?.length ? b.anatomia : (b.maniqui?.length ? b.maniqui : (b.esqueleto ?? [])));
+  }
+
   // ------------------------------------------------------- transformaciones ---
 
-  /** Normaliza la altura y ancla la figura al suelo (o la centra). */
+  /**
+   * Normaliza la altura y ancla la figura al suelo (o la centra).
+   *
+   * La altura se mide SIEMPRE sobre la figura en reposo (`restHeight`): si se
+   * midiera la pose actual, agacharse haria crecer al personaje para que su caja
+   * siguiera midiendo los metros pedidos. El anclaje, en cambio, si es cosa de la
+   * pose: lo mantiene al dia `tick()` en cada fotograma.
+   */
   applyTransform() {
     if (!this.loaded) return;
-    this.holder.scale.setScalar(1);
     this.holder.rotation.set(0, 0, 0);
-    this.holder.position.set(0, 0, 0);
-    this.holder.updateMatrixWorld(true);
+    this.holder.position.x = 0;
+    this.holder.position.z = 0;
+    this.holder.scale.setScalar(this.placement.height / this.restHeight);
+    this.root.updateMatrixWorld(true);
+    this.#unionBones(this.contentBox);
+    this.holder.position.y = this.#anchorOffset();
+    this.root.updateMatrixWorld(true);
+    this.#spreadBounds();
+  }
 
-    // Solo se mide el contenido del archivo: las variantes generadas comparten
-    // el mismo esqueleto y podrian tener extremos ligeramente distintos.
-    const raw = new THREE.Box3().setFromObject(this.source);
-    const h = Math.max(0.01, raw.max.y - raw.min.y);
-    const k = this.placement.height / h;
+  /**
+   * Desplazamiento vertical del contenido segun el anclaje elegido:
+   *   suelo  → el punto mas bajo de la pose queda en y = 0 (los pies apoyados);
+   *   centro → el volumen queda centrado en el origen;
+   *   libre  → el archivo se queda donde lo puso su autor.
+   */
+  #anchorOffset() {
+    if (this.contentBox.isEmpty()) return 0;
+    const k = this.holder.scale.y || 1;
+    switch (this.placement.anchor) {
+      case 'centro': return -((this.contentBox.min.y + this.contentBox.max.y) / 2) * k;
+      case 'libre': return 0;
+      default: return -this.contentBox.min.y * k;
+    }
+  }
 
-    this.holder.scale.setScalar(k);
-    // "suelo": plantas de los pies en y=0. "centro": figura centrada en el origen.
-    this.holder.position.y = this.placement.anchor === 'centro'
-      ? -((raw.min.y + raw.max.y) / 2) * k
-      : -raw.min.y * k;
-    this.holder.updateMatrixWorld(true);
-
-    this.refreshBounds();
+  /**
+   * Vuelve a medir la figura y corrige el anclaje si la pose ha cambiado. Lo
+   * llama el bucle de dibujo (a traves de `FigureSet.tick`) en cada fotograma:
+   * sin esto una figura agachada se quedaba flotando y una en cuclillas hundida,
+   * porque el anclaje solo se recalculaba al tocar su colocacion.
+   */
+  tick() {
+    if (!this.loaded || !this.skinBounds.length) return;
+    this.root.updateMatrixWorld(true);
+    this.#unionBones(this.contentBox);
+    const y = this.#anchorOffset();
+    // Umbral de medio milimetro: evita reescribir la matriz cuando la pose esta
+    // quieta y el redondeo del calculo baila en el ultimo decimal.
+    if (Math.abs(y - this.holder.position.y) > 0.0005) {
+      this.holder.position.y = y;
+      this.root.updateMatrixWorld(true);
+    }
+    this.#spreadBounds();
   }
 
   /** Recalcula el volumen envolvente teniendo en cuenta la pose actual. */
   refreshBounds() {
     if (!this.loaded) return this.box;
-    for (const mesh of this.allMeshes) mesh.boundingBox = null;
     this.root.updateMatrixWorld(true);
-    this.box.setFromObject(this.source);
+    if (!this.skinBounds.length) {
+      // Modelo sin pesos utilizables: se cae al recorrido de vertices de three.
+      for (const mesh of this.allMeshes) mesh.boundingBox = null;
+      this.box.setFromObject(this.source);
+      this.localBox.copy(this.box).applyMatrix4(_m.copy(this.root.matrixWorld).invert());
+      // Y se rellena la caja del contenido, que es la que lee `bounds()`.
+      this.contentBox.copy(this.box).applyMatrix4(_m.copy(this.holder.matrixWorld).invert());
+      return this.box;
+    }
+    this.#unionBones(this.contentBox);
+    this.#spreadBounds();
     return this.box;
+  }
+
+  /**
+   * Volumen envolvente para la interfaz. Con `live` apagado se devuelve la caja
+   * de la figura en reposo, que es la que mide el area del modelo sin la pose.
+   * @param {{live?: boolean, space?: 'objeto'|'mundo'}} [o]
+   * @returns {{box: THREE.Box3, matrix: THREE.Matrix4|null}} `matrix` es la del
+   *   sistema en el que esta expresada la caja (null = coordenadas de mundo).
+   */
+  bounds({ live = true, space = 'objeto' } = {}) {
+    const base = live ? this.contentBox : this.restBox;
+    _cajaTmp.copy(base);
+    if (_cajaTmp.isEmpty()) _cajaTmp.copy(this.contentBox);
+    // Del espacio del contenido al del `root`: altura y anclaje.
+    _cajaTmp.applyMatrix4(this.holder.matrix);
+    if (space === 'mundo') {
+      return { box: _cajaTmp.applyMatrix4(this.root.matrixWorld), matrix: null };
+    }
+    return { box: _cajaTmp, matrix: this.root.matrixWorld };
+  }
+
+  /** Pasa la caja del contenido al espacio del `root` y al de mundo. */
+  #spreadBounds() {
+    this.localBox.copy(this.contentBox).applyMatrix4(this.holder.matrix);
+    this.box.copy(this.localBox).applyMatrix4(this.root.matrixWorld);
+  }
+
+  /**
+   * Union de la piel de cada hueso en el espacio del contenido (el del `holder`,
+   * antes de la altura y el anclaje). Es la medida barata del volumen: no
+   * recorre ningun vertice, solo unos puntos por hueso.
+   */
+  #unionBones(out, variante = null) {
+    out.makeEmpty();
+    const lista = variante && this.boneBounds[variante]?.length ? this.boneBounds[variante] : this.skinBounds;
+    if (!lista.length) return out;
+    _m.copy(this.holder.matrixWorld).invert();
+    for (const entry of lista) {
+      _mm.multiplyMatrices(_m, entry.bone.matrixWorld);
+      const p = entry.points;
+      for (let i = 0; i < p.length; i += 3) {
+        _vTmp.set(p[i], p[i + 1], p[i + 2]).applyMatrix4(_mm);
+        out.expandByPoint(_vTmp);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Reparte la piel entre los huesos que la mueven y guarda, por hueso, los
+   * vertices extremos en 26 direcciones: la silueta del trozo de piel que ese
+   * hueso arrastra, en su propio espacio. Un vertice cuenta para TODOS los huesos
+   * que lo mueven, no solo para el de mas peso, porque su posicion final es una
+   * mezcla de las de todos ellos.
+   *
+   * Con esto el volumen de la figura se recalcula en cada fotograma: medir la
+   * piel de verdad (`Box3.setFromObject` sobre una malla con esqueleto) recorre
+   * decenas de miles de vertices y cuesta milisegundos.
+   */
+  #buildBoneBounds() {
+    this.boneBounds = { anatomia: [], maniqui: [], esqueleto: [] };
+    const bones = this.skeleton?.bones ?? [];
+    if (!bones.length) return;
+    const inverses = this.skeleton.boneInverses;
+
+    // Una lista por variante: la caja envolvente y el anclaje miden la malla que
+    // se esta viendo. Los volumenes generados del maniqui sobresalen algunos
+    // centimetros de la piel, y con una sola lista comun la figura quedaba
+    // flotando sobre el suelo al mostrar la anatomia.
+    for (const [variante, mallas] of Object.entries(this.meshes)) {
+      /** @type {(number[]|null)[]} lista de coordenadas por hueso */
+      const total = bones.map(() => null);
+      for (const mesh of mallas) {
+        const puntos = this.#meshBonePoints(mesh, bones.length, inverses);
+        if (!puntos) continue;
+        for (let i = 0; i < puntos.length; i++) {
+          if (!puntos[i]) continue;
+          (total[i] ??= []).push(...puntos[i]);
+        }
+      }
+      const lista = [];
+      for (let i = 0; i < bones.length; i++) {
+        if (total[i]?.length) lista.push({ bone: bones[i], points: new Float32Array(total[i]) });
+      }
+      this.boneBounds[variante] = lista;
+    }
+  }
+
+  /**
+   * Puntos extremos por hueso de una sola malla, cacheados por geometria. Se
+   * calculan los 13 pares de extremos (maximo y minimo de cada direccion) y se
+   * quitan los repetidos: en la practica quedan entre 8 y 20 puntos por hueso.
+   */
+  #meshBonePoints(mesh, count, inverses) {
+    const geo = mesh.geometry;
+    const pos = geo?.attributes?.position;
+    const idx = geo?.attributes?.skinIndex;
+    const wei = geo?.attributes?.skinWeight;
+    if (!pos || !idx || !wei) return null;
+    const cached = BONE_BOUNDS_CACHE.get(geo);
+    if (cached && cached.length === count) return cached;
+
+    const D = HULL_DIRS.length;
+    // `pre[i]` lleva el vertice de la geometria al espacio del hueso i de una
+    // sola pasada: es el mismo par de matrices para toda la malla.
+    const pre = inverses.map((inv) => inv.clone().multiply(mesh.bindMatrix));
+    /** Por hueso: el punto mas alejado en cada direccion (max y min). */
+    const hi = new Array(count).fill(null);
+    const lo = new Array(count).fill(null);
+    const hiVal = new Array(count).fill(null);
+    const loVal = new Array(count).fill(null);
+
+    for (let v = 0; v < pos.count; v++) {
+      _i4.fromBufferAttribute(idx, v);
+      _w4.fromBufferAttribute(wei, v);
+      for (let k = 0; k < 4; k++) {
+        if (_w4.getComponent(k) < WEIGHT_MIN) continue;
+        const b = _i4.getComponent(k);
+        if (!(b >= 0 && b < count)) continue;
+        _vTmp.fromBufferAttribute(pos, v).applyMatrix4(pre[b]);
+        if (!hi[b]) {
+          hi[b] = new Float32Array(D * 3);
+          lo[b] = new Float32Array(D * 3);
+          hiVal[b] = new Float32Array(D).fill(-Infinity);
+          loVal[b] = new Float32Array(D).fill(Infinity);
+        }
+        const { x, y, z } = _vTmp;
+        for (let d = 0; d < D; d++) {
+          const dir = HULL_DIRS[d];
+          const s = x * dir[0] + y * dir[1] + z * dir[2];
+          if (s > hiVal[b][d]) {
+            hiVal[b][d] = s;
+            hi[b][d * 3] = x; hi[b][d * 3 + 1] = y; hi[b][d * 3 + 2] = z;
+          }
+          if (s < loVal[b][d]) {
+            loVal[b][d] = s;
+            lo[b][d * 3] = x; lo[b][d * 3 + 1] = y; lo[b][d * 3 + 2] = z;
+          }
+        }
+      }
+    }
+
+    const puntos = new Array(count).fill(null);
+    for (let b = 0; b < count; b++) {
+      if (!hi[b]) continue;
+      const vistos = new Set();
+      const lista = [];
+      for (const fuente of [hi[b], lo[b]]) {
+        for (let d = 0; d < D; d++) {
+          const x = fuente[d * 3];
+          const y = fuente[d * 3 + 1];
+          const z = fuente[d * 3 + 2];
+          // Rejilla de un decimo de milimetro: los extremos de varias
+          // direcciones suelen caer en el mismo vertice.
+          const clave = `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`;
+          if (vistos.has(clave)) continue;
+          vistos.add(clave);
+          lista.push(x, y, z);
+        }
+      }
+      puntos[b] = lista;
+    }
+    BONE_BOUNDS_CACHE.set(geo, puntos);
+    return puntos;
+  }
+
+  /**
+   * Mide la figura en reposo. Se pone el esqueleto en la pose de enlace, se mide
+   * y se devuelve la pose tal como estaba: asi la altura pedida en el panel
+   * significa siempre «de pie mide tantos metros», sin depender de la pose.
+   */
+  #measureRest() {
+    if (!this.skinBounds.length) {
+      this.holder.updateMatrixWorld(true);
+      this.restBox.setFromObject(this.source);
+      this.restHeight = Math.max(0.01, this.restBox.max.y - this.restBox.min.y);
+      return;
+    }
+    const bones = this.skeleton.bones;
+    const pose = bones.map((b) => b.quaternion.clone());
+    const hips = this.bones.hips?.position.clone() ?? null;
+
+    this.resetToRest();
+    this.root.updateMatrixWorld(true);
+    // Siempre con la anatomia: si se midiera la variante visible, cambiar de
+    // malla reescalaria la figura al normalizar su altura.
+    this.#unionBones(this.restBox, 'anatomia');
+    this.restHeight = Math.max(0.01, this.restBox.max.y - this.restBox.min.y);
+
+    bones.forEach((b, i) => b.quaternion.copy(pose[i]));
+    if (hips && this.bones.hips) this.bones.hips.position.copy(hips);
+    this.root.updateMatrixWorld(true);
   }
 
   // ------------------------------------------------------------ variantes ---
@@ -354,6 +646,9 @@ export class Character {
     if (!this.meshes[tipo]) return;
     this.settings.set('figure.variant', tipo);
     this.#applyMaterials();
+    // Cada variante tiene su propio volumen: el apoyo en el suelo y la caja
+    // envolvente se rehacen con la malla que pasa a estar a la vista.
+    if (this.loaded) this.applyTransform();
   }
 
   setOpacity(value) {
@@ -572,6 +867,12 @@ export class Character {
     this.meshes = { anatomia: [], maniqui: [], esqueleto: [] };
     this.baseMaterials = new Map();
     this.rest = { local: new Map(), world: new Map(), position: new Map() };
+    this.boneBounds = { anatomia: [], maniqui: [], esqueleto: [] };
+    this.restHeight = 1;
+    this.restBox.makeEmpty();
+    this.contentBox.makeEmpty();
+    this.localBox.makeEmpty();
+    this.box.makeEmpty();
     this.bones = {};
     this.missing = [];
     this.missingRequired = [];

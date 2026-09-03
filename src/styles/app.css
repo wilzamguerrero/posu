@@ -136,6 +136,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #gl-canvas { outline: none; }
 .overlay-canvas { pointer-events: none; }
 
+/* Lapiz del visor. Los dos lienzos van por encima del 3D y por debajo de la
+   interfaz; el trazo en curso, sobre lo ya trazado. Nunca reciben eventos: el
+   puntero lo atrapa draw/Sketch.js antes que los controles de orbita. */
+.sketch-canvas { z-index: 2; }
+#sketch-live { z-index: 3; }
+.sketch-canvas.is-hidden { display: none; }
+
 .viewport-toolbar {
   position: absolute;
   /* Columna centrada en la altura y pegada al borde izquierdo del visor: con el
@@ -726,6 +733,12 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn.danger:hover { background: color-mix(in srgb, var(--err) 22%, var(--bg-widget)); border-color: var(--err); color: #ffb3b3; }
 .btn.block { width: 100%; }
+/* Boton que refleja un interruptor del almacen (la caja envolvente, el lapiz). */
+.btn.is-active {
+  background: color-mix(in srgb, var(--accent) 26%, var(--bg-widget));
+  border-color: var(--accent);
+  color: var(--fg-strong);
+}
 .btn[disabled] { opacity: 0.4; pointer-events: none; }
 .btn .svg-icon { width: 14px; height: 14px; }
 
