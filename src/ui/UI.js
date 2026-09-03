@@ -377,27 +377,88 @@ export class UI {
     this.dom.hudClose.addEventListener('click', () => this.settings.set('mocap.showHud', false));
     this.dom.hudDrag.addEventListener('dblclick', () => hud.classList.toggle('is-collapsed'));
 
-    // Arrastre con puntero: se guarda la posicion en pixeles dentro del visor.
-    let start = null;
+    // Arrastre con puntero. Tres cosas hacian que fuera a tirones y que la caja
+    // saltara de sitio, y las tres se arreglan aqui:
+    //  · `left`/`top` se fijan ya en el `pointerdown`. Poner solo `right` y
+    //    `bottom` en automatico deja la caja en su posicion estatica, o sea de un
+    //    salto a la esquina de arriba a la izquierda, y ahi se quedaba si se
+    //    pulsaba sin llegar a mover (o al doble clic que la repliega).
+    //  · La caja del visor se mide una sola vez, al empezar. Medirla en cada
+    //    aviso de movimiento obliga al navegador a recalcular la disposicion, y un
+    //    raton de 1000 Hz manda un aviso por milisegundo: de ahi el tiron.
+    //  · Los avisos se acumulan y se escriben una vez por cuadro; mas de un
+    //    movimiento por cuadro no se puede ver.
+    let drag = null;
+    let pending = null;
+    let frame = 0;
+
+    const write = () => {
+      frame = 0;
+      if (!pending) return;
+      hud.style.left = pending.x + 'px';
+      hud.style.top = pending.y + 'px';
+      pending = null;
+    };
+
+    const release = () => {
+      if (!drag) return;
+      try { this.dom.hudDrag.releasePointerCapture?.(drag.id); } catch { /* ya soltado */ }
+      drag = null;
+      hud.classList.remove('is-dragging');
+      if (frame) cancelAnimationFrame(frame);
+      write();
+    };
+
     this.dom.hudDrag.addEventListener('pointerdown', (ev) => {
       if (ev.target.closest('.icon-btn')) return;
+      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+      ev.preventDefault();
       const box = hud.getBoundingClientRect();
       const host = this.dom.viewport.getBoundingClientRect();
-      start = { x: ev.clientX, y: ev.clientY, left: box.left - host.left, top: box.top - host.top, w: box.width, h: box.height };
+      const left = box.left - host.left;
+      const top = box.top - host.top;
+      drag = {
+        id: ev.pointerId,
+        x: ev.clientX,
+        y: ev.clientY,
+        left,
+        top,
+        maxX: Math.max(0, host.width - box.width),
+        maxY: Math.max(0, host.height - box.height),
+      };
       hud.style.right = 'auto';
       hud.style.bottom = 'auto';
-      this.dom.hudDrag.setPointerCapture(ev.pointerId);
+      hud.style.left = left + 'px';
+      hud.style.top = top + 'px';
+      hud.classList.add('is-dragging');
+      try { this.dom.hudDrag.setPointerCapture?.(ev.pointerId); } catch { /* sin captura: basta con los avisos del elemento */ }
     });
     this.dom.hudDrag.addEventListener('pointermove', (ev) => {
-      if (!start) return;
-      const host = this.dom.viewport.getBoundingClientRect();
-      const max = { x: host.width - start.w, y: host.height - start.h };
-      hud.style.left = Math.max(0, Math.min(max.x, start.left + ev.clientX - start.x)) + 'px';
-      hud.style.top = Math.max(0, Math.min(max.y, start.top + ev.clientY - start.y)) + 'px';
+      if (!drag || ev.pointerId !== drag.id) return;
+      // Un raton sin botones pulsados no esta arrastrando: si el gesto se perdio
+      // por el camino (menu contextual, gesto del sistema) se suelta aqui.
+      if (ev.pointerType === 'mouse' && ev.buttons === 0) { release(); return; }
+      pending = {
+        x: Math.round(Math.max(0, Math.min(drag.maxX, drag.left + ev.clientX - drag.x))),
+        y: Math.round(Math.max(0, Math.min(drag.maxY, drag.top + ev.clientY - drag.y))),
+      };
+      frame ||= requestAnimationFrame(write);
     });
-    const end = () => { start = null; };
-    this.dom.hudDrag.addEventListener('pointerup', end);
-    this.dom.hudDrag.addEventListener('pointercancel', end);
+    for (const evt of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      this.dom.hudDrag.addEventListener(evt, release);
+    }
+
+    // Al encoger la ventana el monitor podria quedarse fuera del visor. Solo se
+    // recoloca si el usuario lo habia movido: mientras siga anclado a la esquina
+    // se apana solo con `right`/`bottom`.
+    window.addEventListener('resize', () => {
+      if (drag || !hud.style.left) return;
+      const host = this.dom.viewport.getBoundingClientRect();
+      const box = hud.getBoundingClientRect();
+      if (!host.width || !box.width) return;
+      hud.style.left = Math.round(Math.max(0, Math.min(host.width - box.width, box.left - host.left))) + 'px';
+      hud.style.top = Math.round(Math.max(0, Math.min(host.height - box.height, box.top - host.top))) + 'px';
+    });
 
     this.#buildHudResize();
     this.#buildHudPicking();
@@ -458,6 +519,7 @@ export class UI {
         const host = this.dom.viewport.getBoundingClientRect();
         drag = {
           dir: grip.dataset.grip ?? 'se',
+          id: ev.pointerId,
           x: ev.clientX,
           y: ev.clientY,
           left: box.left - host.left,
@@ -475,7 +537,9 @@ export class UI {
         grip.setPointerCapture?.(ev.pointerId);
       });
       grip.addEventListener('pointermove', (ev) => {
-        if (!drag) return;
+        if (!drag || ev.pointerId !== drag.id) return;
+        // Igual que en el arrastre: un raton sin botones ya no esta estirando.
+        if (ev.pointerType === 'mouse' && ev.buttons === 0) { stop(); return; }
         const dx = ev.clientX - drag.x;
         const dy = ev.clientY - drag.y;
         const east = drag.dir.includes('e');
@@ -509,6 +573,9 @@ export class UI {
       };
       grip.addEventListener('pointerup', stop);
       grip.addEventListener('pointercancel', stop);
+      // Si el navegador se queda el puntero a medias, el tirador tiene que
+      // enterarse: de otro modo el monitor seguiria estirandose sin boton.
+      grip.addEventListener('lostpointercapture', stop);
     }
   }
 

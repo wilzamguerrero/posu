@@ -349,7 +349,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-size: 11px;
   color: var(--fg-muted);
   flex: 0 0 auto;
+  /* El gesto es nuestro: sin esto el navegador se queda el arrastre en pantallas
+     tactiles (desplaza la pagina) y con el raton se lleva por delante la
+     seleccion del titulo, que es de donde venian los saltos. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
+/* Mientras se arrastra, el cuerpo no atiende al puntero: ni cursor de cruz ni
+   seleccion de puntos a medio gesto. */
+.mocap-hud.is-dragging .mocap-hud-head { cursor: grabbing; }
+.mocap-hud.is-dragging .mocap-hud-body { pointer-events: none; }
 .mocap-hud-head .svg-icon { width: 13px; height: 13px; }
 /* Por encima del tirador `ne`, para no perder el boton de cerrar. */
 .mocap-hud-head .icon-btn { position: relative; z-index: 2; }

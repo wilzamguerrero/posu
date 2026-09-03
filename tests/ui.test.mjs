@@ -226,6 +226,32 @@ se.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
 console.log('tras el doble clic:', settings.get('mocap.hudW'), '/', settings.get('mocap.hudH'),
   '· con alto fijo:', hud.classList.contains('is-sized'));
 
+// 6b-bis · Arrastre del monitor. Al pulsar la cabecera se fijan ya `left`/`top`:
+// antes solo se soltaban `right`/`bottom` y la caja se iba de un salto a la
+// esquina de arriba a la izquierda si no se movia (o al doble clic que repliega).
+// El movimiento se escribe una vez por cuadro y se recorta al visor.
+const cabecera = document.getElementById('mocap-hud-drag');
+const cuadro = () => new Promise((r) => requestAnimationFrame(r));
+Object.assign(fakeBox, { left: 620, top: 300, width: 268, height: 240 });
+cabecera.dispatchEvent(pev('pointerdown', 700, 310));
+console.log('al pulsar la cabecera:', hud.style.left, '/', hud.style.top,
+  '· sin salto:', hud.style.left === '620px' && hud.style.top === '300px',
+  '· anclaje suelto:', hud.style.right === 'auto' && hud.style.bottom === 'auto',
+  '· arrastrando:', hud.classList.contains('is-dragging'));
+cabecera.dispatchEvent(pev('pointermove', 660, 340));
+await cuadro();
+console.log('tras arrastrar 40 a la izquierda y 30 abajo:', hud.style.left, '/', hud.style.top);
+// Fuera del visor: se queda pegado al borde (900x600 menos la caja).
+cabecera.dispatchEvent(pev('pointermove', 5000, 5000));
+await cuadro();
+console.log('recortado al visor:', hud.style.left, '/', hud.style.top);
+cabecera.dispatchEvent(pev('pointerup', 5000, 5000));
+// Suelto: los avisos que lleguen despues ya no lo mueven.
+cabecera.dispatchEvent(pev('pointermove', 100, 100));
+await cuadro();
+console.log('tras soltar:', hud.style.left, '/', hud.style.top,
+  '· sin la marca de arrastre:', !hud.classList.contains('is-dragging'));
+
 // 6c · Pulsar un punto detectado pide el control correspondiente.
 const overlayCanvas = document.getElementById('mocap-overlay');
 app.overlay = { pick: (x) => (x > 100 ? 13 : -1), clear: () => {} };
