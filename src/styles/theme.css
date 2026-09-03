@@ -7,12 +7,19 @@
   /* Superficies */
   --bg-app: #181818;
   --bg-editor: #1f1f1f;
-  --bg-panel: #181818;
   --bg-widget: #202020;
   --bg-input: #313131;
-  --bg-hover: #2a2d2e;
+  /* Grises neutros de verdad: los del tema de VS Code llevan un punto de azul
+     (#2a2d2e, #252526) que en una superficie grande se lee como un tono frio al
+     lado del gris del estudio 3D. */
+  --bg-hover: #2d2d2d;
   --bg-active: #04395e;
-  --bg-elevated: #252526;
+  --bg-elevated: #262626;
+  /* El panel lateral comparte superficie con los menus que flotan sobre el visor:
+     es lo que hace que se lean como una sola herramienta y no como dos capas de
+     distinto tono. Los controles de dentro siguen siendo mas oscuros
+     (`--bg-widget`), que es lo que los hace parecer hundidos. */
+  --bg-panel: var(--bg-elevated);
   --bg-scrim: rgba(12, 12, 12, 0.72);
 
   /* Bordes */
@@ -67,11 +74,11 @@
 .theme-light {
   --bg-app: #f8f8f8;
   --bg-editor: #ffffff;
-  --bg-panel: #f8f8f8;
   --bg-widget: #f3f3f3;
   --bg-input: #ffffff;
   --bg-hover: #e8e8e8;
   --bg-active: #cce4f7;
+  /* En claro la superficie compartida es el blanco; `--bg-panel` la sigue. */
   --bg-elevated: #ffffff;
   --bg-scrim: rgba(255, 255, 255, 0.72);
   --border: #e5e5e5;

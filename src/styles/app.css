@@ -96,7 +96,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   flex-direction: column;
   min-height: 0;
   background: var(--bg-panel);
-  border-right: 1px solid var(--border);
+  /* Borde marcado, como el de los menus flotantes: el panel es una superficie
+     sobre el visor, no una franja pegada al borde de la ventana. */
+  border-right: 1px solid var(--border-strong);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: absolute;
   left: 0;
@@ -170,8 +172,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-  backdrop-filter: blur(10px);
+  /* Opaca a proposito, con el mismo token que el panel lateral: translucida
+     tomaba el color de lo que hubiera detras (el estudio 3D es un gris claro) y
+     entonces la barra y el panel nunca eran del mismo tono. */
+  background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
