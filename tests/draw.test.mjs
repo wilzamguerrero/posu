@@ -74,7 +74,7 @@ const check = (name, cond, extra = '') => {
 const { Settings } = await import('../src/core/Settings.js');
 const { DEFAULTS } = await import('../src/config.js');
 const { Sketch } = await import('../src/draw/Sketch.js');
-const { strokePath, taper, streamline, decimate } = await import('../src/draw/stroke.js');
+const { strokePath, taper, streamline, decimate, resample, extend, pathLength } = await import('../src/draw/stroke.js');
 
 /* ── 1 · Geometria del trazo ─────────────────────────────────────────── */
 
@@ -101,6 +101,37 @@ check('el estabilizador acerca los puntos intermedios a la linea',
   'x=' + estable.map((p) => p.x.toFixed(1)).join(','));
 check('los puntos pegados se descartan',
   decimate([{ x: 0, y: 0, w: 1 }, { x: 0.1, y: 0, w: 1 }, { x: 20, y: 0, w: 1 }], 1).length === 2);
+
+// Cadena con tramos muy desiguales: dos largos y tres puntos casi encima en el
+// medio. Es la forma de un ritmo de brazo a brazo, y con nudos uniformes la
+// curva se pasaba de largo y dejaba un rizo justo ahi.
+const desigual = [
+  { x: 0, y: 200 }, { x: 120, y: 120 }, { x: 240, y: 62 },
+  { x: 250, y: 56 }, { x: 260, y: 62 }, { x: 380, y: 120 }, { x: 500, y: 200 },
+];
+{
+  const curva = resample(desigual, 90);
+  const techo = Math.min(...desigual.map((p) => p.y));
+  const alto = Math.min(...curva.map((p) => p.y));
+  check('el remuestreo no se pasa del poligono de control', alto >= techo - 1.5,
+    'control ' + techo + ' · curva ' + alto.toFixed(1));
+  const empieza = Math.hypot(curva[0].x - desigual[0].x, curva[0].y - desigual[0].y);
+  const acaba = Math.hypot(curva.at(-1).x - desigual.at(-1).x, curva.at(-1).y - desigual.at(-1).y);
+  check('y pasa por los dos extremos', empieza < 0.01 && acaba < 0.01,
+    empieza.toFixed(3) + ' / ' + acaba.toFixed(3));
+  // Una curva que fluye avanza siempre en el mismo sentido: si se rizara, la x
+  // retrocederia en algun punto.
+  let atras = 0;
+  for (let i = 1; i < curva.length; i++) if (curva[i].x < curva[i - 1].x - 0.01) atras++;
+  check('la curva avanza sin retroceder', atras === 0, atras + ' retrocesos');
+}
+{
+  const largo = pathLength(desigual);
+  const abierta = extend(resample(desigual, 60), 40);
+  check('prolongar alarga el trazo por las dos puntas',
+    abierta[0].x < 0 && abierta.at(-1).x > 500 && pathLength(abierta) > largo,
+    abierta[0].x.toFixed(0) + ' .. ' + abierta.at(-1).x.toFixed(0));
+}
 
 /* ── 2 · Captura del puntero ─────────────────────────────────────────── */
 

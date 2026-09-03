@@ -306,6 +306,7 @@ export const DEFAULTS = {
       line: false,
       arms: false,
       legs: false,
+      cross: true,              // el ritmo de las piernas cruza al lado contrario
       ghost: false,
       exaggeration: 0.4,        // 0 = tal cual esta posado
       width: 5,                 // grosor del trazo en px

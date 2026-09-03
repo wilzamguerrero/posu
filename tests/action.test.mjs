@@ -159,10 +159,10 @@ check('el ritmo de brazo a brazo anade una curva', ctx.fills.length === 2,
 {
   const mano = px('leftHand');
   const hombro = px('leftArm');
-  const cuello = px('neck');
+  const pecho = px('neck');
   const pasaPor = (p, r) => ctx.puntos.some(([x, y]) => Math.hypot(x - p.x, y - p.y) < r);
-  check('la curva encadena mano, hombro y cuello',
-    pasaPor(mano, 22) && pasaPor(hombro, 22) && pasaPor(cuello, 30));
+  check('la curva encadena mano, hombro y el centro del pecho',
+    pasaPor(mano, 22) && pasaPor(hombro, 22) && pasaPor(pecho, 30));
   check('y sale por fuera de la mano',
     Math.max(...ctx.puntos.map(([x]) => x)) > mano.x + 12,
     'mano en x=' + mano.x.toFixed(0) + ' · trazo hasta ' + Math.max(...ctx.puntos.map(([x]) => x)).toFixed(0));
@@ -180,6 +180,23 @@ check('el ritmo de hombro a pierna anade las dos curvas cruzadas',
   check('una de ellas va del hombro derecho al pie izquierdo',
     pasaPor(hombro, 40) && pasaPor(pie, 26));
 }
+
+// Y se puede pedir que cada curva siga la pierna de su propio lado.
+const firma = (c) => c.puntos.map(([x, y]) => Math.round(x) + ',' + Math.round(y)).join(' ');
+const cruzado = firma(ctx);
+settings.set('guides.action.cross', false);
+ctx = fakeCtx();
+linea.draw(ctx, W, H, 1);
+check('sin cruzar se siguen dibujando las dos curvas', ctx.fills.length === 4,
+  ctx.fills.length + ' rellenos');
+check('pero por otro camino', firma(ctx) !== cruzado);
+{
+  const hombro = px('leftArm');
+  const pie = px('leftFoot');
+  const pasaPor = (p, r) => ctx.puntos.some(([x, y]) => Math.hypot(x - p.x, y - p.y) < r);
+  check('cada una baja del hombro al pie de su lado', pasaPor(hombro, 40) && pasaPor(pie, 26));
+}
+settings.set('guides.action.cross', true);
 settings.set('guides.action.arms', false);
 settings.set('guides.action.legs', false);
 

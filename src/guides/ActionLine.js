@@ -30,22 +30,31 @@ const COLUMNA = ['head', 'neck', 'spine2', 'spine1', 'spine', 'hips'];
 
 /**
  * Ritmo de brazo a brazo: de una mano a la otra, arqueandose por encima de los
- * hombros. Es la curva que ata las dos extremidades superiores en un solo gesto.
+ * hombros. Los dos brazos se encadenan con UN solo punto en medio (ver
+ * `#girdle`): con las dos claviculas y el cuello como puntos de control, tres
+ * puntos casi encima quedaban entre dos tramos largos y la curva salia con un
+ * rizo justo en el pecho.
  */
 const RITMO_BRAZOS = [
-  'leftHand', 'leftForeArm', 'leftArm', 'leftShoulder', 'neck',
-  'rightShoulder', 'rightArm', 'rightForeArm', 'rightHand',
+  ['leftHand', 'leftForeArm', 'leftArm'],
+  ['rightArm', 'rightForeArm', 'rightHand'],
 ];
 
 /**
- * Ritmo de hombro a pie: baja cruzando el torso y sigue por la pierna del lado
- * contrario. Se dibujan los dos, que se cruzan en la pelvis: es la construccion
- * clasica del contrapposto.
+ * Ritmo de hombro a pie: baja por el torso y sigue por una pierna. `cruzado` va
+ * al lado contrario (los dos trazos se cruzan en la pelvis, la construccion
+ * clasica del contrapposto) y `mismo` sigue la pierna de su propio lado.
  */
-const RITMO_PIERNAS = [
-  ['rightShoulder', 'spine1', 'leftUpLeg', 'leftLeg', 'leftFoot'],
-  ['leftShoulder', 'spine1', 'rightUpLeg', 'rightLeg', 'rightFoot'],
-];
+const RITMO_PIERNAS = {
+  cruzado: [
+    ['rightShoulder', 'spine1', 'leftUpLeg', 'leftLeg', 'leftFoot'],
+    ['leftShoulder', 'spine1', 'rightUpLeg', 'rightLeg', 'rightFoot'],
+  ],
+  mismo: [
+    ['leftShoulder', 'spine1', 'leftUpLeg', 'leftLeg', 'leftFoot'],
+    ['rightShoulder', 'spine1', 'rightUpLeg', 'rightLeg', 'rightFoot'],
+  ],
+};
 
 /** Huesos del muñeco fantasma, por parejas. */
 const HUESOS = [
@@ -130,9 +139,10 @@ export class ActionLine {
       // La version exagerada del mismo trazo, a puntos para distinguirla.
       this.#dashed(ctx, columna.map((p) => campo.warp(p, e)), grosor, a.color, alfa);
     }
-    if (a.arms) this.#flow(ctx, this.#chain(P, RITMO_BRAZOS), grosor * 0.78, a.color, alfa * 0.92);
+    if (a.arms) this.#flow(ctx, this.#armPoints(P), grosor * 0.78, a.color, alfa * 0.92);
     if (a.legs) {
-      for (const cadena of RITMO_PIERNAS) {
+      const modo = a.cross === false ? 'mismo' : 'cruzado';
+      for (const cadena of RITMO_PIERNAS[modo]) {
         this.#flow(ctx, this.#chain(P, cadena), grosor * 0.78, a.color, alfa * 0.92);
       }
     }
@@ -184,6 +194,32 @@ export class ActionLine {
       if (p) out.push(p);
     }
     return out;
+  }
+
+  /** Cadena del ritmo de los brazos: brazo, cintura escapular, brazo. */
+  #armPoints(P) {
+    const centro = this.#girdle(P);
+    return [
+      ...this.#chain(P, RITMO_BRAZOS[0]),
+      ...(centro ? [centro] : []),
+      ...this.#chain(P, RITMO_BRAZOS[1]),
+    ];
+  }
+
+  /**
+   * Punto medio de la cintura escapular, un poco arqueado hacia el cuello: es
+   * por donde pasa el trazo que ata los dos brazos. Uno solo, y a media
+   * distancia de los dos hombros, para que la curva cruce el pecho de un tiron.
+   */
+  #girdle(P) {
+    const a = P.get('leftShoulder') ?? P.get('leftArm');
+    const b = P.get('rightShoulder') ?? P.get('rightArm');
+    const cuello = P.get('neck');
+    if (!a || !b) return cuello ?? null;
+    const x = (a.x + b.x) / 2;
+    const y = (a.y + b.y) / 2;
+    if (!cuello) return { x, y };
+    return { x: x + (cuello.x - x) * 0.35, y: y + (cuello.y - y) * 0.35 };
   }
 
   /**
@@ -374,7 +410,10 @@ export class ActionLine {
   /** Huesos que hacen falta, proyectados a pixeles del lienzo. */
   #projectBones(ch, W, H) {
     const cam = this.viewport.cameras.active;
-    const claves = new Set(['headTop', ...COLUMNA, ...RITMO_BRAZOS, ...RITMO_PIERNAS.flat()]);
+    const claves = new Set([
+      'headTop', ...COLUMNA, ...RITMO_BRAZOS.flat(),
+      ...Object.values(RITMO_PIERNAS).flat(2),
+    ]);
     for (const [a, b] of HUESOS) { claves.add(a); claves.add(b); }
     const out = new Map();
     for (const key of claves) {

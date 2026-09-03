@@ -164,35 +164,71 @@ function suave(path, list, mover) {
  * por todos ellos. Es lo que convierte una cadena de articulaciones (mano,
  * codo, hombro...) en una linea que fluye: sin esto el trazo se lee como una
  * poligonal con codos, no como un gesto.
+ *
+ * La parametrizacion es **centripeta** (los nudos van con la raiz de la
+ * distancia, no con el indice). Importa: en una cadena con tramos muy desiguales
+ * —tres puntos juntos en los hombros entre dos brazos largos— la version
+ * uniforme se pasa de largo y deja un rizo en el medio. Con nudos centripetos la
+ * curva no se sale del poligono de control ni se cruza consigo misma.
+ *
  * @param {{x:number,y:number,w?:number}[]} points
  * @param {number} count puntos de salida
  */
 export function resample(points, count = 48) {
   if (points.length < 3 || count < 3) return points.map((p) => ({ ...p }));
-  const n = points.length - 1;
+  const n = points.length;
+  const t = new Float64Array(n);
+  for (let i = 1; i < n; i++) {
+    t[i] = t[i - 1] + Math.max(1e-4, Math.sqrt(dist(points[i - 1], points[i])));
+  }
+  const total = t[n - 1];
   const out = [];
+  let k = 0;
   for (let i = 0; i < count; i++) {
-    const t = (i / (count - 1)) * n;
-    const k = Math.min(n - 1, Math.floor(t));
-    const f = t - k;
-    const p0 = points[Math.max(0, k - 1)];
-    const p1 = points[k];
-    const p2 = points[k + 1];
-    const p3 = points[Math.min(n, k + 2)];
-    out.push({
-      x: catmull(p0.x, p1.x, p2.x, p3.x, f),
-      y: catmull(p0.y, p1.y, p2.y, p3.y, f),
-      w: (p1.w ?? 0) + ((p2.w ?? 0) - (p1.w ?? 0)) * f,
-    });
+    const u = (i / (count - 1)) * total;
+    while (k < n - 2 && u > t[k + 1]) k++;
+    out.push(hermite(points, t, k, u));
   }
   return out;
 }
 
-/** Catmull-Rom uniforme: pasa por b y c, con a y d como tirantes. */
-function catmull(a, b, c, d, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+/**
+ * Un tramo de Catmull-Rom no uniforme, escrito como Hermite cubica: los dos
+ * puntos del tramo y las tangentes que salen de sus vecinos, ponderadas por la
+ * separacion de los nudos. Los extremos duplican su punto, asi que la curva
+ * arranca y acaba en ellos.
+ */
+function hermite(points, t, k, u) {
+  const n = points.length;
+  const p1 = points[k];
+  const p2 = points[k + 1];
+  const t1 = t[k];
+  const t2 = t[k + 1];
+  const dt = Math.max(1e-6, t2 - t1);
+  const p0 = k > 0 ? points[k - 1] : p1;
+  const t0 = k > 0 ? t[k - 1] : t1 - dt;
+  const p3 = k + 2 < n ? points[k + 2] : p2;
+  const t3 = k + 2 < n ? t[k + 2] : t2 + dt;
+  const s = Math.max(0, Math.min(1, (u - t1) / dt));
+  const s2 = s * s;
+  const s3 = s2 * s;
+  const h00 = 2 * s3 - 3 * s2 + 1;
+  const h10 = s3 - 2 * s2 + s;
+  const h01 = -2 * s3 + 3 * s2;
+  const h11 = s3 - s2;
+  const eje = (a, b, c, d) => {
+    const d1 = (b - a) / Math.max(1e-6, t1 - t0);
+    const d2 = (c - b) / dt;
+    const d3 = (d - c) / Math.max(1e-6, t3 - t2);
+    const m1 = dt * ((d1 * (t2 - t1) + d2 * (t1 - t0)) / Math.max(1e-6, t2 - t0));
+    const m2 = dt * ((d2 * (t3 - t2) + d3 * (t2 - t1)) / Math.max(1e-6, t3 - t1));
+    return h00 * b + h10 * m1 + h01 * c + h11 * m2;
+  };
+  return {
+    x: eje(p0.x, p1.x, p2.x, p3.x),
+    y: eje(p0.y, p1.y, p2.y, p3.y),
+    w: (p1.w ?? 0) + ((p2.w ?? 0) - (p1.w ?? 0)) * s,
+  };
 }
 
 /**
