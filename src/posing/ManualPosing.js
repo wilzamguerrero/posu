@@ -55,6 +55,13 @@
  * Dos se quedan a la vista pase lo que pase: el elegido, que tiene el giroscopio
  * puesto, y el objetivo de una cadena fijada, que con su color dice que ese pie
  * esta clavado: eso es estado de la pose, no solo algo que agarrar.
+ *
+ * La otra salida al mismo problema es `pose.handleScale`: encogerlos todos a la
+ * vez, del 100 % al 1 %, sin que ninguno pierda su proporcion con los demas. Se
+ * multiplica en la cota de la que salen los tres tamanos de un manejador —el
+ * minimo, el maximo y lo que crece con la distancia a la camara—, asi que un
+ * manejador al 40 % se porta igual que al 100 %, solo mas pequeno. De fabrica
+ * viene a la mitad.
  */
 
 import * as THREE from 'three';
@@ -199,6 +206,25 @@ export function tweakFactors(m, punto) {
   return { k: 2 * largo / base, g: grueso / (base * TWEAK_OFF) };
 }
 
+/**
+ * Radio de un manejador, en unidades de mundo.
+ *
+ * `base` es la cota de la figura —su alto por el tamano global pedido— y `dist` lo
+ * que hay de la camara al punto: un manejador crece con la distancia para ocupar
+ * siempre lo mismo en pantalla, entre un suelo y un techo que salen de la misma
+ * cota. Como los tres tamanos son esa cota por el mismo peso de clase, encoger
+ * `base` encoge el juego entero sin cambiar ninguna proporcion ni cual es mas gordo
+ * que cual, y sin importar en cual de los tres tramos caiga cada manejador.
+ * @param {number} base cota de la figura, ya multiplicada por `pose.handleScale`
+ * @param {number} dist de la camara al punto (o el medio alto si es ortografica)
+ * @param {string} kind clase de manejador, de `SIZES`
+ * @param {boolean} [finger] las falanges van mas finas para no tapar la mano
+ */
+export function handleRadius(base, dist, kind, finger = false) {
+  const f = finger ? 0.4 : SIZES[kind] ?? 1;
+  return THREE.MathUtils.clamp(base * dist * 0.55 * f, base * 0.5 * f, base * 3 * f);
+}
+
 export class ManualPosing {
   /**
    * @param {object} deps
@@ -238,6 +264,8 @@ export class ManualPosing {
     this.proximity = settings.get('pose.proximity') === true;
     /** Radio de ese entorno, en alturas de visor. */
     this.proxRadius = this.#radius(settings.get('pose.proximityRadius'));
+    /** Tamano de todos los manejadores, en fraccion del suyo (1 = el de siempre). */
+    this.handleScale = this.#handleScale(settings.get('pose.handleScale'));
 
     this.material = new THREE.MeshBasicMaterial({
       color: 0x4fc1ff, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false,
@@ -548,13 +576,14 @@ export class ManualPosing {
   }
 
   /**
-   * Cambio de ajuste del posado. Los dos valores viven en campos porque el paso de
-   * proximidad los consulta por manejador y por fotograma, y leer el almacen
-   * cuarenta veces en cada cuadro no aporta nada.
+   * Cambio de ajuste del posado. Los tres valores viven en campos porque el paso de
+   * proximidad y el de colocar los manejadores los consultan por manejador y por
+   * fotograma, y leer el almacen cuarenta veces en cada cuadro no aporta nada.
    */
   #onPoseSetting() {
     this.proximity = this.settings.get('pose.proximity') === true;
     this.proxRadius = this.#radius(this.settings.get('pose.proximityRadius'));
+    this.handleScale = this.#handleScale(this.settings.get('pose.handleScale'));
     // Al apagarla vuelven todos de golpe; al encenderla los aparta el paso del
     // fotograma siguiente, que es el primero que sabe donde esta el puntero.
     if (!this.proximity) for (const entry of this.entries) entry.near = 1;
@@ -565,6 +594,12 @@ export class ManualPosing {
   #radius(v) {
     const n = Number(v);
     return Number.isFinite(n) ? THREE.MathUtils.clamp(n, 0.04, 0.6) : 0.16;
+  }
+
+  /** Tamano global de los manejadores: del 1 % al 100 %, y el de fabrica si llega basura. */
+  #handleScale(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? THREE.MathUtils.clamp(n, 0.01, 1) : 0.5;
   }
 
   /**
@@ -976,9 +1011,12 @@ export class ManualPosing {
       }
     }
 
-    // La altura es propia de cada figura, no un ajuste global.
+    // La altura es propia de cada figura, no un ajuste global. El tamano global se
+    // multiplica aqui, en la cota de la que salen las tres del manejador —el minimo,
+    // el maximo y lo que crece con la distancia—, que es lo que hace que encogerlos
+    // no cambie ni sus proporciones ni cual es mas gordo que cual.
     const height = Math.max(0.4, this.character?.placement?.height ?? 1.75);
-    const base = height * 0.013;
+    const base = height * 0.013 * this.handleScale;
     const prox = this.proximity;
     for (const entry of this.entries) {
       if (!entry.shown) continue;
@@ -990,10 +1028,7 @@ export class ManualPosing {
       const dist = cam.isOrthographicCamera
         ? (cam.top - cam.bottom) * 0.5
         : cam.position.distanceTo(_v);
-      // Las falanges llevan manejadores mas finos para no tapar la mano; los
-      // objetivos van algo mas gordos porque son los que se buscan con el raton.
-      const f = entry.finger ? 0.4 : SIZES[entry.kind] ?? 1;
-      const r = THREE.MathUtils.clamp(base * dist * 0.55 * f, base * 0.5 * f, base * 3 * f);
+      const r = handleRadius(base, dist, entry.kind, entry.finger);
       // Con la proximidad encendida el manejador entra creciendo por el borde del
       // entorno en vez de encenderse de golpe: asi se ve de donde ha salido.
       entry.mesh.scale.setScalar(prox ? r * (0.55 + 0.45 * entry.near) : r);

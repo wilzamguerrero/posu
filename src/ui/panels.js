@@ -1012,6 +1012,10 @@ function posesPanel(app) {
         format: (v) => Math.round(v * 100) + ' % del alto',
         hint: 'Medido en alto de visor y no en pixeles, para que se porte igual en una pantalla grande que en un portatil.' }),
         'pose.proximity', (s) => s.get('pose.proximity') === true),
+      slider({ label: 'Tamano de los manejadores', path: 'pose.handleScale',
+        min: 0.01, max: 1, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Encoge de golpe todos los controles del rig —los del modo directo y los del inverso— sin cambiar sus proporciones ni cual es mas gordo que cual. Empieza al 50 %; al 100 % son los grandes de siempre, y por debajo del 20 % quedan puntos, que tapan menos la figura pero tambien se pinchan peor. Doble clic para volver al 50 %.' }),
       field('Hueso seleccionado', boneTag),
       buttons([
         { label: 'Deshacer', icon: 'rotate-ccw', title: 'Deshacer el ultimo giro (Ctrl+Z)', onClick: () => actions.undo() },

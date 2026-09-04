@@ -122,6 +122,13 @@ export const DEFAULTS = {
   pose: {
     proximity: false,
     proximityRadius: 0.16,
+    // Tamano de todos los manejadores del rig, en fraccion de su tamano de dibujo:
+    // 1 son los grandes de siempre y 0,01 el minimo. Es global y proporcional
+    // —encoge esferas, rombos, cubos y picos a la vez, y con los mismos topes— para
+    // poder ver la figura cuando los controles la tapan, sin cambiar cual es mas
+    // gordo que cual. Empieza a la mitad, que es donde estorban poco y aun se
+    // pinchan bien.
+    handleScale: 0.5,
     space: 'world',             // world | local (los ejes del propio hueso)
     // Deformar un hueso conservando el bulto: al alargarlo se adelgaza y al
     // acortarlo se ensancha, como el squash de las cadenas de IK. Apagado, el largo

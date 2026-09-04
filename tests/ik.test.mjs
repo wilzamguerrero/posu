@@ -1151,6 +1151,45 @@ let destino = null;
     character.deformed === false && Math.abs(eslabon(1) - nat[1]) < 1e-9);
 }
 
+// --- el tamano global de los manejadores ----------------------------------
+// Una barra encoge de golpe todos los controles del rig, del 100 % al 1 %, para
+// poder ver la figura cuando la tapan. Multiplica la cota de la que salen los tres
+// tamanos de un manejador, y eso es lo que se prueba aqui: que encoge todo por
+// igual y que no cambia ninguna proporcion.
+{
+  const { handleRadius } = await import('../src/posing/ManualPosing.js');
+  const base = 1.75 * 0.013;                    // la cota de una figura de 1,75 m
+  const clases = ['joint', 'effector', 'pole', 'body', 'bend', 'tweak'];
+  // Las tres distancias son los tres tramos: el suelo, lo que crece con la camara
+  // y el techo. Un manejador puede caer en cualquiera de ellos.
+  const tramos = [0.3, 2, 40];
+  const escala = 0.4;
+  const razones = [];
+  for (const k of clases) {
+    for (const d of tramos) razones.push(handleRadius(base * escala, d, k) / handleRadius(base, d, k));
+  }
+  check('los tres tramos del tamano son de verdad tres, y no siempre el mismo',
+    new Set(clases.flatMap((k) => tramos.map((d) => handleRadius(base, d, k).toFixed(9)))).size
+      === clases.length * tramos.length,
+    tramos.map((d) => handleRadius(base, d, 'joint').toFixed(4)).join(' / '));
+  check('al 40 % todas las clases y los tres tramos encogen exactamente otro tanto',
+    razones.every((r) => Math.abs(r - escala) < 1e-12),
+    razones.length + ' razones entre ' + Math.min(...razones).toFixed(6)
+    + ' y ' + Math.max(...razones).toFixed(6));
+  check('asi que no cambia cual es mas gordo que cual',
+    clases.every((k) => Math.abs(handleRadius(base * escala, 2, k) / handleRadius(base * escala, 2, 'joint')
+      - handleRadius(base, 2, k) / handleRadius(base, 2, 'joint')) < 1e-12),
+    clases.map((k) => (handleRadius(base, 2, k) / handleRadius(base, 2, 'joint')).toFixed(2)).join(' '));
+  check('las falanges siguen siendo las mas finas, encogidas o no',
+    handleRadius(base * escala, 2, 'joint', true) < handleRadius(base * escala, 2, 'joint')
+    && Math.abs(handleRadius(base * escala, 2, 'joint', true)
+      / handleRadius(base, 2, 'joint', true) - escala) < 1e-12);
+  check('y al 1 %, el minimo de la barra, salen puntos, no ceros',
+    tramos.every((d) => handleRadius(base * 0.01, d, 'tweak') > 0
+      && Number.isFinite(handleRadius(base * 0.01, d, 'tweak'))),
+    handleRadius(base * 0.01, 2, 'tweak').toExponential(2) + ' m de radio');
+}
+
 // --- rehacer el rig al cambiar de modelo ----------------------------------
 {
   rig.setCharacter(null);

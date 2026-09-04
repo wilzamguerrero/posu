@@ -71,6 +71,7 @@ npm run deploy       # build + wrangler pages deploy dist
 | Deformar un hueso: engordar una rodilla, aplastar una cabeza | tecla `R` con un control elegido; panel **Poses › Deformar los huesos** |
 | Clavar o soltar el control elegido (pies en el suelo al agacharse) | tecla `X` o panel **Poses › Cinemática inversa (IK)** |
 | Enseñar solo los controles que hay junto al puntero | tecla `N` o panel **Poses › Pose manual** |
+| Encoger todos los controles del rig a la vez, del 100 % al 1 % (vienen al 50 %), cuando tapan la figura | panel **Poses › Pose manual › Tamaño de los manejadores** |
 | Squash y stretch (la cadena se estira para llegar y se aplasta al plegarse) | panel **Poses › Cinemática inversa (IK)** |
 | Ejes del giro de un hueso: los del **mundo** o los del **propio hueso** | `Alt+X` posando, o panel **Poses › Cinemática directa (FK)** |
 | Ejes del gizmo de cajas y sólidos (ajuste aparte del de los huesos) | panel **Escena › Manipulador**, o `Alt+X` con un sólido elegido |

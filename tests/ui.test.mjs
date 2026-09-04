@@ -487,6 +487,27 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
     settings.get('pose.proximity') === true
     && prox?.querySelector('input[type="checkbox"]')?.checked === true);
   marca(prox, false);
+
+  // La barra del tamano de los manejadores: es del rig entero, no del entorno del
+  // puntero, asi que con la proximidad apagada tiene que seguir viva.
+  const tam = campo(man, 'Tamano de los manejadores');
+  const barra = tam?.querySelector('input[type="range"]');
+  const lee = () => tam?.querySelector('.value')?.textContent ?? '';
+  revisa('el panel trae la barra del tamano de los manejadores', !!barra);
+  revisa('que va del 1 % al 100 %',
+    barra?.getAttribute('min') === '0.01' && barra?.getAttribute('max') === '1');
+  revisa('y empieza a la mitad, no a los manejadores grandes de siempre',
+    settings.get('pose.handleScale') === 0.5 && lee() === '50 %'
+    && DEFAULTS.pose.handleScale === 0.5, lee());
+  revisa('con la proximidad apagada la barra se puede tocar igual',
+    settings.get('pose.proximity') === false && tam?.classList.contains('is-disabled') === false);
+  barra.value = '0.4';
+  barra.dispatchEvent(new window.Event('input', { bubbles: true }));
+  revisa('moverla escribe pose.handleScale y lo dice en tanto por ciento',
+    settings.get('pose.handleScale') === 0.4 && lee() === '40 %', lee());
+  barra.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  revisa('y el doble clic devuelve el de fabrica',
+    settings.get('pose.handleScale') === DEFAULTS.pose.handleScale && lee() === '50 %');
 }
 
 // 8d · El panel de poses reune todo el rig: los dos modos con su nombre, la
