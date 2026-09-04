@@ -10,15 +10,17 @@
 import { el } from './widgets.js';
 import { icon } from './icons.js';
 
-/** Crea un elemento de la lectura; devuelve {root, set}. */
+/** Crea un elemento de la lectura; devuelve {root, set, setIcon}. */
 function item({ iconName, title, onClick, mono = true, cls = '' }) {
   const value = el('span', { class: mono ? 'status-value' : '', text: '—' });
+  let dibujo = iconName ? icon(iconName, 13) : null;
+  let actual = iconName ?? '';
   const root = el('div', {
     class: 'status-item' + (cls ? ' ' + cls : ''),
     title,
     dataset: onClick ? { clickable: '1' } : {},
     onClick,
-  }, [iconName ? icon(iconName, 13) : null, value]);
+  }, [dibujo, value]);
   return {
     root,
     set(text, kind = '') {
@@ -27,6 +29,14 @@ function item({ iconName, title, onClick, mono = true, cls = '' }) {
       // clase entera sin conservarla lo volveria a sacar en el tic siguiente.
       const oculto = root.classList.contains('hidden');
       root.className = 'status-item' + (cls ? ' ' + cls : '') + (kind ? ' ' + kind : '') + (oculto ? ' hidden' : '');
+    },
+    /** Cambia el dibujo sin rehacer el elemento: lo usa el interruptor FK/IK. */
+    setIcon(name) {
+      if (!dibujo || !name || name === actual) return;
+      const nuevo = icon(name, 13);
+      root.replaceChild(nuevo, dibujo);
+      dibujo = nuevo;
+      actual = name;
     },
   };
 }
@@ -45,6 +55,10 @@ export class Readout {
     this.confidence = item({ iconName: 'activity', title: 'Confianza media de la deteccion' });
     this.bone = item({ iconName: 'bone', title: 'Hueso seleccionado en la pose manual', onClick: () => app.ui.showSection('poses') });
     this.lens = item({ iconName: 'aperture', title: 'Optica de la camara', onClick: () => app.ui.showSection('camera') });
+    // El interruptor del rig, al lado del nombre de la figura: es el gesto que mas
+    // se repite al posar y tenerlo aqui ahorra abrir el panel o acordarse de la
+    // tecla. Un clic hace lo mismo que la tecla `I`.
+    this.rig = item({ iconName: 'rotate-3d', title: 'Modo del rig', onClick: () => this.#toggleRig() });
     this.figure = item({ iconName: 'person-standing', title: 'Malla visible', mono: false, onClick: () => app.ui.showSection('figure') });
     this.tris = item({ iconName: 'layers', title: 'Triangulos y llamadas de dibujo por fotograma' });
     this.fps = item({ iconName: 'gauge', title: 'Fotogramas por segundo del visor' });
@@ -55,6 +69,7 @@ export class Readout {
       this.confidence.root,
       this.bone.root,
       el('div', { class: 'status-spacer' }),
+      this.rig.root,
       this.figure.root,
       this.lens.root,
       this.tris.root,
@@ -77,6 +92,7 @@ export class Readout {
     s.on(['figure.variant', 'figure.opacity', 'camera.projection', 'camera.focalLength', 'camera.fStop',
       'camera.dof', 'mocap.engine', 'quality.showStats'], () => this.#paintStatic());
     s.on('mocap.frozen', () => this.#paintCapture());
+    s.on('ik.enabled', () => this.#paintRig());
     s.on('ui.selectedBone', (v) => this.bone.set(v ? String(v).replace(/^mixamorig:?/, '') : 'sin seleccion'));
   }
 
@@ -89,6 +105,7 @@ export class Readout {
     this.lens.root.title = `Optica de la camara · ${ortho ? 'ortografica' : 'perspectiva'} · sensor ${Math.round(s.get('camera.filmGauge'))} mm`;
     this.capture.root.title = `Estado de la captura de movimiento · motor «${s.get('mocap.engine')}»`;
     this.#paintFigure();
+    this.#paintRig();
     const show = s.get('quality.showStats') !== false;
     this.tris.root.classList.toggle('hidden', !show);
     this.fps.root.classList.toggle('hidden', !show);
@@ -110,7 +127,28 @@ export class Readout {
    * que recibe la camara y las poses: sin esto no se sabe a quien se esta
    * posando. Lo llama `main` cada vez que cambia la figura activa.
    */
-  setFigure() { this.#paintFigure(); }
+  setFigure() { this.#paintFigure(); this.#paintRig(); }
+
+  /**
+   * Cinematica directa o inversa. Se pinta con las siglas que usa el panel de
+   * poses, en color cuando manda la inversa, y se esconde si no hay figura: sin
+   * nadie a quien posar el interruptor no significa nada.
+   */
+  #paintRig() {
+    const ik = this.settings.get('ik.enabled') === true;
+    this.rig.set(ik ? 'IK' : 'FK', ik ? 'accent' : '');
+    this.rig.setIcon(ik ? 'target' : 'rotate-3d');
+    this.rig.root.title = ik
+      ? 'Cinematica inversa (IK) · clic o tecla I para volver a la directa'
+      : 'Cinematica directa (FK) · clic o tecla I para pasar a la inversa';
+    this.rig.root.classList.toggle('hidden', (this.app.figures?.count ?? 0) === 0);
+  }
+
+  /** El mismo cambio que la tecla `I`: al encender la inversa se abre el posado. */
+  #toggleRig() {
+    const on = this.settings.get('ik.enabled') !== true;
+    this.settings.batch({ 'ik.enabled': on, ...(on ? { 'ui.manualPosing': true } : {}) });
+  }
 
   #paintFigure() {
     const s = this.settings;

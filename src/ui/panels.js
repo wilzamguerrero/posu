@@ -994,7 +994,7 @@ function posesPanel(app) {
           { value: false, label: 'Directa (FK)', icon: 'rotate-3d' },
           { value: true, label: 'Inversa (IK)', icon: 'target' },
         ],
-        hint: 'Los dos modos de un rig de verdad, y se cambia con la tecla I. El hueso que no sea la punta de una cadena encendida se sigue girando a mano en los dos.',
+        hint: 'Los dos modos de un rig de verdad, y se cambia con la tecla I o desde las siglas de la barra de abajo. En modo inverso desaparecen las esferas de giro de los huesos que manda el solucionador: ahi se deforma por posicion, con el pliegue y los tiradores de volumen.',
       }),
       segmented({
         label: 'Que hace el giroscopio', path: 'scene.tool',
@@ -1003,7 +1003,7 @@ function posesPanel(app) {
           { value: 'rotate', label: 'Girar', icon: 'rotate-3d' },
           { value: 'scale', label: 'Deformar', icon: 'scaling' },
         ],
-        hint: 'Teclas W, E y R. Mover es para los controles de mano, pie y cadera; girar y deformar valen para cualquier hueso.',
+        hint: 'Teclas W, E y R. Mover es para los controles de mano, pie y cadera; girar y deformar valen para cualquier hueso. Al deformar, el tirador que va a lo largo del hueso lo alarga y los otros dos lo engordan.',
       }),
       toggle({ path: 'pose.proximity', label: 'Ensenar solo lo que hay junto al puntero',
         hint: 'En una figura entera hay mas de cuarenta manejadores y de espaldas se tapan entre si: asi solo aparecen los del entorno del raton (tecla N). Vale para las dos formas de posar, girar hueso a hueso y arrastrar la mano.' }),
@@ -1023,7 +1023,7 @@ function posesPanel(app) {
       ], { cols: 2, compact: true }),
     ]),
     group({ id: 'ps-fk', title: 'Cinematica directa (FK)', icon: 'rotate-3d' }, [
-      notice('info', 'Girar hueso a hueso, del hombro a la mano: cada giro arrastra lo que cuelga de el, como en un maniqui de madera. Es lo que manda en cualquier hueso que no sea la punta de una cadena de cinematica inversa, asi que sigue estando ahi tambien en modo inverso.'),
+      notice('info', 'Girar hueso a hueso, del hombro a la mano: cada giro arrastra lo que cuelga de el, como en un maniqui de madera. Es el modo de la tecla I por la mitad de la izquierda; en modo inverso solo quedan las esferas de los huesos que no lleva ninguna cadena encendida, y para recuperar el resto se apaga esa cadena en <b>Cadenas</b>.'),
       segmented({
         label: 'Ejes del giro', path: 'scene.space',
         options: [
@@ -1039,11 +1039,11 @@ function posesPanel(app) {
           { value: 0.1, label: '10 cm' }, { value: 0.25, label: '25 cm' },
           { value: 0.5, label: '50 cm' },
         ],
-        hint: 'Con el imantado puesto los huesos giran de 15 en 15 grados, los controles se mueven a saltos de esa medida y la deformacion va de decima en decima.',
+        hint: 'Con el imantado puesto los huesos giran de 15 en 15 grados, los controles se mueven a saltos de esa medida y la deformacion va de cinco en cinco centesimas (1,05 · 1,10 · 1,15).',
       }).root,
     ]),
     group({ id: 'ps-ik', title: 'Cinematica inversa (IK)', icon: 'target' }, [
-      notice('info', 'Rombos en manos, pies, pecho y cabeza: arrastras uno y la cadena entera le sigue. W mueve el control, E gira el hueso de la punta y R lo deforma. Se enciende arriba, en <b>Modo del rig</b>.'),
+      notice('info', 'Rombos en manos, pies, pecho y cabeza: arrastras uno y la cadena entera le sigue. W mueve el control, E gira el hueso de la punta y R lo deforma. Se enciende arriba, en <b>Modo del rig</b>, con la tecla I o desde las siglas FK/IK de la barra de abajo.'),
       enableWhen(el('div', { class: 'stack' }, [
         field('Cadenas', buttons([
           { label: 'Brazos', icon: 'hand', path: 'ik.arms', title: 'Hombro, codo y mano' },
@@ -1054,7 +1054,9 @@ function posesPanel(app) {
         field('Controles auxiliares', buttons([
           { label: 'Codo y rodilla', icon: 'circle-dot', path: 'ik.poles', title: 'Cubo pequeno junto a la articulacion: gira el plano de flexion sin mover la mano' },
           { label: 'Peso del cuerpo', icon: 'move-3d', path: 'ik.body', title: 'Cubo en la cadera: con los pies clavados, agacha la figura' },
-        ], { cols: 2, compact: true })),
+          { label: 'Deformar por posicion', icon: 'scaling', path: 'ik.deform', title: 'La bola del pliegue en el codo y la rodilla, y un pico de volumen en cada hueso de la cadena' },
+        ], { cols: 2, compact: true }),
+        { hint: 'La bola morada del codo o la rodilla lleva la articulacion a un punto y los dos eslabones dan de si lo justo para llegar, con la mano quieta. El pico verde de cada hueso lo engorda al apartarlo del eje y lo alarga al correrlo a lo largo. Son los que sustituyen a la esfera de giro cuando la cadena esta encendida.' }),
         slider({ label: 'Holgura de la articulacion', path: 'ik.margin', min: 0, max: 0.15, step: 0.005,
           format: (v) => Math.round(v * 100) + ' %',
           hint: 'Parte del miembro que nunca se estira. A cero el brazo puede quedar del todo recto y pierde el plano del codo.' }),
@@ -1075,8 +1077,11 @@ function posesPanel(app) {
       notice('info', 'Los controles sin clavar vuelven solos a la mano o el pie, asi que la cinematica inversa no pelea con la captura ni con la biblioteca de poses.'),
     ]),
     group({ id: 'ps-deform', title: 'Deformar los huesos', icon: 'scaling' }, [
-      notice('info', 'Con <b>R</b> el giroscopio escala el hueso del control elegido, lo mismo en directa que en inversa: es el aplastado a mano de un rig de dibujo animado, y vale tambien para una rodilla o un codo en medio de una cadena. Lo que cuelga del hueso mantiene su tamano, asi que engordar la rodilla no engorda el pie.'),
+      notice('info', 'Con <b>R</b> el giroscopio deforma el hueso del control elegido: es el aplastado a mano de un rig de dibujo animado. El tirador que va <b>a lo largo</b> del hueso lo <b>alarga</b> moviendo la articulacion de abajo, asi que la piel se estira entre las dos sin dar un escalon; los otros dos lo <b>engordan</b> sin moverla. Lo que cuelga del hueso mantiene su tamano, asi que engordar la rodilla no engorda el pie.'),
+      notice('info', 'En los huesos que lleva una cadena encendida no hace falta el giroscopio: se deforman <b>por posicion</b>, arrastrando la bola del pliegue o el pico de volumen del propio hueso. Es la misma deformacion, con los mismos topes, y se apagan juntos en <b>Controles auxiliares</b>.'),
       field('Deformacion del hueso', deformTag),
+      toggle({ path: 'pose.deformVolume', label: 'Conservar el volumen al deformar',
+        hint: 'Aplastar y estirar de dibujo animado: al alargar un hueso se adelgaza y al acortarlo se ensancha, la misma cuenta que el squash de las cadenas. Apagado, el largo y el grosor van cada uno a lo suyo.' }),
       buttons([
         { label: 'Devolver el tamano', icon: 'refresh-cw', title: 'Quita la deformacion del control elegido',
           onClick: () => actions.resetBoneDeform?.() },

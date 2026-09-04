@@ -529,8 +529,62 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
     && botonesDef.some((t) => t.includes('Devolver el tamano'))
     && botonesDef.some((t) => t.includes('Quitar todas')),
     botonesDef.join(' | '));
+  const vol = campo(def, 'Conservar el volumen al deformar');
+  revisa('y el interruptor del volumen, que es el aplastado de dibujo animado',
+    !!vol && marca(vol, false) && settings.get('pose.deformVolume') === false);
+  revisa('encenderlo lo devuelve al aplastado',
+    marca(vol, true) && settings.get('pose.deformVolume') === true);
   revisa('las manos y la colocacion se mudaron al panel de poses',
     !!grupo('Manos y dedos') && !!grupo('Colocacion'));
+
+  // Los tiradores que deforman por posicion son los que sustituyen a la esfera de
+  // giro cuando la cadena esta encendida, asi que tienen que poder apagarse.
+  const inv = grupo('Cinematica inversa (IK)');
+  const aux = campo(inv, 'Controles auxiliares');
+  const pulsa = (raiz, texto) => {
+    const b = [...(raiz?.querySelectorAll('button') ?? [])].find((n) => n.textContent.includes(texto));
+    b?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    return !!b;
+  };
+  revisa('los controles auxiliares traen el deformado por posicion',
+    !!aux && [...aux.querySelectorAll('button')].some((b) => b.textContent.includes('Deformar por posicion')),
+    [...(aux?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim()).join(' | '));
+  revisa('y se pueden apagar sin tocar el resto del rig',
+    pulsa(aux, 'Deformar por posicion') && settings.get('ik.deform') === false
+    && settings.get('ik.poles') !== false);
+  revisa('volver a pulsar los devuelve',
+    pulsa(aux, 'Deformar por posicion') && settings.get('ik.deform') === true);
+}
+
+// 8e · El interruptor del rig en la lectura del visor: es el gesto que mas se
+//      repite al posar, y desde ahi se cambia sin abrir el panel ni buscar la
+//      tecla. Las siglas son las mismas que en el panel de poses.
+{
+  const sw = [...document.querySelectorAll('#viewport-readout .status-item')]
+    .find((n) => /^(FK|IK)$/.test(n.textContent.trim()));
+  const clic = () => sw?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  settings.batch({ 'ik.enabled': false, 'ui.manualPosing': false });
+  revisa('la lectura del visor trae las siglas del rig', !!sw && sw.textContent.trim() === 'FK',
+    sw?.textContent.trim());
+  revisa('y se puede pulsar', sw?.dataset.clickable === '1');
+  clic();
+  revisa('un clic pasa a la inversa y abre el posado a mano',
+    settings.get('ik.enabled') === true && settings.get('ui.manualPosing') === true);
+  revisa('las siglas cambian y se marcan',
+    sw.textContent.trim() === 'IK' && sw.classList.contains('accent'), sw.className);
+  clic();
+  revisa('otro clic vuelve a la directa, sin cerrar el posado',
+    settings.get('ik.enabled') === false && settings.get('ui.manualPosing') === true
+    && sw.textContent.trim() === 'FK' && !sw.classList.contains('accent'), sw.className);
+  // Sin figura no hay a quien posar: el interruptor sobra y se esconde.
+  const habia = settings.get('scene.figures');
+  settings.set('scene.figures', []);
+  sb.setFigure();
+  revisa('sin figuras el interruptor se esconde', sw.classList.contains('hidden'), sw.className);
+  settings.set('scene.figures', habia);
+  sb.setFigure();
+  revisa('y vuelve con la figura, con las siglas al dia',
+    !sw.classList.contains('hidden') && sw.textContent.trim() === 'FK', sw.className);
 }
 
 // 9 · La firma del autor sale en Ayuda > Acerca de.

@@ -164,39 +164,81 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   uniforme no cizalla la piel de un miembro doblado como haría una escala por ejes.
   Todo se rehace desde el reposo en cada cambio, porque el cuello es a la vez la
   punta del torso y la raíz de la cabeza y los dos factores tienen que multiplicarse
-  en ese hueso. Una pose guardada lleva giros y escalas de hueso, pero no el estirado
-  de las cadenas: ese viaja aparte (`IKRig.stretchState`), porque devolver los largos
-  sin devolver su factor los iría alargando en cada solución. Cambiar de modo sí lo
-  respeta, que es lo del punto siguiente.
+  en ese hueso. Una pose guardada lleva giros y el largo y el grosor de cada hueso,
+  pero no el estirado de las cadenas: ese viaja aparte (`IKRig.stretchState`), porque
+  devolver los largos sin devolver su factor los iría alargando en cada solución.
+  Cambiar de modo sí lo respeta, que es lo del punto siguiente.
 - **Directa y inversa son dos modos del mismo rig, no dos programas.** El panel
   **Poses** manda sobre todo: el modo (`Directa (FK)` / `Inversa (IK)`, tecla `I`),
   qué hace el gizmo (`W` mover, `E` girar, `R` deformar), y luego un grupo por
   cinemática con lo suyo —ejes del giro e imantado en la directa; rombos, fijaciones,
-  holgura y squash en la inversa—. Girar hueso a hueso no se apaga nunca: en modo
-  inverso sigue mandando en cualquier hueso que no sea la punta de una cadena
-  encendida, igual que en un rig de producción. Y al salir del modo inverso se
+  holgura y squash en la inversa—, y las siglas del modo salen también abajo, en la
+  lectura del visor al lado de los milímetros y los fps: con una figura puesta, un
+  clic en `FK`/`IK` cambia de cinemática sin abrir ningún panel, y pasar a inversa
+  abre el posado a mano de paso, que si no no habría nada que arrastrar. A un hueso
+  le manda **un** control, no dos: en modo inverso los huesos que resuelve una
+  cadena encendida pierden su bola de giro directo, porque girarlos peleaba con el
+  solver y la siguiente solución deshacía el giro —era eso lo que deformaba mal—.
+  Ahí quedan los controles de la inversa: la punta, el rombo del codo o la rodilla
+  y los tiradores de posición del punto siguiente. Para volver a girar uno de esos
+  huesos a mano se apaga su cadena en **Cadenas** (brazos, piernas, torso, cabeza)
+  y las bolas vuelven, sin sacar del modo inverso al resto de la figura. Y al salir
+  del modo inverso se
   sincronizan los objetivos **sin** deshacer el estirado
   (`IKRig.syncAll({ stretch: false })`), así que un aplastado puesto en inverso no se
   desinfla al volver a directo: la silueta es la misma a los dos lados del
   interruptor. Apagar el squash a mano sí devuelve los largos, que para eso está.
 - **Deformar los huesos: el aplastado a mano del rig de dibujo animado.** Con `R` el
-  gizmo escala el hueso del control elegido, en los dos modos y también en un hueso
+  gizmo deforma el hueso del control elegido, en los dos modos y también en un hueso
   de en medio como la rodilla o el codo, que es lo que no daba la cinemática inversa
-  por sí sola. La escala de cada hueso sale de multiplicar tres capas —reposo × lo
-  que pide el usuario × el estirado de la cadena— y las escribe un solo camino
-  (`IKRig.applyStretch` llama primero a `Character.applyDeform` y multiplica su factor
-  encima), así que ninguna capa pisa a las otras. Lo que cuelga del hueso conserva su
-  tamaño, como el *segment scale compensate* de Maya: a cada hijo se le divide por lo
-  que hereda, y no componente a componente sino contando su giro (la norma de cada
-  columna de `diag(f)·R`), porque en un esqueleto de Mixamo el pie está girado
-  respecto a la espinilla y dividir por ejes le dejaba puesto el estirón en el eje
-  equivocado. Así engordar la rodilla no engorda el pie. La deformación va de 0,2 a
-  3, viaja con la pose (`pose.scales`), y por eso se guarda en la biblioteca, se
-  exporta, se copia al duplicar una figura y vuelve con `Ctrl+Z` sin código aparte.
-  Dos límites que conviene saber: una escala **por ejes** sobre un hueso girado
-  cizalla la piel (la uniforme nunca), y con dos huesos seguidos deformados al nieto
-  le queda un resto pequeño, porque una escala girada ya no es diagonal y ninguna
-  escala local la deshace del todo.
+  por sí sola. Deformar son **dos números**, no una escala de tres ejes: **largo** y
+  **grosor**. El tirador que va a lo largo del hueso lo alarga y los otros dos lo
+  engordan; si se piden distintos, el grosor sale de la media geométrica de los dos,
+  así que la sección nunca queda ovalada. El largo **no se escala**: se mueve la
+  articulación de abajo (`hijo.position = reposo × k/g`), el mismo mecanismo que el
+  estirado de las cadenas, y por eso la piel se estira con el degradado de los pesos
+  en vez de dar un escalón en la rodilla —era el largo por escala lo que se veía
+  forzado—. El grosor sí es escala, pero **uniforme**, y a cada hijo se le divide por
+  ella (`1/g`): el *segment scale compensate* de Maya, aquí exacto, sin importar cómo
+  esté girado el hijo ni cuántos huesos seguidos se deformen. Como en toda la figura
+  las escalas quedan uniformes, nada cizalla la piel y al nieto no le queda ningún
+  resto: los dos límites que este apartado avisaba antes han dejado de existir. El
+  eje del largo no se supone, se mide del hijo en reposo (`Character.deformAxis`).
+  Las tres capas —reposo, lo que pide el usuario y el estirado de la cadena— las
+  compone un solo camino: `IKRig.applyStretch` llama primero a
+  `Character.applyDeform` y luego **multiplica** encima (`Character.deformLength`
+  dice cuánto había alargado cada articulación), así que un hueso alargado a mano
+  dentro de una cadena estirada mantiene lo suyo. Al arrastrar, el gizmo no manda tal
+  cual: se suaviza contra el valor que había al apretar (`ajustarDeform`, exponente
+  0,55), que por ser función del puntero no se va acumulando solo, y con **Conservar
+  el volumen** puesto alargar adelgaza y acortar ensancha (`g ÷ √k`), el mismo
+  aplastado que hace el squash de las cadenas. La deformación va de 0,2 a 3, viaja
+  con la pose (`pose.scales`, largo y grosor por hueso; las poses viejas de tres ejes
+  se reparten al cargarlas), y por eso se guarda en la biblioteca, se exporta, se
+  copia al duplicar una figura y vuelve con `Ctrl+Z` sin código aparte.
+- **Deformar por posición, que es como se deforma en un rig de verdad.** Con la
+  inversa puesta, girar el hueso ya no es una opción —lo resuelve el solver—, así
+  que el cartón se pide **colocando** cosas. Dos tiradores, los dos del interruptor
+  **Deformar por posición**: la **bola morada del pliegue**, en el codo y en la
+  rodilla, y un **pico verde de volumen** por hueso, flotando a media altura de su
+  eslabón. El pliegue no gira nada: del punto donde está el ratón saca los dos lados
+  del triángulo (`|A−P|` y `|P−T|`), los escribe como largo de los dos huesos y
+  resuelve la cadena usándose a sí mismo de rombo, así que la articulación queda
+  **debajo del puntero** —medido, a la precisión de la máquina— y la punta no se
+  mueve de su objetivo; por la desigualdad triangular siempre alcanza. El pico de
+  volumen mete los dos números en un solo sitio: lo que se corre **a lo largo** del
+  eje es el largo, y lo que se **aparta** de él el grosor, contado en brazos de
+  palanca del propio tirador. Ir y volver son la misma función al revés
+  (`tweakPoint` / `tweakFactors`, exportadas y probadas contra el código que usa el
+  ratón, no contra una copia de la fórmula), y por eso el tirador se queda pegado al
+  puntero aunque el hueso esté cambiando de tamaño debajo. Los dos congelan su marco
+  de medida al apretar (`#posStart`): volver a leer el eje en cada evento es un
+  bucle, porque deformar gira la cadena y con ella el eje con el que se mide, y el
+  tirador se iba solo con el ratón quieto. Cada evento es función del puntero y de
+  ese marco, nunca del valor de antes, así que no se acumula nada y volver al punto
+  de partida devuelve los factores a 1. Una salvedad con el squash encendido:
+  `solve` recalcula el estirado después del reparto, así que en una pierna casi
+  recta el puntero corre un par de puntos por delante de la rodilla.
 - **Solo los controles que hacen falta.** Una figura entera pasa de cuarenta
   manejadores y de espaldas se tapan unos a otros. Con `N` solo se ven los del
   entorno del puntero: cada manejador se proyecta a pantalla y se mide su distancia

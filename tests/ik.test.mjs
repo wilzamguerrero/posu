@@ -681,6 +681,18 @@ let destino = null;
   const iguales = (a, b, tol) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < tol);
   const razon = (a, b) => a.map((v, i) => (v / b[i]).toFixed(5)).join(' ');
   const claveDe = (b) => Object.keys(character.bones).find((k) => character.bones[k] === b) || '';
+  /**
+   * Cuanto se ha sesgado lo que cuelga de un hueso. Una escala no uniforme heredada
+   * bajo un giro cizalla: los ejes dejan de ser perpendiculares y el pie sale como
+   * un paralelogramo. Con todas las escalas uniformes esto no se mueve del reposo.
+   */
+  const sesgo = (o) => {
+    o.updateWorldMatrix(true, false);
+    const e = o.matrixWorld.elements;
+    const c = [V(e[0], e[1], e[2]).normalize(), V(e[4], e[5], e[6]).normalize(),
+      V(e[8], e[9], e[10]).normalize()];
+    return Math.max(Math.abs(c[0].dot(c[1])), Math.abs(c[1].dot(c[2])), Math.abs(c[0].dot(c[2])));
+  };
 
   const pierna = rig.get('leftLeg');
   const espinilla = pierna.mid;   // la rodilla, el hueso de en medio de la cadena
@@ -688,69 +700,112 @@ let destino = null;
   const muslo = pierna.root;
   const cEspinilla = claveDe(espinilla);
   const cMuslo = claveDe(muslo);
+  const eje = character.lengthAxis(espinilla);
+  /** Lo que pide el giroscopio: el largo en el eje del hueso, el grosor en los otros. */
+  const pedir = (bone, k, g) => {
+    const v = V(g, g, g);
+    const i = character.lengthAxis(bone);
+    if (i >= 0) v.setComponent(i, k);
+    return v;
+  };
   const natural = eslabones(pierna);
   const largoReposo = pierna.rest.links.map((l) => l.len);
   const ePie = escalaMundo(pie).clone();
   const eEspinilla = escalaMundo(espinilla).clone();
   const rEspinilla = character.rest.scale.get(espinilla).clone();
   const rMuslo = character.rest.scale.get(muslo).clone();
+  const sesgoPie = sesgo(pie);
 
   check('el modelo nace sin deformar',
-    character.deformed === false && cEspinilla !== '' && cMuslo !== '',
-    cMuslo + ' / ' + cEspinilla);
+    character.deformed === false && cEspinilla !== '' && cMuslo !== '' && eje >= 0,
+    cMuslo + ' / ' + cEspinilla + ' eje=' + eje);
 
-  // Uniforme: la rodilla crece entera, el eslabon que cuelga de ella la sigue y el
-  // pie no se contagia. Es el "segment scale compensate" de los rigs de cine.
-  character.setBoneScale(cEspinilla, V(1.5, 1.5, 1.5));
-  check('escalar un hueso alarga su eslabon y deja quieto el de arriba',
-    iguales(eslabones(pierna), [natural[0], natural[1] * 1.5], 1e-6),
+  // Solo grosor: la rodilla engorda sin mover el tobillo y sin contagiar al pie. Es
+  // el "segment scale compensate" de los rigs de cine, y al ser la escala uniforme
+  // la cuenta del hijo es exacta en vez de aproximada.
+  character.setBoneScale(cEspinilla, pedir(espinilla, 1, 1.3));
+  const f1 = character.boneFactors(cEspinilla);
+  check('engordar es escala uniforme y no toca el largo',
+    Math.abs(f1.k - 1) < 1e-12 && Math.abs(f1.g - 1.3) < 1e-12
+    && espinilla.scale.distanceTo(rEspinilla.clone().multiplyScalar(1.3)) < 1e-12,
+    'k=' + f1.k + ' g=' + f1.g);
+  check('engordar un hueso no le mueve las articulaciones',
+    iguales(eslabones(pierna), natural, 1e-9), razon(eslabones(pierna), natural));
+  check('y el pie no engorda con la rodilla',
+    escalaMundo(pie).distanceTo(ePie) < 1e-9,
+    razon(escalaMundo(pie).toArray(), ePie.toArray()));
+  check('ni queda sesgado, que es lo que estropeaba la piel',
+    sesgo(pie) <= sesgoPie + 1e-9, 'sesgo=' + sesgo(pie).toExponential(1));
+
+  // Solo largo: no se escala nada, se mueve la articulacion de abajo, igual que el
+  // estirado de las cadenas. La piel se estira entre las dos con el degradado de
+  // los pesos, que es lo que se ve suave en vez de dar un escalon en la rodilla.
+  character.setBoneScale(cEspinilla, pedir(espinilla, 1.4, 1));
+  check('alargar un hueso no le cambia la escala',
+    espinilla.scale.distanceTo(rEspinilla) < 1e-12, espinilla.scale.toArray().join(' '));
+  check('alargar mueve la articulacion de abajo, y solo ese eslabon',
+    iguales(eslabones(pierna), [natural[0], natural[1] * 1.4], 1e-6),
     razon(eslabones(pierna), natural));
-  check('y el pie no crece con la rodilla',
-    escalaMundo(pie).distanceTo(ePie) < 1e-6,
+  check('el pie sigue midiendo lo suyo aunque la espinilla sea mas larga',
+    escalaMundo(pie).distanceTo(ePie) < 1e-9,
     razon(escalaMundo(pie).toArray(), ePie.toArray()));
 
-  // No uniforme: el factor se guarda tal cual y al hijo se le descuenta contando el
-  // giro que lleva, no componente a componente, que es lo que engordaba el pie.
-  const f = V(1, 1.4, 1);
-  character.setBoneScale(cEspinilla, f);
-  check('el factor del hueso es el que se pidio',
-    character.boneDeform(cEspinilla).distanceTo(f) < 1e-12);
-  check('la escala local del hueso es reposo por deformacion',
-    espinilla.scale.distanceTo(rEspinilla.clone().multiply(f)) < 1e-12,
-    espinilla.scale.toArray().join(' '));
-  const eDeform = escalaMundo(espinilla);
-  check('en el mundo el hueso crece solo en el eje que se pidio',
-    Math.abs(eDeform.x / eEspinilla.x - 1) < 1e-9
-    && Math.abs(eDeform.y / eEspinilla.y - 1.4) < 1e-9
-    && Math.abs(eDeform.z / eEspinilla.z - 1) < 1e-9,
-    razon(eDeform.toArray(), eEspinilla.toArray()));
-  check('y el pie no engorda aunque cuelgue girado de ella',
-    escalaMundo(pie).distanceTo(ePie) < 1e-6,
-    razon(escalaMundo(pie).toArray(), ePie.toArray()));
+  // Un tiron uniforme: el trozo entero crece, largo y grosor a la vez.
+  character.setBoneScale(cEspinilla, pedir(espinilla, 1.5, 1.5));
+  check('un tiron uniforme alarga y engorda el mismo trozo',
+    iguales(eslabones(pierna), [natural[0], natural[1] * 1.5], 1e-6)
+    && Math.abs(escalaMundo(espinilla).x / eEspinilla.x - 1.5) < 1e-9
+    && escalaMundo(pie).distanceTo(ePie) < 1e-9,
+    razon(eslabones(pierna), natural));
 
-  // Deformacion y squash a la vez sobre la misma cadena: cada capa en su sitio.
+  // Pedir grosor en un solo eje no deja el hueso ovalado: el grosor sale de la media
+  // geometrica de los dos ejes de al lado. Una seccion ovalada bajo un giro es justo
+  // lo que cizallaba, y por eso no se le deja pedir.
+  character.setBoneScale(cEspinilla, pedir(espinilla, 1, 1).setComponent((eje + 1) % 3, 1.44));
+  const f2 = character.boneFactors(cEspinilla);
+  check('pedir grosor en un solo eje engorda la mitad, pero redondo',
+    Math.abs(f2.g - 1.2) < 1e-9 && Math.abs(f2.k - 1) < 1e-12
+    && espinilla.scale.distanceTo(rEspinilla.clone().multiplyScalar(1.2)) < 1e-12,
+    'g=' + f2.g.toFixed(5));
+  check('con la seccion redonda nada de lo que cuelga se sesga',
+    sesgo(pie) <= sesgoPie + 1e-9, 'sesgo=' + sesgo(pie).toExponential(1));
+
+  // Deformacion y estirado de la cadena a la vez, cada capa en su sitio: el squash
+  // multiplica lo que el usuario ya habia puesto a mano en vez de pisarlo.
+  const kd = 1.3;
+  const gd = 1.1;
+  character.setBoneScale(cEspinilla, pedir(espinilla, kd, gd));
   rig.setStretch(pierna, 1 + rig.stretchMax);
   const k = pierna.stretch;
   const u = 1 / Math.sqrt(k);
   check('el squash no borra la deformacion del hueso de en medio',
-    k > 1 && espinilla.scale.distanceTo(rEspinilla.clone().multiply(f)) < 1e-12,
+    k > 1 && espinilla.scale.distanceTo(rEspinilla.clone().multiplyScalar(gd)) < 1e-12,
     'k=' + k.toFixed(4));
-  check('la rodilla lleva su deformacion y el adelgazado de la cadena',
-    Math.abs(escalaMundo(espinilla).y / eEspinilla.y - 1.4 * u) < 1e-9
-    && Math.abs(escalaMundo(espinilla).x / eEspinilla.x - u) < 1e-9,
+  check('el eslabon deformado mide su largo por el de la cadena',
+    iguales(eslabones(pierna), [natural[0] * k, natural[1] * kd * k], 1e-6),
+    razon(eslabones(pierna), natural) + ' k=' + k.toFixed(4));
+  check('la rodilla lleva su grosor y el adelgazado de la cadena',
+    Math.abs(escalaMundo(espinilla).x / eEspinilla.x - gd * u) < 1e-9
+    && Math.abs(escalaMundo(espinilla).y / eEspinilla.y - gd * u) < 1e-9,
     razon(escalaMundo(espinilla).toArray(), eEspinilla.toArray()) + ' u=' + u.toFixed(5));
   check('y con el squash puesto el pie sigue midiendo lo suyo',
     escalaMundo(pie).distanceTo(ePie) < 1e-6,
     razon(escalaMundo(pie).toArray(), ePie.toArray()));
 
-  // Tres capas en el mismo hueso: reposo, deformacion del usuario y estirado del
-  // IK. La raiz de la cadena es la que lleva el factor que compensa el volumen.
-  const fMuslo = V(1.3, 1, 1.3);
-  character.setBoneScale(cMuslo, fMuslo);
+  // Tres capas en el mismo hueso: reposo, grosor del usuario y estirado de la
+  // cadena. Y con el padre y el hijo deformados a la vez el nieto no hereda nada,
+  // ni un resto: el descuento de una escala uniforme es exacto.
+  character.setBoneScale(cMuslo, pedir(muslo, 1, 1.2));
   rig.applyStretch();
-  check('reposo por deformacion por estirado, las tres capas en la raiz',
-    muslo.scale.distanceTo(rMuslo.clone().multiply(fMuslo).multiplyScalar(u)) < 1e-12,
+  check('reposo por grosor por estirado, las tres capas en la raiz',
+    muslo.scale.distanceTo(rMuslo.clone().multiplyScalar(1.2 * u)) < 1e-12,
     muslo.scale.toArray().map((v) => v.toFixed(5)).join(' '));
+  check('engordar el muslo no alarga la pierna',
+    iguales(eslabones(pierna), [natural[0] * k, natural[1] * kd * k], 1e-6),
+    razon(eslabones(pierna), natural));
+  check('con padre e hijo deformados al pie no le queda ni un resto',
+    escalaMundo(pie).distanceTo(ePie) < 1e-6 && sesgo(pie) <= sesgoPie + 1e-9,
+    razon(escalaMundo(pie).toArray(), ePie.toArray()));
 
   // Rehacer el rig con huesos deformados no puede tomar la deformacion por largo
   // natural: las medidas de reposo salen del mapa del personaje, no del hueso vivo.
@@ -764,6 +819,9 @@ let destino = null;
   // Continuidad al cambiar de modo: al pasar de IK a FK se mueven los objetivos,
   // pero el squash sigue puesto y los huesos no vuelven a su tamano de golpe.
   const sinEstirar = eslabones(pierna2);
+  check('sin estirar, la pierna lleva solo el largo puesto a mano',
+    iguales(sinEstirar, [natural[0], natural[1] * kd], 1e-6),
+    razon(sinEstirar, natural));
   rig.setStretch(pierna2, 1 + rig.stretchMax);
   const k2 = pierna2.stretch;
   const estirados = eslabones(pierna2);
@@ -779,20 +837,14 @@ let destino = null;
     && character.deform.size === 2,
     razon(eslabones(pierna2), sinEstirar));
 
-  // Con dos huesos seguidos deformados (el muslo y la rodilla) al pie ya no se le
-  // puede descontar todo: la escala girada del abuelo no es diagonal y ninguna
-  // escala local la deshace. Queda un resto pequeno, no el 1.3 de no compensar.
-  check('con padre e hijo deformados al pie solo le queda un resto',
-    escalaMundo(pie).toArray().every((v, i) => Math.abs(v / ePie.getComponent(i) - 1) < 0.1),
-    razon(escalaMundo(pie).toArray(), ePie.toArray()));
-
   // La deformacion viaja con la pose, que es lo que hace que se guarde, se copie
-  // entre figuras y vuelva con deshacer sin escribir nada aparte.
+  // entre figuras y vuelva con deshacer sin escribir nada aparte. Son dos numeros
+  // por hueso, largo y grosor, no una escala de tres ejes.
   const pose = character.getPose();
-  const ePieDeform = escalaMundo(pie).clone();
-  check('la pose se lleva las escalas de los huesos deformados',
+  check('la pose se lleva el largo y el grosor de cada hueso deformado',
     !!pose.scales && Object.keys(pose.scales).length === 2
-    && pose.scales[cEspinilla]?.length === 3,
+    && pose.scales[cEspinilla]?.length === 2
+    && Math.abs(pose.scales[cEspinilla][0] - kd) < 1e-9,
     Object.keys(pose.scales || {}).join(' '));
   character.clearDeform();
   check('quitar todas devuelve el tamano de reposo, hueso y pie',
@@ -802,32 +854,205 @@ let destino = null;
     && iguales(eslabones(pierna2), natural, 1e-9),
     razon(eslabones(pierna2), natural));
   character.setPose(pose);
-  check('cargar la pose las devuelve tal cual, huesos y piel',
-    character.boneDeform(cEspinilla).distanceTo(f) < 1e-9
-    && character.boneDeform(cMuslo).distanceTo(fMuslo) < 1e-9
-    && escalaMundo(pie).distanceTo(ePieDeform) < 1e-9,
-    razon(escalaMundo(pie).toArray(), ePieDeform.toArray()));
+  check('cargar la pose las devuelve tal cual',
+    Math.abs(character.boneFactors(cEspinilla).k - kd) < 1e-9
+    && Math.abs(character.boneFactors(cEspinilla).g - gd) < 1e-9
+    && iguales(eslabones(pierna2), [natural[0], natural[1] * kd], 1e-6)
+    && escalaMundo(pie).distanceTo(ePie) < 1e-6);
   const vieja = character.getPose();
   delete vieja.scales;
   character.setPose(vieja);
   check('y una pose vieja sin escalas no borra lo deformado',
     character.deformed === true && character.deform.size === 2);
+  character.setDeformState({ [cEspinilla]: [1, 1.44, 1] });
+  check('una pose guardada con escalas de tres ejes se reparte en largo y grosor',
+    character.deform.size === 1
+    && Math.abs(character.boneFactors(cEspinilla).k - (eje === 1 ? 1.44 : 1)) < 1e-9
+    && Math.abs(character.boneFactors(cEspinilla).g - (eje === 1 ? 1 : 1.2)) < 1e-9,
+    JSON.stringify(character.boneFactors(cEspinilla)));
 
+  character.setBoneScale(cMuslo, pedir(muslo, 1, 1.2));
   check('la deformacion tiene topes por arriba y por abajo',
-    character.setBoneScale(cEspinilla, V(9, 0.01, 1)) === true
-    && character.boneDeform(cEspinilla).distanceTo(V(3, 0.2, 1)) < 1e-12,
+    character.setBoneScale(cEspinilla, pedir(espinilla, 9, 0.01)) === true
+    && character.boneDeform(cEspinilla).distanceTo(pedir(espinilla, 3, 0.2)) < 1e-12,
     character.boneDeform(cEspinilla).toArray().join(' '));
   check('pedir el mismo factor otra vez no cambia nada',
-    character.setBoneScale(cMuslo, fMuslo) === false);
+    character.setBoneScale(cMuslo, pedir(muslo, 1, 1.2)) === false);
   check('volver a uno borra el apunte de ese hueso',
-    character.setBoneScale(cEspinilla, V(1, 1, 1)) === true
+    character.setBoneFactors(cEspinilla, 1, 1) === true
     && character.deform.size === 1
-    && escalaMundo(espinilla).distanceTo(eEspinilla) < 1e-9);
+    && escalaMundo(espinilla).distanceTo(eEspinilla) < 1e-9
+    && iguales(eslabones(pierna2), natural, 1e-9));
   character.clearDeform(cMuslo);
-  check('quitar el ultimo deja el modelo limpio',
+  check('quitar el ultimo deja el modelo limpio, sin escalas ni largos pendientes',
     character.deformed === false && character.deform.size === 0
-    && muslo.scale.distanceTo(rMuslo) < 1e-12);
+    && character.deformLength.size === 0
+    && muslo.scale.distanceTo(rMuslo) < 1e-12
+    && iguales(eslabones(pierna2), natural, 1e-9));
   rig.syncAll();
+
+  // El tacto del giroscopio: lo que pide el raton se suaviza contra el valor que
+  // habia al empezar a arrastrar, asi que es una funcion del puntero y no se va
+  // acumulando. Y con el volumen puesto, alargar adelgaza en la misma medida.
+  const { ajustarDeform } = await import('../src/posing/ManualPosing.js');
+  const uno = { k: 1, g: 1 };
+  const duro = ajustarDeform(uno, { k: 2, g: 1 }, { volumen: false });
+  check('un tiron al doble no llega al doble, pero va en su sentido',
+    duro.k > 1.4 && duro.k < 1.5 && Math.abs(duro.g - 1) < 1e-12,
+    'k=' + duro.k.toFixed(4));
+  const vol = ajustarDeform(uno, { k: 2, g: 1 });
+  check('con el volumen puesto, alargar adelgaza lo justo para no ganar bulto',
+    Math.abs(vol.k * vol.g * vol.g - 1) < 1e-12,
+    'k=' + vol.k.toFixed(4) + ' g=' + vol.g.toFixed(4));
+  const corto = ajustarDeform(uno, { k: 0.5, g: 1 });
+  check('y acortar ensancha, que es el aplastado de dibujo animado',
+    corto.k > 0.5 && corto.k < 1 && corto.g > 1
+    && Math.abs(corto.k * corto.g * corto.g - 1) < 1e-12,
+    'k=' + corto.k.toFixed(4) + ' g=' + corto.g.toFixed(4));
+  const quieto = ajustarDeform({ k: 1.4, g: 0.9 }, { k: 1.4, g: 0.9 });
+  check('pedir lo que ya hay no mueve nada: el suavizado no se va solo',
+    Math.abs(quieto.k - 1.4) < 1e-12 && Math.abs(quieto.g - 0.9) < 1e-12,
+    'k=' + quieto.k + ' g=' + quieto.g);
+  const iman = ajustarDeform(uno, { k: 1.6, g: 1 }, { volumen: false, paso: 0.05 });
+  check('con el imantado el largo cae de cinco en cinco centesimas',
+    Math.abs(iman.k - 1.3) < 1e-9, 'k=' + iman.k);
+}
+
+// --- deformar por posicion: el pliegue y el tirador de volumen -------------
+{
+  const { tweakPoint, tweakFactors } = await import('../src/posing/ManualPosing.js');
+  settings.set('ik.stretch', false);
+  character.clearDeform();
+  rig.hold.clear();
+  rig.syncAll();
+  const pierna = rig.get('leftLeg');
+  const camino = [pierna.root, pierna.mid, pierna.tip];
+
+  check('cada cadena dice de que huesos esta hecha, y en orden',
+    rig.chains.every((c) => c.keys.length === c.bones.length
+      && c.keys.every((k, i) => bones[k] === c.bones[i])),
+    rig.chains.map((c) => c.id + ':' + c.keys.join('>')).join(' '));
+  check('y la raiz de la cadena se puede pedir en mundo',
+    rig.rootWorld(pierna, new THREE.Vector3()).distanceTo(wp(pierna.root)) < 1e-12);
+
+  // El pliegue: se lleva la rodilla a un punto y los dos eslabones dan de si lo
+  // justo para llegar, con el pie quieto en su objetivo. La cuenta es la del
+  // manejador: cada eslabon tiene que medir su lado del triangulo.
+  const s0 = pierna.stretch || 1;
+  const f0 = pierna.keys.map((k) => character.boneFactors(k));
+  const nat = [0, 1].map((i) => wp(camino[i]).distanceTo(wp(camino[i + 1])) / (f0[i].k * s0));
+  const raiz = wp(pierna.root);
+  const objetivo = rig.targetWorld(pierna, new THREE.Vector3());
+  const rodilla0 = rig.midWorld(pierna, new THREE.Vector3());
+  const total = nat[0] + nat[1];
+  const eslabon = (i) => wp(camino[i]).distanceTo(wp(camino[i + 1]));
+
+  /** Lo que hace el manejador del pliegue en cada evento del raton. */
+  const pliega = (punto) => {
+    const s = pierna.stretch || 1;
+    const dist = [raiz.distanceTo(punto), punto.distanceTo(objetivo)];
+    for (let i = 0; i < 2; i++) {
+      const k = dist[i] / (nat[i] * s);
+      character.setBoneFactors(pierna.keys[i], k, f0[i].g);
+    }
+    rig.applyStretch();
+    rig.solve(pierna, punto);
+    return dist;
+  };
+
+  // Un punto fuera de la linea muslo-pie: la rodilla sale de la recta y los dos
+  // huesos tienen que alargarse para llegar hasta el.
+  const fuera = perpA(rodilla0, raiz, wp(pierna.tip).sub(raiz).normalize()).normalize();
+  const pedido = rodilla0.clone().addScaledVector(fuera, total * 0.2);
+  const dist = pliega(pedido);
+  check('el pliegue deja la rodilla debajo del raton',
+    rig.midWorld(pierna, new THREE.Vector3()).distanceTo(pedido) < total * 1e-4,
+    'd=' + rig.midWorld(pierna, new THREE.Vector3()).distanceTo(pedido).toExponential(1));
+  check('y el pie no se ha movido de su objetivo',
+    punta(pierna).distanceTo(objetivo) < total * 1e-4,
+    'd=' + punta(pierna).distanceTo(objetivo).toExponential(1));
+  check('los dos eslabones miden justo su lado del triangulo',
+    Math.abs(eslabon(0) - dist[0]) < 1e-6 && Math.abs(eslabon(1) - dist[1]) < 1e-6,
+    [eslabon(0) / dist[0], eslabon(1) / dist[1]].map((v) => v.toFixed(6)).join(' '));
+  check('que es alargar los huesos, no girarlos y ya',
+    character.boneFactors(pierna.keys[0]).k > 1.02
+    && character.boneFactors(pierna.keys[1]).k > 1.02,
+    pierna.keys.map((k) => character.boneFactors(k).k.toFixed(3)).join(' '));
+
+  // Cada evento es una funcion del raton: el mismo punto dos veces no acumula, y
+  // volver al punto de partida devuelve los huesos a su largo natural.
+  const k1 = pierna.keys.map((k) => character.boneFactors(k).k);
+  pliega(pedido);
+  check('pedir el mismo punto otra vez no lo va estirando',
+    pierna.keys.every((k, i) => Math.abs(character.boneFactors(k).k - k1[i]) < 1e-9),
+    pierna.keys.map((k) => character.boneFactors(k).k.toFixed(6)).join(' '));
+  pliega(rodilla0);
+  check('y volver al punto de partida devuelve los largos',
+    pierna.keys.every((k) => Math.abs(character.boneFactors(k).k - 1) < 1e-6)
+    && Math.abs(eslabon(0) - nat[0]) < 1e-6 && Math.abs(eslabon(1) - nat[1]) < 1e-6,
+    pierna.keys.map((k) => character.boneFactors(k).k.toFixed(6)).join(' '));
+
+  // El tirador de volumen de un hueso: flota a media altura del eslabon y apartado
+  // de su eje, y donde se dibuja es exactamente la inversa de lo que un punto pide.
+  // Eso es lo que lo mantiene pegado al raton mientras se arrastra.
+  character.clearDeform();
+  rig.syncAll();
+  const clave = pierna.keys[1];               // la rodilla, el hueso de en medio
+  const rodilla = pierna.mid;
+  const pie = pierna.tip;
+  const a0 = wp(rodilla);
+  const base = a0.distanceTo(wp(pie));        // sin deformar ni estirar, k = 1
+  const eje = wp(pie).sub(a0).normalize();
+  const perp = rig.bendWorld(pierna, new THREE.Vector3());
+  perp.addScaledVector(eje, -perp.dot(eje)).normalize();
+  const marco = { a: a0, eje, perp, base };
+  const reposo = tweakPoint(marco);
+
+  check('el tirador de volumen nace a media altura del eslabon',
+    Math.abs(reposo.clone().sub(a0).dot(eje) - base * 0.5) < 1e-9,
+    (reposo.clone().sub(a0).dot(eje) / base).toFixed(6));
+  check('y apartado del eje, para poder pincharlo sin darle al hueso',
+    perpA(reposo, a0, eje).length() > base * 0.1,
+    (perpA(reposo, a0, eje).length() / base).toFixed(3));
+  const ida = tweakFactors(marco, tweakPoint({ ...marco, k: 1.4, g: 0.7 }));
+  check('la ida y la vuelta dan el mismo largo y el mismo grosor',
+    Math.abs(ida.k - 1.4) < 1e-9 && Math.abs(ida.g - 0.7) < 1e-9,
+    'k=' + ida.k.toFixed(6) + ' g=' + ida.g.toFixed(6));
+  check('correrlo a lo largo alarga y apartarlo engorda, cada cosa por su lado',
+    Math.abs(tweakFactors(marco, tweakPoint({ ...marco, k: 2 })).g - 1) < 1e-9
+    && Math.abs(tweakFactors(marco, tweakPoint({ ...marco, g: 2 })).k - 1) < 1e-9);
+  check('apartarlo el doble de su brazo engorda el hueso al doble',
+    Math.abs(perpA(tweakPoint({ ...marco, g: 2 }), a0, eje).length()
+      / perpA(reposo, a0, eje).length() - 2) < 1e-9);
+
+  // Y la prueba que importa: soltar el tirador en un punto y volver a dibujarlo
+  // sobre el hueso ya deformado lo deja en el mismo punto. Si no, se despegaria
+  // del raton en cuanto el hueso cambiase de tamano.
+  const suelta = tweakPoint({ ...marco, k: 1.25, g: 1.6 });
+  const f = tweakFactors(marco, suelta);
+  character.setBoneFactors(clave, f.k, f.g);
+  rig.applyStretch();
+  const puesto = character.boneFactors(clave);
+  const a1 = wp(rodilla);
+  const largo1 = a1.distanceTo(wp(pie));
+  check('deformar el hueso no mueve la articulacion de arriba',
+    a1.distanceTo(a0) < 1e-9);
+  check('el largo del eslabon es el natural por el largo pedido',
+    Math.abs(largo1 - base * puesto.k) < 1e-9,
+    (largo1 / base).toFixed(6) + ' vs ' + puesto.k.toFixed(6));
+  const dibujado = tweakPoint({
+    a: a1, eje: wp(pie).sub(a1).normalize(), perp,
+    base: largo1 / puesto.k, k: puesto.k, g: puesto.g,
+  });
+  check('el tirador se queda donde se ha soltado, con el hueso ya deformado',
+    dibujado.distanceTo(suelta) < base * 1e-9,
+    'd=' + dibujado.distanceTo(suelta).toExponential(1));
+
+  character.clearDeform();
+  rig.hold.clear();
+  rig.syncAll();
+  check('y al soltarlo todo el modelo queda limpio',
+    character.deformed === false && Math.abs(eslabon(1) - nat[1]) < 1e-9);
 }
 
 // --- rehacer el rig al cambiar de modelo ----------------------------------

@@ -112,7 +112,7 @@ function armarDos(def, bones) {
   if (!root || !mid || !tip) return null;
   return {
     def, id: def.id, kind: 'twoBone', root, mid, tip, bones: [root, mid],
-    rootKey: def.root, midKey: def.mid, tipKey: def.tip,
+    rootKey: def.root, midKey: def.mid, tipKey: def.tip, keys: [def.root, def.mid],
   };
 }
 
@@ -126,13 +126,14 @@ function armarVarios(def, bones) {
   const tipKey = def.tips.find((k) => bones[k]);
   if (!tipKey) return null;
   const corte = def.bones.indexOf(tipKey);
-  const usados = (corte >= 0 ? def.bones.slice(0, corte) : def.bones)
-    .map((k) => bones[k])
-    .filter(Boolean);
+  // Las claves viajan al lado de los huesos porque el modelo puede no traerlos
+  // todos: quien quiera deformar el tercero de la cadena necesita saber cual es.
+  const claves = (corte >= 0 ? def.bones.slice(0, corte) : def.bones).filter((k) => bones[k]);
+  const usados = claves.map((k) => bones[k]);
   if (!usados.length) return null;
   return {
     def, id: def.id, kind: 'chain', root: usados[0], mid: null, tip: bones[tipKey], bones: usados,
-    rootKey: def.bones[0], midKey: '', tipKey,
+    rootKey: claves[0], midKey: '', tipKey, keys: claves,
   };
 }
 
@@ -311,6 +312,11 @@ export class IKRig {
     return worldOf(chain.tip, out);
   }
 
+  /** Posicion de mundo de la raiz (hombro, muslo, primera vertebra). */
+  rootWorld(chain, out) {
+    return worldOf(chain.root, out);
+  }
+
   /** Posicion de mundo del codo o la rodilla; `null` en las cadenas FABRIK. */
   midWorld(chain, out) {
     if (!chain.mid) return null;
@@ -381,6 +387,11 @@ export class IKRig {
     // Capas 1 y 2. Si no hay personaje (o aun no hay esqueleto) se vuelve a las
     // medidas de reposo propias de cada cadena, que es como corren las pruebas.
     const base = this.character?.applyDeform?.() === true;
+    // Lo que la deformacion a mano ha alargado la traslacion de cada hueso. Va
+    // dentro del largo natural del eslabon en vez de encima: las dos capas se
+    // multiplican, asi que una rodilla alargada a mano sigue alargada dentro de una
+    // cadena estirada, y ninguna de las dos pisa a la otra.
+    const largos = base ? this.character.deformLength : null;
     for (const chain of this.chains) {
       const rest = chain.rest;
       if (!rest) continue;
@@ -388,7 +399,9 @@ export class IKRig {
         rest.root.bone.scale.copy(rest.root.scale);
         for (const c of rest.comp) c.bone.scale.copy(c.scale);
       }
-      for (const l of rest.links) l.bone.position.copy(l.dir).multiplyScalar(l.len);
+      for (const l of rest.links) {
+        l.bone.position.copy(l.dir).multiplyScalar(l.len * (largos?.get(l.bone) ?? 1));
+      }
     }
     for (const chain of this.chains) {
       const rest = chain.rest;
@@ -396,10 +409,12 @@ export class IKRig {
       const k = chain.stretch;
       const u = 1 / Math.sqrt(k);
       rest.root.bone.scale.multiplyScalar(u);
-      // El largo se escribe dividido por `u` porque la escala de la raiz ya
+      // El largo se multiplica dividido por `u` porque la escala de la raiz ya
       // multiplica por `u` todo lo que cuelga: asi el eslabon acaba midiendo
-      // `len * k` de mundo, ni mas ni menos.
-      for (const l of rest.links) l.bone.position.copy(l.dir).multiplyScalar(l.len * k / u);
+      // `len * k` de mundo, ni mas ni menos. Se multiplica sobre lo que dejo la
+      // pasada anterior, no se rehace desde `l.len`, que es lo que conserva el
+      // largo que el usuario haya puesto a mano en ese hueso.
+      for (const l of rest.links) l.bone.position.multiplyScalar(k / u);
       for (const c of rest.comp) c.bone.scale.multiplyScalar(1 / u);
     }
     return this;

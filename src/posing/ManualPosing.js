@@ -28,12 +28,23 @@
  *     porque el solucionador nunca escribe en ese hueso y los dos usos no chocan.
  *   - **Cubo pequeño** al lado del codo o la rodilla: el polo, que decide hacia
  *     donde se dobla el miembro sin mover la mano.
+ *   - **Bola morada** en el codo o la rodilla: el pliegue. Se lleva la articulacion
+ *     a un punto y los dos eslabones se alargan lo justo para llegar, con la mano
+ *     quieta en su objetivo. Es el «pin» del codo de un rig de dibujo animado: la
+ *     deformacion se hace **por posicion**, no con el giroscopio.
+ *   - **Pico verde** a media altura de cada hueso de una cadena: su volumen. Se
+ *     aparta del hueso y engorda, se corre a lo largo y alarga.
  *   - **Cubo grande** en la cadera: el peso del cuerpo. Mientras se arrastra, las
  *     piernas en cinematica inversa sujetan los pies, que es como se hace una
  *     sentadilla en un rig de verdad.
  *
- * La esfera de un hueso que ya tiene control de cinematica inversa se esconde: dos
- * manejadores concentricos se robarian el clic entre ellos.
+ * En modo inverso **desaparecen las esferas de giro de los huesos que manda el
+ * solucionador**: el hombro y el codo de un brazo encendido, la columna si el torso
+ * esta encendido. Girarlos a mano peleaba con la solucion —se movian y volvian al
+ * fotograma siguiente, deformando la figura por el camino—, y es justo lo que no
+ * hace un rig de produccion. Lo que se quiera girar hueso a hueso se apaga en
+ * **Cadenas** y vuelve a la cinematica directa; lo que se quiera deformar se hace
+ * con los tiradores de posicion, que estan para eso.
  *
  * Y por encima de las dos formas de posar esta `pose.proximity`: con ella solo se
  * ven los manejadores que caen junto al puntero (la cuenta esta en
@@ -48,21 +59,106 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { IKRig } from './IKRig.js';
 import { nearFactor, viewAspect } from './proximity.js';
+import { BONE_LABELS } from '../model/boneMap.js';
+import { worldOf } from '../pose/ik.js';
 
 const HANDLE_GEO = new THREE.SphereGeometry(1, 14, 10);
 /** Rombo para los objetivos: se reconoce de un vistazo entre las esferas. */
 const GOAL_GEO = new THREE.OctahedronGeometry(1.15, 0);
 /** Cubo para el polo y para el peso del cuerpo. */
 const CUBE_GEO = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-/** Tope de segmentos de la guia: un polo y un tirante por cadena. */
-const MAX_HINTS = 12;
+/** Pico para el tirador de volumen: no se confunde con ninguna de las otras. */
+const TWEAK_GEO = new THREE.TetrahedronGeometry(1.35, 0);
+/** Tope de segmentos de la guia: polo, tirante y palanca de volumen por cadena. */
+const MAX_HINTS = 28;
 /** Tamaño relativo de cada clase de manejador. */
-const SIZES = { joint: 1, effector: 1.3, pole: 0.62, body: 1.55 };
+const SIZES = { joint: 1, effector: 1.3, pole: 0.62, body: 1.55, bend: 1.15, tweak: 0.55 };
+/**
+ * Brazo del tirador de volumen, en largos del hueso: a que distancia del eje flota
+ * cuando el hueso no esta engordado. Tambien es su ganancia, porque el grosor sale
+ * de dividir por el: apartarlo ese brazo de mas es engordar el hueso al doble.
+ */
+const TWEAK_OFF = 0.3;
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _pq = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _t = new THREE.Vector3();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _e = new THREE.Vector3();
+const _n = new THREE.Vector3();
+const _d = new THREE.Vector3();
+/** Cuanto se suaviza el arrastre de deformar. 1 seria el crudo del giroscopio. */
+const DEFORM_SUAVE = 0.55;
+/** Paso del imantado al deformar: 1,15 de grosor, no 1,1473. */
+const DEFORM_PASO = 0.05;
+
+/**
+ * De lo que pide el giroscopio a lo que se le escribe al hueso. Dos correcciones,
+ * las dos medidas desde el tamano que tenia el hueso al empezar el arrastre (no
+ * desde el fotograma anterior, que se iria acumulando):
+ *
+ *   - **Suavizado.** El gizmo de escala de three casi duplica el tamano por cada
+ *     radio arrastrado, que en un hueso es un salto brusco: se va al tope antes de
+ *     que el ojo vea lo que esta pasando. Elevar el factor a `DEFORM_SUAVE` obliga
+ *     a arrastrar mas para el mismo grosor, asi que la deformacion crece despacio
+ *     y se puede afinar sin pelearse con el raton.
+ *   - **Volumen.** Aplastar y estirar de dibujo animado conserva el bulto: al
+ *     alargar un hueso se adelgaza y al acortarlo se ensancha. Es la misma cuenta
+ *     que el squash de las cadenas de IK (`u = 1/√k`), y por eso un hueso estirado
+ *     a mano y uno estirado por el rig se ven igual.
+ *
+ * @param {{k:number,g:number}} inicio  largo y grosor al empezar el arrastre
+ * @param {{k:number,g:number}} pedido  largo y grosor que sale del giroscopio
+ * @returns {{k:number,g:number}} lo que hay que escribirle al hueso
+ */
+export function ajustarDeform(inicio, pedido, { volumen = true, suave = DEFORM_SUAVE, paso = 0 } = {}) {
+  const k0 = inicio?.k > 0 ? inicio.k : 1;
+  const g0 = inicio?.g > 0 ? inicio.g : 1;
+  const k = k0 * ((pedido?.k > 0 ? pedido.k : k0) / k0) ** suave;
+  let g = g0 * ((pedido?.g > 0 ? pedido.g : g0) / g0) ** suave;
+  // El volumen se descuenta sobre lo que ha cambiado el largo en este arrastre, no
+  // sobre el largo total: si no, tocar un hueso ya estirado lo adelgazaria otra vez.
+  if (volumen) g /= Math.sqrt(k / k0);
+  const red = (v) => (paso > 0 ? Math.round(v / paso) * paso : v);
+  return { k: red(k), g: red(g) };
+}
+
+/**
+ * Donde flota el tirador de volumen de un hueso, y al reves: que largo y grosor
+ * esta pidiendo un punto. Las dos cuentas van juntas porque son la inversa una de
+ * la otra, y es eso lo que mantiene el tirador pegado al raton mientras se
+ * arrastra: se dibuja exactamente donde el punto lo pondria.
+ *
+ * El marco es el del eslabon: `a` es la articulacion de arriba, `eje` la direccion
+ * al hueso siguiente, `perp` el lado por el que se aparta, y `base` el largo que
+ * tendria el eslabon sin deformar (el natural por el estirado de la cadena). El
+ * tirador va a **media altura** del eslabon, asi que el largo sale por dos; y de
+ * lado se mide en brazos de palanca, asi que apartarlo un brazo mas es engordar el
+ * hueso al doble.
+ * @param {{a:THREE.Vector3,eje:THREE.Vector3,perp:THREE.Vector3,base:number,k?:number,g?:number}} m
+ */
+export function tweakPoint(m, out = new THREE.Vector3()) {
+  return out.copy(m.a)
+    .addScaledVector(m.eje, m.base * (m.k ?? 1) * 0.5)
+    .addScaledVector(m.perp, m.base * (m.g ?? 1) * TWEAK_OFF);
+}
+
+/**
+ * La inversa de `tweakPoint`: el largo y el grosor que pide un punto de mundo.
+ * @param {{a:THREE.Vector3,eje:THREE.Vector3,base:number}} m
+ * @param {THREE.Vector3} punto
+ * @returns {{k:number,g:number}}
+ */
+export function tweakFactors(m, punto) {
+  const base = Math.max(1e-6, m.base);
+  _d.copy(punto).sub(m.a);
+  const largo = _d.dot(m.eje);
+  const grueso = _d.addScaledVector(m.eje, -largo).length();
+  return { k: 2 * largo / base, g: grueso / (base * TWEAK_OFF) };
+}
 
 export class ManualPosing {
   /**
@@ -86,6 +182,12 @@ export class ManualPosing {
     this.entries = [];         // { key, label, bone, mesh, kind, chain, finger }
     this.history = [];
     this.dragging = false;
+    /** Largo y grosor del hueso al empezar a deformar; null si no se esta. */
+    this.deformStart = null;
+    /** Marco congelado del tirador de posicion que se arrastra; null si no hay. */
+    this.posStart = null;
+    /** Paso del imantado al deformar (0 = libre). */
+    this.deformStep = 0;
 
     /** Cinematica inversa: cadenas, objetivos y fijaciones. */
     this.rig = new IKRig(character ?? null, settings);
@@ -121,8 +223,17 @@ export class ManualPosing {
     this.matBody = this.material.clone();
     this.matBody.color.set(0xdcdcaa);
     this.matBody.opacity = 0.75;
+    // El pliegue lleva el morado del polo, que es su vecino y su primo: los dos
+    // deciden por donde pasa el codo, solo que este ademas da de si los huesos.
+    this.matBend = this.material.clone();
+    this.matBend.color.set(0xc586c0);
+    this.matBend.opacity = 0.85;
+    this.matTweak = this.material.clone();
+    this.matTweak.color.set(0xb5cea8);
+    this.matTweak.opacity = 0.72;
 
-    // Guias: del polo al codo, y del objetivo a la punta cuando no alcanza.
+    // Guias: del polo al codo, del objetivo a la punta cuando no alcanza, y del
+    // hueso a su tirador de volumen, que si no parece flotar sin dueño.
     this.hintMat = new THREE.LineBasicMaterial({
       color: 0xc586c0, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false,
     });
@@ -164,8 +275,22 @@ export class ManualPosing {
       if (e.value) {
         this.#pushHistory();
         this.#holdStart();
+        // Punto de partida del deformado: el suavizado y el volumen se miden desde
+        // aqui, que es tambien de donde parte el giroscopio (`_scaleStart`), asi que
+        // arrastrar es una funcion del raton y no se va acumulando por fotograma.
+        this.deformStart = this.#deformable(this.selected)
+          ? this.character.boneFactors(this.selected.boneKey)
+          : null;
+        // Y los tiradores de posicion se miden contra el esqueleto tal como estaba
+        // al empezar. Releer el marco en cada evento es una realimentacion: alargar
+        // un hueso hace que el solucionador gire la cadena, con la cadena gira el
+        // eje contra el que se mide, y el tirador se va solo aunque el raton este
+        // parado. Congelado, cada evento es una funcion del raton y nada acumula.
+        this.posStart = this.#posStart(this.selected);
       } else {
         this.rig.hold.clear();
+        this.deformStart = null;
+        this.posStart = null;
       }
     });
     this.gizmo.addEventListener('objectChange', () => this.#applyProxy());
@@ -194,8 +319,11 @@ export class ManualPosing {
     // El mismo paso que el gizmo de la escena: arrastrar un objetivo imantado se
     // mueve de 10 en 10 cm, comodo para plantar los pies en una linea.
     this.gizmo.translationSnap = n > 0 ? n : null;
-    // Deformar imantado va de decima en decima: 1.2 o 1.5 de grosor, no 1.4873.
-    this.gizmo.scaleSnap = n > 0 ? 0.1 : null;
+    // Deformar se imanta al final, sobre el largo y el grosor ya suavizados: si lo
+    // hiciera el giroscopio, el suavizado desharia el redondeo y saldrian numeros
+    // como 1,1473 con el imantado puesto.
+    this.gizmo.scaleSnap = null;
+    this.deformStep = n > 0 ? DEFORM_PASO : 0;
   }
 
   /** Reconstruye los manejadores a partir de los huesos posables del modelo. */
@@ -223,6 +351,26 @@ export class ManualPosing {
           key: `pole:${chain.id}`, label: chain.def.pole ?? chain.def.label, bone: chain.mid,
           boneKey: chain.midKey, kind: 'pole', chain, geo: CUBE_GEO,
         });
+        // El pliegue va sobre la misma articulacion que el polo, pero manda otra
+        // cosa: el polo gira el miembro alrededor del eje mano-hombro y este saca
+        // la articulacion de la linea alargando los dos eslabones.
+        this.#addHandle({
+          key: `bend:${chain.id}`, label: `Pliegue de ${chain.def.pole ?? chain.def.label}`,
+          bone: chain.mid, kind: 'bend', chain, geo: HANDLE_GEO,
+        });
+      }
+      // Un tirador de volumen por hueso de la cadena, y solo si el siguiente del
+      // camino cuelga de el: el largo se hace moviendo al hijo, asi que sin hijo
+      // en la cadena no hay eslabon que estirar.
+      const camino = [...chain.bones, chain.tip];
+      for (let i = 0; i < chain.bones.length; i++) {
+        const hueso = chain.bones[i];
+        const clave = chain.keys[i];
+        if (!clave || camino[i + 1]?.parent !== hueso) continue;
+        this.#addHandle({
+          key: `tweak:${chain.id}:${i}`, label: `Volumen · ${BONE_LABELS[clave] ?? clave}`,
+          bone: hueso, boneKey: clave, kind: 'tweak', chain, index: i, geo: TWEAK_GEO,
+        });
       }
     }
     if (this.character.bones?.hips) {
@@ -235,7 +383,7 @@ export class ManualPosing {
   }
 
   /** Crea una malla de manejador y la registra. */
-  #addHandle({ key, label, bone, mesh, finger = false, kind, chain = null, boneKey = '', geo }) {
+  #addHandle({ key, label, bone, mesh, finger = false, kind, chain = null, boneKey = '', index = -1, geo }) {
     const malla = mesh ?? new THREE.Mesh(geo, this.material);
     malla.name = `handle:${key}`;
     malla.renderOrder = 999;
@@ -243,7 +391,7 @@ export class ManualPosing {
     malla.userData.key = key;
     this.handles.add(malla);
     const entry = {
-      key, label, bone, mesh: malla, finger, kind, chain,
+      key, label, bone, mesh: malla, finger, kind, chain, index,
       boneKey: boneKey || (kind === 'joint' ? key : ''),
       // `shown` es lo que dicen las reglas y `near` (0..1) lo que dice el puntero:
       // el manejador se ve cuando las dos cosas estan de acuerdo.
@@ -264,7 +412,16 @@ export class ManualPosing {
     const ik = this.rig.on;
     this.taken.clear();
     if (ik) {
-      for (const chain of this.rig.chains) if (this.rig.live(chain)) this.taken.add(chain.tip);
+      // Todos los huesos de una cadena encendida, no solo su punta. Girar a mano el
+      // hombro de un brazo en cinematica inversa es pelear con el solucionador: el
+      // hueso se mueve y vuelve al fotograma siguiente, deformando la figura por el
+      // camino. Un rig de produccion tampoco los ofrece. Quien quiera girarlos
+      // apaga esa cadena en **Cadenas** y recupera la cinematica directa entera.
+      for (const chain of this.rig.chains) {
+        if (!this.rig.live(chain)) continue;
+        for (const hueso of chain.bones) this.taken.add(hueso);
+        this.taken.add(chain.tip);
+      }
       if (this.settings.get('ik.body') !== false && this.character?.bones?.hips) {
         this.taken.add(this.character.bones.hips);
       }
@@ -302,6 +459,12 @@ export class ManualPosing {
     if (entry.kind === 'body') return this.settings.get('ik.body') !== false;
     if (!this.rig.live(entry.chain)) return false;
     if (entry.kind === 'pole') return this.settings.get('ik.poles') !== false;
+    // El pliegue y los tiradores de volumen son lo que sustituye a la esfera de
+    // giro: en modo inverso se deforma por posicion, y por eso van juntos en un
+    // solo interruptor.
+    if (entry.kind === 'bend' || entry.kind === 'tweak') {
+      return this.settings.get('ik.deform') !== false;
+    }
     return true;
   }
 
@@ -310,6 +473,8 @@ export class ManualPosing {
     if (entry.kind === 'effector') return entry.chain?.pinned ? this.matPinned : this.matGoal;
     if (entry.kind === 'pole') return this.matPole;
     if (entry.kind === 'body') return this.matBody;
+    if (entry.kind === 'bend') return this.matBend;
+    if (entry.kind === 'tweak') return this.matTweak;
     return this.material;
   }
 
@@ -413,23 +578,38 @@ export class ManualPosing {
    * Que hace el giroscopio con este manejador. El polo solo se mueve y las
    * articulaciones solo giran; los objetivos y la cadera hacen lo que diga
    * `scene.tool`, de modo que `W` coloca la mano y `E` gira la muñeca sin salir
-   * del modo. `R` deforma, y esa vale en todos menos en el polo: es la escala del
-   * hueso, lo que convierte el maniqui en un rig de dibujo animado.
+   * del modo. `R` deforma, y esa vale en todos menos en el polo: el tirador que va a
+   * lo largo del hueso lo alarga y los otros dos lo engordan, que es lo que convierte
+   * el maniqui en un rig de dibujo animado.
    */
   #applyMode(entry) {
     const tool = this.settings.get('scene.tool');
     const libre = entry.kind === 'effector' || entry.kind === 'body';
-    const modo = entry.kind === 'pole' ? 'translate'
+    // El pliegue y el volumen deforman por posicion: siempre se mueven, tambien con
+    // `E` o `R` puestos. Son justamente lo que sustituye al giroscopio.
+    const modo = this.#positional(entry) || entry.kind === 'pole' ? 'translate'
       : (tool === 'scale' && this.#deformable(entry)) ? 'scale'
         : entry.kind === 'joint' ? 'rotate'
           : (libre && tool === 'rotate') ? 'rotate' : 'translate';
     if (this.gizmo.mode !== modo) this.gizmo.setMode(modo);
   }
 
-  /** ¿Se puede deformar el hueso de este manejador? El polo no es un hueso. */
+  /** ¿Este manejador deforma arrastrando su posicion en vez de con el gizmo? */
+  #positional(entry) {
+    return entry?.kind === 'bend' || entry?.kind === 'tweak';
+  }
+
+  /** Que hueso deforma este manejador; '' si ninguno. */
+  #deformKey(entry) {
+    // El polo solo gira el plano y el pliegue toca dos huesos a la vez, asi que
+    // ninguno de los dos tiene un hueso propio que ensenar ni que limpiar.
+    if (!entry || entry.kind === 'pole' || entry.kind === 'bend' || !entry.boneKey) return '';
+    return this.character?.bones?.[entry.boneKey] ? entry.boneKey : '';
+  }
+
+  /** ¿Se puede deformar el hueso de este manejador con el gizmo de escala (`R`)? */
   #deformable(entry) {
-    if (!entry || entry.kind === 'pole' || !entry.boneKey) return false;
-    return !!this.character?.bones?.[entry.boneKey];
+    return !this.#positional(entry) && !!this.#deformKey(entry);
   }
 
   /** Coloca el objeto que arrastra el giroscopio donde toca segun el manejador. */
@@ -439,10 +619,12 @@ export class ManualPosing {
     // escalar sigue desde donde se dejo en vez de saltar a 1.
     if (this.#deformable(entry)) this.character.boneDeform(entry.boneKey, p.scale);
     else p.scale.set(1, 1, 1);
-    if (entry.kind === 'pole') {
-      const polo = this.rig.poleWorld(entry.chain, _v);
-      if (polo) p.position.copy(polo);
+    if (entry.kind === 'pole' || this.#positional(entry)) {
+      // Sin orientacion: son puntos, y el giroscopio de mover con ejes de mundo es
+      // lo unico que hace falta para llevarlos a donde se quiere.
+      if (this.#pointOf(entry, _v)) p.position.copy(_v);
       p.quaternion.identity();
+      p.scale.set(1, 1, 1);
       return;
     }
     if (entry.kind === 'effector') {
@@ -466,7 +648,9 @@ export class ManualPosing {
     this.rig.hold.clear();
     const entry = this.selected;
     if (!entry || !this.rig.on) return;
-    if (entry.kind === 'effector') this.rig.hold.add(entry.chain.id);
+    // El pliegue sujeta su cadena por la misma razon que el objetivo: la mano se
+    // queda donde esta y lo que cede es el largo de los huesos.
+    if (entry.kind === 'effector' || entry.kind === 'bend') this.rig.hold.add(entry.chain.id);
     if (entry.kind === 'body') {
       for (const chain of this.rig.chains) {
         if (chain.def.group === 'legs' && this.rig.live(chain)) this.rig.hold.add(chain.id);
@@ -488,6 +672,10 @@ export class ManualPosing {
       // El polo gira el plano del pliegue con la punta clavada: el tercer paso del
       // solucionador gira sobre el eje hombro-objetivo, que no puede mover la mano.
       this.rig.solve(entry.chain, this.proxy.position);
+    } else if (entry.kind === 'bend') {
+      this.#bendLimb(entry);
+    } else if (entry.kind === 'tweak') {
+      this.#tweakBone(entry);
     } else if (entry.kind === 'effector' && !girando) {
       this.rig.setTargetWorld(entry.chain, this.proxy.position);
     } else if (entry.kind === 'body' && !girando) {
@@ -495,10 +683,6 @@ export class ManualPosing {
     } else {
       this.#rotateBone(entry.bone);
     }
-    // Con algun hueso deformado hay que rehacer las tres capas de escala en cada
-    // arrastre: la compensacion de los hijos depende de como esten girados, asi que
-    // girar un pie bajo una espinilla engordada cambia lo que hay que descontarle.
-    if (this.character?.deformed) this.rig.applyStretch();
     // Las cadenas sujetas (fijadas o retenidas por este arrastre) se rehacen en
     // orden de dependencia, asi que la que se arrastra se resuelve tambien aqui.
     this.rig.solveHeld();
@@ -523,32 +707,195 @@ export class ManualPosing {
     bone.updateWorldMatrix(false, true);
   }
 
-  /** Lleva un hueso a un punto de mundo (solo la cadera: es la raiz de la pose). */
   /**
-   * Deforma el hueso del manejador con la escala del giroscopio. La escala vive en
-   * el personaje, asi que viaja con la pose y se deshace con ella; el estirado del
-   * IK se vuelve a poner encima, que es lo que compone las tres capas.
+   * Deforma el hueso del manejador con lo que arrastra el giroscopio, pasado antes
+   * por `ajustarDeform`: suavizado para que no se dispare y con el volumen puesto
+   * si esta pedido. La deformacion vive en el personaje, asi que viaja con la pose
+   * y se deshace con ella; el estirado del IK se vuelve a poner encima, que es lo
+   * que compone las tres capas.
    */
   #deformBone(entry) {
     if (!this.#deformable(entry)) return;
-    this.character.setBoneScale(entry.boneKey, this.proxy.scale);
-    // Y de vuelta al giroscopio con los topes ya puestos, para que arrastrar mas
-    // alla del limite no lo deje apuntando a un tamano que el hueso no tiene.
-    this.character.boneDeform(entry.boneKey, this.proxy.scale);
+    const key = entry.boneKey;
+    const f = ajustarDeform(this.deformStart ?? this.character.boneFactors(key),
+      this.character.deformFactors(key, this.proxy.scale), {
+        volumen: this.settings.get('pose.deformVolume') !== false,
+        paso: this.deformStep,
+      });
+    this.character.setBoneFactors(key, f.k, f.g);
+    // Y de vuelta al giroscopio lo que el hueso tiene de verdad, con los topes y el
+    // suavizado ya puestos, para que no quede apuntando a un tamano que no existe.
+    this.character.boneDeform(key, this.proxy.scale);
     this.rig.applyStretch();
     this.#reportDeform(entry);
   }
 
+  /**
+   * Marco de referencia de un tirador de posicion, tomado al empezar el arrastre.
+   *
+   * El largo de mundo de un eslabon es `natural × k × estirado`, donde `k` es el
+   * largo que el usuario le ha puesto al hueso de arriba (deformar mueve al hijo) y
+   * el estirado es el de la cadena entera. Midiendo el eslabon ahora y dividiendo
+   * por lo que ya lleva puesto sale su largo natural, que es la unidad en la que
+   * hay que traducir la distancia del raton. Se guarda una sola vez porque el
+   * esqueleto se mueve mientras se arrastra: ver mas arriba, en `dragging-changed`.
+   *
+   * @returns {{kind:string}|null} `null` si este manejador no deforma por posicion
+   */
+  #posStart(entry) {
+    if (!this.#positional(entry) || !this.character?.loaded) return null;
+    const chain = entry.chain;
+    if (!chain) return null;
+    const s = chain.stretch || 1;
+    const camino = [...chain.bones, chain.tip];
+    const factores = (clave) => (this.character.bones?.[clave]
+      ? this.character.boneFactors(clave)
+      : { k: 1, g: 1 });
+    if (entry.kind === 'bend') {
+      if (!chain.mid) return null;
+      const keys = [chain.keys[0], chain.keys[1]];
+      const f = keys.map(factores);
+      const nat = [0, 1].map((i) => worldOf(camino[i], _a).distanceTo(worldOf(camino[i + 1], _b))
+        / Math.max(1e-6, f[i].k * s));
+      if (nat.some((v) => !(v > 1e-6))) return null;
+      return { kind: 'bend', keys, f, nat };
+    }
+    const hijo = this.#tweakChild(entry);
+    if (!hijo) return null;
+    const f = factores(entry.boneKey);
+    const a = worldOf(entry.bone, new THREE.Vector3());
+    const eje = worldOf(hijo, new THREE.Vector3()).sub(a);
+    const largo = eje.length();
+    if (largo < 1e-6) return null;
+    return { kind: 'tweak', a, eje: eje.divideScalar(largo), f, nat: largo / Math.max(1e-6, f.k * s) };
+  }
+
+  /**
+   * El pliegue: lleva el codo o la rodilla a un punto y los dos eslabones dan de si
+   * lo justo para llegar, con la mano quieta en su objetivo. Es el gesto de un rig
+   * de dibujo animado —deformar **por posicion**, no con el giroscopio— y es lo que
+   * sustituye a girar los huesos a mano cuando la cadena esta encendida.
+   *
+   * La cuenta es directa: el eslabon de arriba tiene que medir `|hombro − raton|` y
+   * el de abajo `|raton − objetivo|`. Se escriben esos dos largos y se resuelve la
+   * cadena usando el propio tirador como polo, asi que la articulacion aterriza
+   * justo debajo del raton: el punto pedido cumple las dos distancias y el polo
+   * elige de que lado del eje se dobla. La desigualdad triangular garantiza que
+   * llega siempre, y lo unico que separa la articulacion del raton es la holgura
+   * que el solucionador reserva para no bloquear la articulacion del todo.
+   */
+  #bendLimb(entry) {
+    const st = this.posStart;
+    if (!st || st.kind !== 'bend') return;
+    const chain = entry.chain;
+    const p = this.proxy.position;
+    const a = this.rig.rootWorld(chain, _a);
+    const t = this.rig.targetWorld(chain, _b);
+    // El estirado de la cadena se lee ahora, no al empezar: con squash y stretch
+    // encendido el solucionador lo retoca al resolver, y en las poses casi rectas
+    // deja al raton un par de puntos por ciento por delante del codo.
+    const s = chain.stretch || 1;
+    const dist = [a.distanceTo(p), p.distanceTo(t)];
+    const volumen = this.settings.get('pose.deformVolume') !== false;
+    for (let i = 0; i < 2; i++) {
+      const clave = st.keys[i];
+      if (!clave || !this.character.bones?.[clave]) continue;
+      // `suave: 1` deja pasar el largo tal cual: el tirador no es un gizmo de
+      // escala, es un punto, y suavizarlo lo desengancharia del raton.
+      const f = ajustarDeform(st.f[i], { k: dist[i] / Math.max(1e-6, st.nat[i] * s), g: st.f[i].g },
+        { volumen, suave: 1, paso: this.deformStep });
+      this.character.setBoneFactors(clave, f.k, f.g);
+    }
+    this.rig.applyStretch();
+    this.rig.solve(chain, p);
+    this.#reportDeform(entry);
+  }
+
+  /** El hueso siguiente en el camino de la cadena; `null` si el tirador no vale. */
+  #tweakChild(entry) {
+    const chain = entry.chain;
+    if (!chain || entry.index < 0) return null;
+    const hijo = entry.index + 1 < chain.bones.length ? chain.bones[entry.index + 1] : chain.tip;
+    return hijo?.parent === entry.bone ? hijo : null;
+  }
+
+  /**
+   * El tirador de volumen: un punto que flota a media altura del hueso y apartado
+   * de su eje. Correrlo a lo largo alarga el hueso y apartarlo lo engorda, las dos
+   * cosas a la vez y sin tocar el giroscopio.
+   *
+   * La cuenta es la inversa exacta de donde se dibuja (`#tweakPoint`), que es lo que
+   * lo mantiene pegado al raton: la parte del arrastre que va sobre el eje es medio
+   * hueso, y de ahi el 2; la que va de lado se mide en brazos de palanca, asi que
+   * apartarlo un brazo mas es engordar el hueso al doble. El volumen automatico se
+   * queda fuera a proposito: aqui la posicion ya dice las dos cosas, y descontar el
+   * grosor por el largo pelearia con lo que el raton esta pidiendo.
+   */
+  #tweakBone(entry) {
+    const st = this.posStart;
+    if (!st || st.kind !== 'tweak') return;
+    const key = entry.boneKey;
+    if (!this.character?.bones?.[key]) return;
+    const base = st.nat * (entry.chain?.stretch || 1);
+    const f = ajustarDeform(st.f, tweakFactors({ a: st.a, eje: st.eje, base }, this.proxy.position),
+      { volumen: false, suave: 1, paso: this.deformStep });
+    this.character.setBoneFactors(key, f.k, f.g);
+    this.rig.applyStretch();
+    this.#reportDeform(entry);
+  }
+
+  /**
+   * Donde se dibuja el tirador de volumen de un hueso: a media altura de su eslabon
+   * y apartado hacia el lado por el que se dobla el miembro, que es el lado por el
+   * que la figura no lo tapa. El brazo crece con el grosor y se divide por el largo
+   * porque el eslabon ya viene multiplicado por el, y sin eso el tirador se
+   * despegaria del raton en cuanto el hueso cambiara de tamano.
+   */
+  #tweakPoint(entry, out) {
+    const hijo = this.#tweakChild(entry);
+    if (!hijo) return false;
+    const a = worldOf(entry.bone, _a);
+    const largo = a.distanceTo(worldOf(hijo, _b));
+    if (largo < 1e-6) return false;
+    const eje = _e.copy(_b).sub(a).divideScalar(largo);
+    const perp = this.rig.bendWorld(entry.chain, _n);
+    perp.addScaledVector(eje, -perp.dot(eje));
+    // Hueso alineado con la direccion del pliegue (pasa en la columna): cualquier
+    // perpendicular sirve, con tal de que no cambie de fotograma a fotograma.
+    if (perp.lengthSq() < 1e-8) perp.set(0, 1, 0).addScaledVector(eje, -eje.y);
+    if (perp.lengthSq() < 1e-8) perp.set(1, 0, 0).addScaledVector(eje, -eje.x);
+    perp.normalize();
+    const f = this.character?.bones?.[entry.boneKey]
+      ? this.character.boneFactors(entry.boneKey)
+      : null;
+    const k = f ? Math.max(0.05, f.k) : 1;
+    // El largo de mundo del eslabon ya viene multiplicado por `k`, asi que dividir
+    // por el devuelve la base con la que se hizo la cuenta al arrastrarlo.
+    tweakPoint({ a, eje, perp, base: largo / k, k, g: f ? f.g : 1 }, out);
+    return true;
+  }
+
   /** Deja a la vista del panel cuanto se ha deformado el hueso elegido. */
   #reportDeform(entry = this.selected) {
-    const f = this.#deformable(entry) ? this.character.boneDeform(entry.boneKey, _s) : null;
-    const txt = !f ? ''
-      : (Math.abs(f.x - 1) < 1e-4 && Math.abs(f.y - 1) < 1e-4 && Math.abs(f.z - 1) < 1e-4)
-        ? 'sin deformar'
-        : f.x.toFixed(2) + ' x ' + f.y.toFixed(2) + ' x ' + f.z.toFixed(2);
+    let txt = '';
+    if (entry?.kind === 'bend') {
+      // El pliegue no tiene un hueso: tiene los dos eslabones del miembro, y lo que
+      // interesa ver mientras se arrastra es cuanto ha dado de si cada uno.
+      const ks = (entry.chain?.keys ?? []).slice(0, 2)
+        .map((k) => (this.character?.bones?.[k] ? this.character.boneFactors(k).k : 1));
+      if (ks.length === 2) txt = 'largos ' + ks[0].toFixed(2) + ' + ' + ks[1].toFixed(2);
+    } else {
+      const key = this.#deformKey(entry);
+      const f = key ? this.character.boneFactors(key) : null;
+      txt = !f ? ''
+        : (Math.abs(f.k - 1) < 1e-4 && Math.abs(f.g - 1) < 1e-4)
+          ? 'sin deformar'
+          : 'largo ' + f.k.toFixed(2) + ' · grosor ' + f.g.toFixed(2);
+    }
     if (this.settings.get('ui.boneDeform') !== txt) this.settings.set('ui.boneDeform', txt);
   }
 
+  /** Lleva un hueso a un punto de mundo (solo la cadera: es la raiz de la pose). */
   #moveBone(bone) {
     const parent = bone.parent;
     if (parent) {
@@ -651,6 +998,11 @@ export class ManualPosing {
   #pointOf(entry, out) {
     if (entry.kind === 'effector') return !!this.rig.targetWorld(entry.chain, out);
     if (entry.kind === 'pole') return !!this.rig.poleWorld(entry.chain, out);
+    // El pliegue se dibuja en la articulacion misma, que es donde lo deja el
+    // solucionador al resolver con el propio tirador como polo: asi el codo queda
+    // debajo del raton en vez de a un lado.
+    if (entry.kind === 'bend') return !!this.rig.midWorld(entry.chain, out);
+    if (entry.kind === 'tweak') return this.#tweakPoint(entry, out);
     entry.bone.updateWorldMatrix(true, false);
     out.setFromMatrixPosition(entry.bone.matrixWorld);
     return true;
@@ -683,6 +1035,14 @@ export class ManualPosing {
         const polo = this.rig.poleWorld(chain, _v);
         if (polo) seg(this.rig.midWorld(chain, _p), polo);
       }
+    }
+    // La palanca del tirador de volumen: sin ella parece una mota suelta en el aire
+    // y no se ve de que hueso cuelga ni por donde se aparta.
+    for (const entry of this.entries) {
+      if (entry.kind !== 'tweak' || !entry.mesh.visible) continue;
+      const hijo = this.#tweakChild(entry);
+      if (!hijo) continue;
+      seg(worldOf(entry.bone, _v).add(worldOf(hijo, _p)).multiplyScalar(0.5), entry.mesh.position);
     }
     attr.needsUpdate = true;
     this.hintGeo.setDrawRange(0, n * 2);
@@ -759,7 +1119,7 @@ export class ManualPosing {
 
   /** El hueso que deformaria el manejador seleccionado ('' si no hay ninguno). */
   get selectedBoneKey() {
-    return this.#deformable(this.selected) ? this.selected.boneKey : '';
+    return this.#deformKey(this.selected);
   }
 
   /**
@@ -875,6 +1235,8 @@ export class ManualPosing {
     this.matPinned.dispose();
     this.matPole.dispose();
     this.matBody.dispose();
+    this.matBend.dispose();
+    this.matTweak.dispose();
     this.hintMat.dispose();
     this.hintGeo.dispose();
   }

@@ -116,6 +116,10 @@ export const DEFAULTS = {
   pose: {
     proximity: false,
     proximityRadius: 0.16,
+    // Deformar un hueso conservando el bulto: al alargarlo se adelgaza y al
+    // acortarlo se ensancha, como el squash de las cadenas de IK. Apagado, el largo
+    // y el grosor son independientes.
+    deformVolume: true,
   },
 
   /**
@@ -139,6 +143,10 @@ export const DEFAULTS = {
     head: true,
     poles: true,                // manejadores de codo y rodilla
     body: true,                 // control de cadera (mover el peso del cuerpo)
+    // Tiradores que deforman por posicion: la bola del pliegue (rodilla, codo) y
+    // uno por hueso a media altura del eslabon. En modo inverso son los que
+    // sustituyen a la esfera de giro, que ahi la manda el solucionador.
+    deform: true,
     margin: 0.02,
     // Squash y stretch: la cadena se alarga para llegar a donde no alcanza y se
     // aplasta cuando el objetivo esta mas cerca de lo que puede plegarse. Solo
