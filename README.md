@@ -66,6 +66,8 @@ npm run deploy       # build + wrangler pages deploy dist
 | Buscar una imagen de referencia en la web | tecla `Espacio` o la lupa de la barra del visor |
 | Congelar la pose | tecla `C` |
 | Posar huesos a mano con el gizmo | tecla `G`; deshacer con `Ctrl+Z` |
+| Posar arrastrando manos y pies (cinemática inversa) | tecla `I`; `W` mueve el control, `E` gira la punta |
+| Clavar o soltar el control elegido (pies en el suelo al agacharse) | tecla `X` o panel **Poses › Cinemática inversa** |
 | Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Escena › Manipulador** o `Alt+X` |
 | Caja envolvente al pasar el ratón, del elemento elegido o de todos | panel **Escena › Caja envolvente** o el botón **Caja** |
 | Línea de acción, ritmos brazo a brazo y hombro a pierna (cruzado, por su lado o por el costado), fantasma exagerado | panel **Guías › Línea de acción** |
@@ -100,9 +102,9 @@ src/
   core/                Settings, Viewport, CameraRig, Lighting, Stage, PostFX, shaders
   core/errors.js       traduce Event/ErrorEvent a texto legible
   model/               Character (carga GLB/FBX, mallas compartidas, materiales), HandRig, boneMap, variants
-  pose/                DirectRetargeter, KalidokitRetargeter, PoseEngine, OneEuroFilter, PoseLibrary
+  pose/                DirectRetargeter, KalidokitRetargeter, PoseEngine, OneEuroFilter, PoseLibrary, ik (solucionadores)
   mocap/               PoseDetector y HandTracker (MediaPipe), SquarePad, MocapSource, Overlay2D
-  posing/              ManualPosing (gizmo de huesos con historial)
+  posing/              ManualPosing (gizmo de huesos con historial), IKRig (cadenas de cinemática inversa)
   draw/                Sketch (lápiz sobre el visor) y stroke.js (geometría del trazo)
   scene/               SceneEditor, Bounds (cajas envolventes), primitivas, luces insertables
   guides/              Guides, Perspective y ActionLine (acción, ritmos y fantasma)
@@ -126,6 +128,23 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   al suelo mantiene los pies apoyados aunque la figura se agache, y la **altura en
   metros se mide siempre con la figura en reposo**, así que posarla ya no la
   reescala. Cada variante tiene su propio volumen: se mide la malla que se ve.
+- **Cinemática inversa como en un rig.** Con `I` aparecen rombos en manos, pies,
+  pecho y cabeza: se arrastra el extremo y el resto de la cadena se acomoda, en vez
+  de girar tres huesos por brazo. Brazos y piernas se resuelven con la **ley de
+  cosenos** en tres pasos —doblar el codo para que la distancia cuadre, apuntar el
+  conjunto al objetivo y girar sobre el eje hombro-objetivo para llevar el codo a su
+  polo—; ese tercer paso gira alrededor de la recta donde ya está la mano, así que
+  no la puede mover, y el hueso de la punta nunca se escribe, de modo que la muñeca
+  y el pie se siguen girando a mano encima (`E`). El torso y el cuello usan FABRIK,
+  donde no hay fórmula cerrada. Todo se resuelve **girando** huesos, nunca
+  estirándolos: el esqueleto no se puede romper. Los objetivos viven en el espacio
+  del `holder`, no en el del mundo, porque en el mundo levantar un pie movería el
+  anclaje al suelo, que movería el objetivo, que volvería a mover el anclaje. Un
+  control sin clavar sigue a su extremidad, así que la cinemática inversa no pelea
+  con la captura ni con la biblioteca de poses; clavarlo (`X`) es lo contrario, y es
+  lo que permite hundir la cadera con el cubo grande y que los pies no se despeguen
+  del suelo. El polo del codo o la rodilla no se guarda: se deduce del pliegue de
+  ahora, y con el miembro estirado manda la anatomía medida en la pose de reposo.
 - **Una herramienta, sus opciones al lado.** La barra del visor son dos columnas:
   la de herramientas y, pegada a ella, la de las opciones de la elegida, que cambia
   con ella (`UI.#toolModel`). Las tres primeras —seleccionar, posar, lápiz— son

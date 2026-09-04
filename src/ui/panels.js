@@ -26,6 +26,7 @@ import { LIGHT_TYPES, LIGHT_BY_ID, LIGHT_RANGE } from '../scene/lights.js';
 import { HAND_PRESETS } from '../model/HandRig.js';
 import { MAX_FIGURAS } from '../model/FigureSet.js';
 import { FINGERS, FINGER_LABELS } from '../model/boneMap.js';
+import { IK_CHAINS } from '../posing/IKRig.js';
 
 /** Abre el selector de archivos del sistema y resuelve con el archivo elegido. */
 export function pickFile(accept) {
@@ -985,6 +986,19 @@ function posesPanel(app) {
   hooks.refreshPoses = refresh;
   refresh();
 
+  // Fijaciones: se listan en el orden en que se usan al montar una pose (los
+  // brazos son lo que mas se arrastra, la cabeza lo que menos). La etiqueta y el
+  // grupo salen de IK_CHAINS para no repetir aqui los nombres de los tiradores.
+  const pines = ['leftArm', 'rightArm', 'leftLeg', 'rightLeg', 'torso', 'head']
+    .map((id) => IK_CHAINS.find((c) => c.id === id))
+    .filter(Boolean)
+    .map((def) => ({
+      label: def.handle, icon: 'magnet', path: 'ik.pins.' + def.id,
+      title: 'Clavar ' + def.label.toLowerCase() + ' en su sitio',
+      ref: (node) => enableWhen(node, ['ik.enabled', 'ik.' + def.group],
+        (s) => s.get('ik.enabled') === true && s.get('ik.' + def.group) !== false),
+    }));
+
   // Hueso seleccionado por el gizmo de pose manual.
   const boneTag = el('span', { class: 'value', text: '—' });
   const paintBone = (v) => { boneTag.textContent = v ? String(v).replace(/^mixamorig:?/, '') : '—'; };
@@ -1004,6 +1018,32 @@ function posesPanel(app) {
         { label: 'Pose T', icon: 'person-standing', onClick: () => actions.presetPose('t') },
         { label: 'Pose A', icon: 'person-standing', onClick: () => actions.presetPose('a') },
       ], { cols: 2, compact: true }),
+    ]),
+    group({ id: 'ps-ik', title: 'Cinematica inversa', icon: 'target' }, [
+      toggle({ path: 'ik.enabled', label: 'Posar arrastrando manos y pies',
+        hint: 'Aparecen rombos en manos, pies, pecho y cabeza (tecla I). Arrastra uno y la cadena entera le sigue: W mueve el control, E gira el hueso de la punta.' }),
+      enableWhen(el('div', { class: 'stack' }, [
+        field('Cadenas', buttons([
+          { label: 'Brazos', icon: 'hand', path: 'ik.arms', title: 'Hombro, codo y mano' },
+          { label: 'Piernas', icon: 'footprints', path: 'ik.legs', title: 'Muslo, rodilla y pie' },
+          { label: 'Torso', icon: 'person-standing', path: 'ik.torso', title: 'Columna: el pecho arrastra la espalda' },
+          { label: 'Cabeza', icon: 'scan-face', path: 'ik.head', title: 'Cuello y cabeza: la coronilla mira al control' },
+        ], { cols: 2, compact: true }), { hint: 'Lo que apagues aqui se sigue posando hueso a hueso, como siempre.' }),
+        field('Controles auxiliares', buttons([
+          { label: 'Codo y rodilla', icon: 'circle-dot', path: 'ik.poles', title: 'Cubo pequeno junto a la articulacion: gira el plano de flexion sin mover la mano' },
+          { label: 'Peso del cuerpo', icon: 'move-3d', path: 'ik.body', title: 'Cubo en la cadera: con los pies clavados, agacha la figura' },
+        ], { cols: 2, compact: true })),
+        slider({ label: 'Holgura de la articulacion', path: 'ik.margin', min: 0, max: 0.15, step: 0.005,
+          format: (v) => Math.round(v * 100) + ' %',
+          hint: 'Parte del miembro que nunca se estira. A cero el brazo puede quedar del todo recto y pierde el plano del codo.' }),
+        field('Fijaciones', buttons(pines, { cols: 2, compact: true }),
+          { hint: 'Un control clavado se queda donde esta aunque muevas el resto del cuerpo. Con X clavas o sueltas el control elegido.' }),
+        buttons([
+          { label: 'Clavar los pies', icon: 'magnet', title: 'Fija los dos pies para agacharse o inclinarse sin despegarlos del suelo', onClick: () => actions.pinFeet?.() },
+          { label: 'Soltar todo', icon: 'lock-open', title: 'Quita todas las fijaciones', onClick: () => actions.unpinAll?.() },
+        ], { cols: 2 }),
+      ]), 'ik.enabled', (s) => s.get('ik.enabled') === true),
+      notice('info', 'Los controles sin clavar vuelven solos a la mano o el pie, asi que la cinematica inversa no pelea con la captura ni con la biblioteca de poses.'),
     ]),
     group({ id: 'ps-lib', title: 'Biblioteca', icon: 'library' }, [
       field('Guardar la pose actual', el('div', { class: 'field-row' }, [

@@ -244,9 +244,11 @@ async function main() {
     settings, viewport, character: null,
     // Se guardan etiqueta y clave: la primera se lee en la interfaz, la segunda
     // la usa el monitor de captura para marcar el punto correspondiente.
+    // Los controles de cinematica inversa no son huesos, pero llevan apuntado el
+    // hueso al que corresponden: asi el monitor de captura sigue marcando el punto.
     onSelect: (entry) => settings.batch({
       'ui.selectedBone': entry?.label ?? entry?.key ?? '',
-      'ui.selectedBoneKey': entry?.key ?? '',
+      'ui.selectedBoneKey': entry?.boneKey || entry?.key || '',
     }),
   });
   app.posing = posing;
@@ -490,6 +492,7 @@ async function main() {
     posing.mark?.();
     engine.release();
     hands.apply();          // el reposo borra los dedos: se recuperan los valores
+    posing.syncRig?.();     // los objetivos vuelven al reposo con la figura
     viewport.invalidateShadows();
     toast('Pose de reposo restaurada');
   };
@@ -509,9 +512,44 @@ async function main() {
   };
   actions.presetPose = (tipo) => {
     settings.set('mocap.frozen', true);
+    posing.mark?.();
     library.preset(tipo);
+    posing.syncRig?.();
     viewport.invalidateShadows();
     toast(tipo === 't' ? 'Pose T aplicada' : 'Pose A aplicada');
+  };
+
+  /* ── Cinematica inversa ─────────────────────────────────────────────── */
+
+  /**
+   * Fijar y soltar cadenas. Se hace desde aqui (y no desde el panel escribiendo
+   * en el almacen) porque fijar tiene que anotar donde esta la punta en ese
+   * momento: es lo que hace que clavar un pie no lo mueva ni un milimetro.
+   */
+  actions.togglePin = () => {
+    if (settings.get('ik.enabled') !== true) {
+      toast('Enciende la cinematica inversa para fijar controles', 'warn');
+      return false;
+    }
+    const chain = posing.selectedChain;
+    if (!chain) {
+      toast('Elige antes un control de mano, pie, pecho o cabeza', 'warn');
+      return false;
+    }
+    posing.togglePin();
+    toast((chain.pinned ? 'Fijado: ' : 'Suelto: ') + (chain.def.handle ?? chain.def.label).toLowerCase());
+    return true;
+  };
+  actions.pinFeet = () => {
+    if (settings.get('ik.enabled') !== true) settings.set('ik.enabled', true);
+    posing.pinFeet(true);
+    toast('Pies clavados: mueve el peso del cuerpo para agacharte');
+    return true;
+  };
+  actions.unpinAll = () => {
+    const habia = posing.unpinAll();
+    toast(habia ? 'Fijaciones sueltas' : 'No habia nada fijado');
+    return habia;
   };
   actions.undo = () => {
     if (!posing.canUndo) return;
@@ -530,8 +568,11 @@ async function main() {
   };
   actions.applyPose = (id) => {
     settings.set('mocap.frozen', true);
+    posing.mark?.();
     if (library.apply(id)) {
       figures.snapshotPoses();
+      // La pose recien puesta manda sobre los objetivos de la cinematica inversa.
+      posing.syncRig?.();
       viewport.invalidateShadows();
       toast('Pose aplicada');
     }

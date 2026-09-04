@@ -101,6 +101,31 @@ export const DEFAULTS = {
   },
 
   /**
+   * Cinematica inversa. Se apaga por defecto porque cambia la forma de posar: con
+   * ella encendida se arrastra la mano y el brazo se acomoda solo, en vez de girar
+   * hombro y codo por separado.
+   *
+   *   - Cada grupo se puede apagar suelto para no llenar el visor de controles.
+   *   - `margin` es cuanto se prohibe estirar el miembro: con 0 el brazo llega a
+   *     quedar recto como un palo, lo que se ve raro y ademas hace que el codo
+   *     pierda el plano; un 2 % de reserva basta para que siempre quede un pliegue.
+   *   - `pins` recuerda que cadenas se quedan clavadas donde estan. Guardar solo
+   *     el interruptor y no la posicion es a proposito: al abrir de nuevo el
+   *     objetivo se toma de la pose que haya, que es lo unico que tiene sentido.
+   */
+  ik: {
+    enabled: false,
+    arms: true,
+    legs: true,
+    torso: true,
+    head: true,
+    poles: true,                // manejadores de codo y rodilla
+    body: true,                 // control de cadera (mover el peso del cuerpo)
+    margin: 0.02,
+    pins: { leftArm: false, rightArm: false, leftLeg: false, rightLeg: false, torso: false, head: false },
+  },
+
+  /**
    * Conversor FBX → GLB del panel Modelo. Un FBX de Mixamo trae texturas de
    * 4096 px: guardadas tal cual el .glb se va a decenas de megas, asi que por
    * defecto se limita el lado mayor y el color se escribe en JPEG.

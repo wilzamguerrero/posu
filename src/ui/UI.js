@@ -316,6 +316,11 @@ export class UI {
       {
         id: 'pose', icon: 'hand', mode: true, title: 'Posar los huesos a mano (G)',
         options: [
+          { icon: 'target', title: 'Cinematica inversa: arrastrar manos y pies (I)', path: 'ik.enabled' },
+          { icon: 'move', title: 'Mover el control (W)', path: 'scene.tool', value: 'translate' },
+          { icon: 'rotate-3d', title: 'Girar el hueso (E)', path: 'scene.tool', value: 'rotate' },
+          { icon: 'magnet', title: 'Fijar o soltar el control elegido (X)', onClick: () => actions.togglePin?.() },
+          { sep: true },
           { icon: 'fingerprint', title: 'Manejadores de falange', path: 'hands.fingers' },
           { icon: 'snowflake', title: 'Congelar la pose (C)', path: 'mocap.frozen' },
           { sep: true },
@@ -814,6 +819,14 @@ export class UI {
             case 'c': s.set('mocap.frozen', s.get('mocap.frozen') !== true); break;
             case 'f': actions.frameFigure(); break;
             case 'g': s.set('ui.manualPosing', s.get('ui.manualPosing') !== true); break;
+            // La cinematica inversa solo tiene sentido con los manejadores a la
+            // vista, asi que encenderla enciende tambien el posado manual.
+            case 'i': {
+              const on = s.get('ik.enabled') !== true;
+              s.batch({ 'ik.enabled': on, ...(on ? { 'ui.manualPosing': true } : {}) });
+              break;
+            }
+            case 'x': actions.togglePin?.(); break;
             case 'd': s.set('draw.enabled', s.get('draw.enabled') !== true); break;
             case 'h': s.set('ui.sidebar', s.get('ui.sidebar') === false); break;
             default: return;

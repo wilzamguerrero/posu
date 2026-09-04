@@ -409,6 +409,40 @@ console.log('sin seleccion:', (cuerpo?.querySelectorAll('input').length ?? -1) =
 console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.querySelectorAll('.list-row').length, 'filas');
 
 
+// 8b · El grupo de cinematica inversa: sus interruptores escriben la ruta que
+// dicen y el resto queda inerte mientras la cinematica inversa esta apagada.
+{
+  settings.set('ik.enabled', false);
+  const ik = grupoPorTitulo('Cinematica inversa');
+  const boton = (texto) => [...(ik?.querySelectorAll('button') ?? [])]
+    .find((b) => b.textContent.includes(texto));
+  const pulsa = (b) => b?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  revisa('el panel de poses trae el grupo de cinematica inversa', !!ik);
+  revisa('apagada, sus controles quedan inertes',
+    (ik?.querySelectorAll('.stack.is-disabled').length ?? 0) === 1);
+  settings.set('ik.enabled', true);
+  revisa('encendida, se pueden tocar',
+    (ik?.querySelectorAll('.stack.is-disabled').length ?? 0) === 0);
+  pulsa(boton('Mano izq.'));
+  revisa('el boton de la mano izquierda clava su cadena', settings.get('ik.pins.leftArm') === true);
+  pulsa(boton('Mano izq.'));
+  revisa('y vuelve a soltarla', settings.get('ik.pins.leftArm') === false);
+  pulsa(boton('Brazos'));
+  revisa('el interruptor de brazos apaga su grupo', settings.get('ik.arms') === false);
+  pulsa(boton('Brazos'));
+  revisa('apagar los brazos inhabilita sus fijaciones',
+    (() => {
+      settings.set('ik.arms', false);
+      const inerte = boton('Mano izq.')?.classList.contains('is-disabled') === true
+        && boton('Pie izq.')?.classList.contains('is-disabled') === false;
+      settings.set('ik.arms', true);
+      return inerte;
+    })());
+  const rango = ik?.querySelector('input[type="range"]');
+  revisa('la holgura tiene su deslizador', rango?.getAttribute('max') === '0.15');
+  settings.set('ik.enabled', false);
+}
+
 // 9 · La firma del autor sale en Ayuda > Acerca de.
 const firma = document.querySelector('#sidebar-host .credit');
 console.log('firma:', firma ? firma.textContent.replace(/s+/g, ' ').trim() : 'NO APARECE',
