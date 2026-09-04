@@ -68,6 +68,8 @@ npm run deploy       # build + wrangler pages deploy dist
 | Posar huesos a mano con el gizmo | tecla `G`; deshacer con `Ctrl+Z` |
 | Posar arrastrando manos y pies (cinemática inversa) | tecla `I`; `W` mueve el control, `E` gira la punta |
 | Clavar o soltar el control elegido (pies en el suelo al agacharse) | tecla `X` o panel **Poses › Cinemática inversa** |
+| Enseñar solo los controles que hay junto al puntero | tecla `N` o panel **Poses › Pose manual** |
+| Squash y stretch (la cadena se estira para llegar y se aplasta al plegarse) | panel **Poses › Cinemática inversa** |
 | Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Escena › Manipulador** o `Alt+X` |
 | Caja envolvente al pasar el ratón, del elemento elegido o de todos | panel **Escena › Caja envolvente** o el botón **Caja** |
 | Línea de acción, ritmos brazo a brazo y hombro a pierna (cruzado, por su lado o por el costado), fantasma exagerado | panel **Guías › Línea de acción** |
@@ -104,7 +106,7 @@ src/
   model/               Character (carga GLB/FBX, mallas compartidas, materiales), HandRig, boneMap, variants
   pose/                DirectRetargeter, KalidokitRetargeter, PoseEngine, OneEuroFilter, PoseLibrary, ik (solucionadores)
   mocap/               PoseDetector y HandTracker (MediaPipe), SquarePad, MocapSource, Overlay2D
-  posing/              ManualPosing (gizmo de huesos con historial), IKRig (cadenas de cinemática inversa)
+  posing/              ManualPosing (gizmo de huesos con historial), IKRig (cadenas de cinemática inversa), proximity (cercanía al puntero en pantalla)
   draw/                Sketch (lápiz sobre el visor) y stroke.js (geometría del trazo)
   scene/               SceneEditor, Bounds (cajas envolventes), primitivas, luces insertables
   guides/              Guides, Perspective y ActionLine (acción, ritmos y fantasma)
@@ -137,7 +139,8 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   no la puede mover, y el hueso de la punta nunca se escribe, de modo que la muñeca
   y el pie se siguen girando a mano encima (`E`). El torso y el cuello usan FABRIK,
   donde no hay fórmula cerrada. Todo se resuelve **girando** huesos, nunca
-  estirándolos: el esqueleto no se puede romper. Los objetivos viven en el espacio
+  estirándolos —salvo que se pida el squash y stretch, que es lo de abajo—: el
+  esqueleto no se puede romper. Los objetivos viven en el espacio
   del `holder`, no en el del mundo, porque en el mundo levantar un pie movería el
   anclaje al suelo, que movería el objetivo, que volvería a mover el anclaje. Un
   control sin clavar sigue a su extremidad, así que la cinemática inversa no pelea
@@ -145,6 +148,31 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   lo que permite hundir la cadera con el cubo grande y que los pies no se despeguen
   del suelo. El polo del codo o la rodilla no se guarda: se deduce del pliegue de
   ahora, y con el miembro estirado manda la anatomía medida en la pose de reposo.
+- **Squash y stretch, si se pide.** Es la única excepción a lo de no estirar
+  huesos, y nace apagada. Con ella puesta, antes de resolver se mide cuánto le falta
+  a la cadena para llegar y se alargan sus eslabones en esa proporción, de modo que
+  el solucionador —que lee los huesos tal como están— sigue devolviendo una solución
+  de giros. Solo entra en juego en los dos extremos, cuando el objetivo queda más
+  lejos de lo que da el miembro o más cerca de lo que puede plegarse, así que
+  encenderla no cambia ninguna pose que ya llegaba. El factor se mide siempre sobre
+  el largo natural apuntado al construir la cadena, nunca sobre el estirado de ahora,
+  que si no el brazo se alargaría un poco más en cada solución; y el grosor se
+  compensa con una escala **uniforme** en el hueso raíz (`1/√k`), que por ser
+  uniforme no cizalla la piel de un miembro doblado como haría una escala por ejes.
+  Todo se rehace desde el reposo en cada cambio, porque el cuello es a la vez la
+  punta del torso y la raíz de la cabeza y los dos factores tienen que multiplicarse
+  en ese hueso. Una pose guardada lleva solo giros, así que el estirado viaja aparte
+  (`IKRig.stretchState`) y aplicar una pose de la biblioteca devuelve los largos.
+- **Solo los controles que hacen falta.** Una figura entera pasa de cuarenta
+  manejadores y de espaldas se tapan unos a otros. Con `N` solo se ven los del
+  entorno del puntero: cada manejador se proyecta a pantalla y se mide su distancia
+  al ratón en **altos de visor** —no en píxeles, para que se porte igual en un
+  portátil que en un monitor grande—, con un borde en el que entran creciendo en vez
+  de encenderse de golpe. Vale para las dos formas de posar, hueso a hueso y
+  arrastrando la mano. El manejador elegido y los controles clavados no se esconden
+  nunca, que si no habría que buscarlos a ciegas. La lista de lo que acepta el ratón
+  se rehace en el mismo sitio donde se decide qué se ve, porque el `Raycaster` de
+  three ignora `.visible` y un manejador invisible seguiría robando el clic.
 - **Una herramienta, sus opciones al lado.** La barra del visor son dos columnas:
   la de herramientas y, pegada a ella, la de las opciones de la elegida, que cambia
   con ella (`UI.#toolModel`). Las tres primeras —seleccionar, posar, lápiz— son

@@ -1009,6 +1009,13 @@ function posesPanel(app) {
     group({ id: 'ps-manual', title: 'Pose manual', icon: 'hand' }, [
       toggle({ path: 'ui.manualPosing', label: 'Editar huesos con el raton',
         hint: 'Pulsa un tirador sobre la figura y gira el hueso; la captura se congela al editar.' }),
+      toggle({ path: 'pose.proximity', label: 'Ensenar solo lo que hay junto al puntero',
+        hint: 'En una figura entera hay mas de cuarenta manejadores y de espaldas se tapan entre si: asi solo aparecen los del entorno del raton (tecla N). Vale para las dos formas de posar, girar hueso a hueso y arrastrar la mano.' }),
+      enableWhen(slider({ label: 'Radio del entorno', path: 'pose.proximityRadius',
+        min: 0.06, max: 0.4, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' % del alto',
+        hint: 'Medido en alto de visor y no en pixeles, para que se porte igual en una pantalla grande que en un portatil.' }),
+        'pose.proximity', (s) => s.get('pose.proximity') === true),
       field('Hueso seleccionado', boneTag),
       buttons([
         { label: 'Deshacer', icon: 'rotate-ccw', title: 'Deshacer el ultimo giro (Ctrl+Z)', onClick: () => actions.undo() },
@@ -1036,6 +1043,13 @@ function posesPanel(app) {
         slider({ label: 'Holgura de la articulacion', path: 'ik.margin', min: 0, max: 0.15, step: 0.005,
           format: (v) => Math.round(v * 100) + ' %',
           hint: 'Parte del miembro que nunca se estira. A cero el brazo puede quedar del todo recto y pierde el plano del codo.' }),
+        toggle({ path: 'ik.stretch', label: 'Squash y stretch',
+          hint: 'La cadena se alarga para llegar a donde no alcanza y se aplasta cuando el objetivo queda mas cerca de lo que puede plegarse. Solo entra en juego en esos dos extremos: encenderlo no cambia ninguna pose que ya llegaba.' }),
+        enableWhen(slider({ label: 'Estirado maximo', path: 'ik.stretchMax',
+          min: 0.05, max: 0.6, step: 0.05,
+          format: (v) => '+' + Math.round(v * 100) + ' %',
+          hint: 'Cuanto se permite dar de si al miembro. Un 25 % es el gesto de dibujo animado sin que la figura deje de parecer la misma.' }),
+          'ik.stretch', (s) => s.get('ik.stretch') === true),
         field('Fijaciones', buttons(pines, { cols: 2, compact: true }),
           { hint: 'Un control clavado se queda donde esta aunque muevas el resto del cuerpo. Con X clavas o sueltas el control elegido.' }),
         buttons([

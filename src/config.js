@@ -101,6 +101,24 @@ export const DEFAULTS = {
   },
 
   /**
+   * Posado manual: como se muestran los manejadores en el visor.
+   *
+   * `proximity` ensena solo los que caen cerca del puntero y esconde el resto. En
+   * una figura entera hay mas de cuarenta manejadores contando los de cinematica
+   * inversa, y con la figura de espaldas o muy cerca se tapan entre ellos; con
+   * esto el visor queda limpio y siempre se pincha el que se quiere. Vale para los
+   * dos modos de posar, el de girar hueso a hueso y el de arrastrar la mano.
+   *
+   * `proximityRadius` es el radio de ese entorno en fraccion de la altura del
+   * visor, no en pixeles, para que se comporte igual en una pantalla grande que en
+   * un portatil.
+   */
+  pose: {
+    proximity: false,
+    proximityRadius: 0.16,
+  },
+
+  /**
    * Cinematica inversa. Se apaga por defecto porque cambia la forma de posar: con
    * ella encendida se arrastra la mano y el brazo se acomoda solo, en vez de girar
    * hombro y codo por separado.
@@ -122,6 +140,12 @@ export const DEFAULTS = {
     poles: true,                // manejadores de codo y rodilla
     body: true,                 // control de cadera (mover el peso del cuerpo)
     margin: 0.02,
+    // Squash y stretch: la cadena se alarga para llegar a donde no alcanza y se
+    // aplasta cuando el objetivo esta mas cerca de lo que puede plegarse. Solo
+    // entra en juego en esos dos extremos, asi que encendido no cambia ninguna
+    // pose que ya llegaba. `stretchMax` es cuanto se permite, en tanto por uno.
+    stretch: false,
+    stretchMax: 0.25,
     pins: { leftArm: false, rightArm: false, leftLeg: false, rightLeg: false, torso: false, head: false },
   },
 

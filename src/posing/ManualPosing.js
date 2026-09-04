@@ -34,11 +34,20 @@
  *
  * La esfera de un hueso que ya tiene control de cinematica inversa se esconde: dos
  * manejadores concentricos se robarian el clic entre ellos.
+ *
+ * Y por encima de las dos formas de posar esta `pose.proximity`: con ella solo se
+ * ven los manejadores que caen junto al puntero (la cuenta esta en
+ * `proximity.js`). Mas de cuarenta esferas y rombos en una figura de espaldas se
+ * tapan entre si; asi el visor queda limpio y siempre se pincha el que se buscaba.
+ * Dos se quedan a la vista pase lo que pase: el elegido, que tiene el giroscopio
+ * puesto, y el objetivo de una cadena fijada, que con su color dice que ese pie
+ * esta clavado: eso es estado de la pose, no solo algo que agarrar.
  */
 
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { IKRig } from './IKRig.js';
+import { nearFactor, viewAspect } from './proximity.js';
 
 const HANDLE_GEO = new THREE.SphereGeometry(1, 14, 10);
 /** Rombo para los objetivos: se reconoce de un vistazo entre las esferas. */
@@ -84,6 +93,10 @@ export class ManualPosing {
     this.taken = new Set();
     /** Mallas visibles, que son las unicas que aceptan el raycast. */
     this.pickable = [];
+    /** Ensenar solo los manejadores que hay junto al puntero. */
+    this.proximity = settings.get('pose.proximity') === true;
+    /** Radio de ese entorno, en alturas de visor. */
+    this.proxRadius = this.#radius(settings.get('pose.proximityRadius'));
 
     this.material = new THREE.MeshBasicMaterial({
       color: 0x4fc1ff, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false,
@@ -143,6 +156,7 @@ export class ManualPosing {
       // asi que el control de una mano sirve para las dos cosas sin botones nuevos.
       settings.on('scene.tool', () => { if (this.selected) this.#applyMode(this.selected); }),
       settings.on('ik.*', (_v, _p, path) => this.#onIKSetting(path)),
+      settings.on('pose.*', () => this.#onPoseSetting()),
     ];
     this.gizmo.addEventListener('dragging-changed', (e) => {
       this.dragging = e.value;
@@ -226,7 +240,14 @@ export class ManualPosing {
     malla.frustumCulled = false;
     malla.userData.key = key;
     this.handles.add(malla);
-    const entry = { key, label, bone, mesh: malla, finger, kind, chain, boneKey: boneKey || (kind === 'joint' ? key : '') };
+    const entry = {
+      key, label, bone, mesh: malla, finger, kind, chain,
+      boneKey: boneKey || (kind === 'joint' ? key : ''),
+      // `shown` es lo que dicen las reglas y `near` (0..1) lo que dice el puntero:
+      // el manejador se ve cuando las dos cosas estan de acuerdo.
+      shown: false,
+      near: 1,
+    };
     malla.material = this.#materialFor(entry);
     this.entries.push(entry);
     return entry;
@@ -246,14 +267,30 @@ export class ManualPosing {
         this.taken.add(this.character.bones.hips);
       }
     }
-    this.pickable.length = 0;
     for (const entry of this.entries) {
-      entry.mesh.visible = this.#visible(entry, ik);
-      if (entry.mesh.visible) this.pickable.push(entry.mesh);
+      entry.shown = this.#visible(entry, ik);
       if (entry !== this.selected) entry.mesh.material = this.#materialFor(entry);
     }
     this.hints.visible = ik;
-    if (this.selected && !this.selected.mesh.visible) this.select(null);
+    // El elegido se suelta si las reglas lo apagan, no si el puntero se ha ido
+    // lejos: por proximidad se esconde, pero sigue siendo el elegido.
+    if (this.selected && !this.selected.shown) this.select(null);
+    this.#visibilityPass();
+  }
+
+  /**
+   * Que se ve y que acepta el clic, a partir de las reglas (`shown`) y de la
+   * cercania al puntero (`near`). Las dos listas se rehacen juntas a proposito: el
+   * raycast de three no mira `visible`, asi que en cuanto se separan aparece el
+   * manejador invisible que roba el clic.
+   */
+  #visibilityPass() {
+    this.pickable.length = 0;
+    for (const entry of this.entries) {
+      const near = entry.shown ? (this.proximity ? entry.near : 1) : 0;
+      entry.mesh.visible = near > 0;
+      if (entry.mesh.visible) this.pickable.push(entry.mesh);
+    }
   }
 
   /** Reglas de visibilidad de un manejador. */
@@ -284,7 +321,39 @@ export class ManualPosing {
     // La reserva de estirado cambia el resultado sin mover nada: hay que pedir
     // expresamente que las cadenas fijadas se rehagan.
     else if (path === 'ik.margin') this.rig.invalidate();
+    else if (path === 'ik.stretch' || path === 'ik.stretchMax') {
+      // Al apagarlo los miembros recuperan su largo en el acto, y los objetivos
+      // sueltos bajan con la punta: el manejador de una mano es su objetivo, asi
+      // que sin esto se quedaria colgado donde llegaba el brazo estirado. Encendido
+      // no mueve nada por si mismo, pero las cadenas sujetas se rehacen para que la
+      // que no alcanzaba llegue ya, sin esperar a que se arrastre otra vez.
+      if (!this.rig.stretchOn && this.rig.resetStretch()) this.rig.syncLoose();
+      this.rig.invalidate();
+      this.rig.solveHeld();
+      this.character?.tick?.();
+      this.viewport.invalidateShadows?.();
+    }
     this.#refresh();
+  }
+
+  /**
+   * Cambio de ajuste del posado. Los dos valores viven en campos porque el paso de
+   * proximidad los consulta por manejador y por fotograma, y leer el almacen
+   * cuarenta veces en cada cuadro no aporta nada.
+   */
+  #onPoseSetting() {
+    this.proximity = this.settings.get('pose.proximity') === true;
+    this.proxRadius = this.#radius(this.settings.get('pose.proximityRadius'));
+    // Al apagarla vuelven todos de golpe; al encenderla los aparta el paso del
+    // fotograma siguiente, que es el primero que sabe donde esta el puntero.
+    if (!this.proximity) for (const entry of this.entries) entry.near = 1;
+    this.#visibilityPass();
+  }
+
+  /** Radio del entorno del puntero, en alturas de visor y con topes sanos. */
+  #radius(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? THREE.MathUtils.clamp(n, 0.04, 0.6) : 0.16;
   }
 
   /**
@@ -459,8 +528,9 @@ export class ManualPosing {
     // La altura es propia de cada figura, no un ajuste global.
     const height = Math.max(0.4, this.character?.placement?.height ?? 1.75);
     const base = height * 0.013;
+    const prox = this.proximity;
     for (const entry of this.entries) {
-      if (!entry.mesh.visible) continue;
+      if (!entry.shown) continue;
       // Si de pronto no hay punto donde dibujar, el manejador se apaga aqui mismo,
       // y con el su turno en el raycast: una malla escondida no se puede pinchar.
       if (!this.#pointOf(entry, _v)) { this.#hide(entry); continue; }
@@ -473,18 +543,53 @@ export class ManualPosing {
       // objetivos van algo mas gordos porque son los que se buscan con el raton.
       const f = entry.finger ? 0.4 : SIZES[entry.kind] ?? 1;
       const r = THREE.MathUtils.clamp(base * dist * 0.55 * f, base * 0.5 * f, base * 3 * f);
-      entry.mesh.scale.setScalar(r);
+      // Con la proximidad encendida el manejador entra creciendo por el borde del
+      // entorno en vez de encenderse de golpe: asi se ve de donde ha salido.
+      entry.mesh.scale.setScalar(prox ? r * (0.55 + 0.45 * entry.near) : r);
     }
+    // La cercania se repasa con las posiciones recien escritas, y antes de las
+    // guias, que solo se dibujan para los objetivos que se ven.
+    if (prox) this.#proximityPass();
     if (this.rig.on) this.#syncHints();
     if (this.selected && !this.dragging) this.#placeProxy(this.selected);
   }
 
   /** Esconde un manejador sin dejarlo en la lista de lo que acepta el raycast. */
   #hide(entry) {
+    // Tambien para la proximidad: sin punto donde dibujarlo no esta cerca de nada.
+    entry.near = 0;
     entry.mesh.visible = false;
     const i = this.pickable.indexOf(entry.mesh);
     if (i >= 0) this.pickable.splice(i, 1);
     if (this.selected === entry) this.select(null);
+  }
+
+  /**
+   * Repasa la cercania de cada manejador al puntero y rehace la visibilidad. Se
+   * llama por fotograma y tambien justo antes de mirar que hay debajo del raton:
+   * el paso del fotograma va un cuadro por detras del puntero, y sin ese repaso el
+   * manejador que acaba de entrar en el entorno todavia no aceptaria el clic.
+   */
+  #proximityPass() {
+    const cam = this.viewport.cameras.active;
+    // La relacion de aspecto sale de la camara una vez, no por manejador.
+    const aspect = viewAspect(cam);
+    for (const entry of this.entries) {
+      if (entry.shown) entry.near = this.#nearOf(entry, entry.mesh.position, cam, aspect);
+    }
+    this.#visibilityPass();
+  }
+
+  /**
+   * Cuanto asoma un manejador. Las dos excepciones que se quedan siempre a la
+   * vista son el elegido, porque perder de vista lo que tiene puesto el giroscopio
+   * desconcierta, y el objetivo de una cadena fijada, que avisa de que ese pie
+   * esta clavado.
+   */
+  #nearOf(entry, point, cam, aspect) {
+    if (entry === this.selected) return 1;
+    if (entry.kind === 'effector' && entry.chain?.pinned) return 1;
+    return nearFactor(point, cam, this.pointer, this.proxRadius, aspect);
   }
 
   /** Donde va el manejador de una entrada; `false` si ahora mismo no hay punto. */
@@ -571,6 +676,9 @@ export class ManualPosing {
 
   #onPointerMove(event) {
     if (!this.enabled || this.dragging) return;
+    // El puntero ya esta donde estara al soltar el clic: la proximidad se repasa
+    // aqui para que el manejador que acaba de entrar se pueda pinchar ahora mismo.
+    if (this.proximity) { this.#pointerTo(event); this.#proximityPass(); }
     const key = this.#pick(event);
     if (key === this.hovered) return;
     for (const e of this.entries) {
@@ -630,7 +738,9 @@ export class ManualPosing {
 
   #pushHistory() {
     if (!this.character?.loaded) return;
-    this.history.push(this.character.getPose());
+    // Una pose guarda solo giros, asi que el estirado de las cadenas viaja al lado:
+    // sin el, deshacer devolveria los giros y dejaria el brazo largo.
+    this.history.push({ pose: this.character.getPose(), stretch: this.rig.stretchState() });
     if (this.history.length > 40) this.history.shift();
   }
 
@@ -645,12 +755,14 @@ export class ManualPosing {
   }
 
   undo() {
-    const pose = this.history.pop();
-    if (!pose) return false;
-    this.character?.setPose(pose, 1);
+    const paso = this.history.pop();
+    if (!paso) return false;
+    this.character?.setPose(paso.pose, 1);
     // La pose de vuelta manda sobre los objetivos: si no, una cadena fijada
-    // volveria a llevar el miembro a donde acabamos de deshacer.
+    // volveria a llevar el miembro a donde acabamos de deshacer. `syncAll` deshace
+    // el estirado, asi que el que hubiera se vuelve a poner justo despues.
     this.rig.syncAll();
+    if (paso.stretch) this.rig.setStretchState(paso.stretch);
     this.viewport.invalidateShadows?.();
     return true;
   }

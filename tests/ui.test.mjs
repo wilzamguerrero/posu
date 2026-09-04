@@ -366,6 +366,17 @@ settings.set('scene.lights', luzDefs);
 const grupoPorTitulo = (titulo) => [...document.querySelectorAll('#sidebar-host .group-head')]
   .find((h) => h.textContent.includes(titulo))?.parentElement
   ?.querySelector('.group-body') ?? null;
+/** El `.field` de un control, que se busca por el texto de su etiqueta. */
+const campo = (raiz, texto) => [...(raiz?.querySelectorAll('.field') ?? [])]
+  .find((f) => f.textContent.includes(texto)) ?? null;
+/** Marca o desmarca la casilla de un campo, como haria un clic. */
+const marca = (nodo, valor) => {
+  const c = nodo?.querySelector('input[type="checkbox"]');
+  if (!c) return false;
+  c.checked = valor;
+  c.dispatchEvent(new window.Event('change', { bubbles: true }));
+  return true;
+};
 const cuerpo = grupoPorTitulo('Elemento seleccionado');
 if (!cuerpo) console.log('AVISO: no se encontro el grupo del elemento seleccionado');
 const cuenta = (id) => {
@@ -440,7 +451,42 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
     })());
   const rango = ik?.querySelector('input[type="range"]');
   revisa('la holgura tiene su deslizador', rango?.getAttribute('max') === '0.15');
+
+  // El squash y stretch trae su tope, que solo se toca con la opcion encendida.
+  const stretch = campo(ik, 'Squash y stretch');
+  const tope = campo(ik, 'Estirado maximo');
+  revisa('el grupo trae el squash y stretch con su tope',
+    !!stretch && tope?.querySelector('input[type="range"]')?.getAttribute('max') === '0.6');
+  revisa('apagado, el tope del estirado queda inerte',
+    tope?.classList.contains('is-disabled') === true);
+  revisa('la casilla escribe ik.stretch',
+    marca(stretch, true) && settings.get('ik.stretch') === true);
+  revisa('encendido, el tope se puede tocar',
+    tope?.classList.contains('is-disabled') === false);
+  marca(stretch, false);
+  revisa('y se vuelve a apagar', settings.get('ik.stretch') === false);
   settings.set('ik.enabled', false);
+}
+
+// 8c · Pose manual: la proximidad y su radio, que solo cuenta con ella puesta.
+{
+  const man = grupoPorTitulo('Pose manual');
+  const prox = campo(man, 'junto al puntero');
+  const radio = campo(man, 'Radio del entorno');
+  revisa('el panel de poses trae la opcion de proximidad', !!prox);
+  revisa('el radio se pide en alto de visor',
+    radio?.querySelector('input[type="range"]')?.getAttribute('max') === '0.4');
+  revisa('apagada, el radio queda inerte', radio?.classList.contains('is-disabled') === true);
+  revisa('la casilla escribe pose.proximity',
+    marca(prox, true) && settings.get('pose.proximity') === true);
+  revisa('encendida, el radio se puede tocar', radio?.classList.contains('is-disabled') === false);
+  key('n');
+  revisa('la tecla N la apaga desde el visor', settings.get('pose.proximity') === false);
+  key('n');
+  revisa('y la vuelve a encender, con la casilla al dia',
+    settings.get('pose.proximity') === true
+    && prox?.querySelector('input[type="checkbox"]')?.checked === true);
+  marca(prox, false);
 }
 
 // 9 · La firma del autor sale en Ayuda > Acerca de.

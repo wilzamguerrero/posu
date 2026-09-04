@@ -17,6 +17,7 @@ import Bone from 'lucide/dist/esm/icons/bone.js';
 import Box from 'lucide/dist/esm/icons/box.js';
 import Camera from 'lucide/dist/esm/icons/camera.js';
 import ChevronDown from 'lucide/dist/esm/icons/chevron-down.js';
+import ChevronsUpDown from 'lucide/dist/esm/icons/chevrons-up-down.js';
 import CircleCheck from 'lucide/dist/esm/icons/circle-check.js';
 import CircleDot from 'lucide/dist/esm/icons/circle-dot.js';
 import CircleX from 'lucide/dist/esm/icons/circle-x.js';
@@ -130,7 +131,8 @@ import Footprints from 'lucide/dist/esm/icons/footprints.js';
 /** Nombre kebab-case -> nodo de icono de Lucide. */
 export const ICONS = {
   activity: Activity, aperture: Aperture, atom: Atom, 'axis-3d': Axis3d, blend: Blend, bone: Bone,
-  box: Box, camera: Camera, 'chevron-down': ChevronDown, 'circle-check': CircleCheck,
+  box: Box, camera: Camera, 'chevron-down': ChevronDown, 'chevrons-up-down': ChevronsUpDown,
+  'circle-check': CircleCheck,
   'circle-dot': CircleDot, 'circle-x': CircleX, 'columns-3': Columns3, 'code-xml': CodeXml, contrast: Contrast,
   copy: Copy, cpu: Cpu, crop: Crop, crosshair: Crosshair, download: Download,
   droplet: Droplet, eye: Eye, 'eye-off': EyeOff, 'file-down': FileDown, 'file-up': FileUp,

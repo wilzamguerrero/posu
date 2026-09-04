@@ -320,7 +320,9 @@ export class UI {
           { icon: 'move', title: 'Mover el control (W)', path: 'scene.tool', value: 'translate' },
           { icon: 'rotate-3d', title: 'Girar el hueso (E)', path: 'scene.tool', value: 'rotate' },
           { icon: 'magnet', title: 'Fijar o soltar el control elegido (X)', onClick: () => actions.togglePin?.() },
+          { icon: 'chevrons-up-down', title: 'Squash y stretch: la cadena se estira para llegar y se aplasta al plegarse', path: 'ik.stretch' },
           { sep: true },
+          { icon: 'focus', title: 'Ensenar solo los controles junto al puntero (N)', path: 'pose.proximity' },
           { icon: 'fingerprint', title: 'Manejadores de falange', path: 'hands.fingers' },
           { icon: 'snowflake', title: 'Congelar la pose (C)', path: 'mocap.frozen' },
           { sep: true },
@@ -827,6 +829,9 @@ export class UI {
               break;
             }
             case 'x': actions.togglePin?.(); break;
+            // Con cuarenta manejadores en pantalla esto se enciende y se apaga
+            // constantemente mientras se posa, asi que tiene tecla propia.
+            case 'n': s.set('pose.proximity', s.get('pose.proximity') !== true); break;
             case 'd': s.set('draw.enabled', s.get('draw.enabled') !== true); break;
             case 'h': s.set('ui.sidebar', s.get('ui.sidebar') === false); break;
             default: return;

@@ -508,6 +508,160 @@ let destino = null;
     rig.targetWorld(pierna, new THREE.Vector3()).distanceTo(punta(pierna)) < 1e-9);
 }
 
+// --- squash y stretch -----------------------------------------------------
+{
+  /** Escala de mundo de un hueso, que es donde se ve la compensacion de grosor. */
+  const escalaMundo = (o) => {
+    o.updateWorldMatrix(true, false);
+    return new THREE.Vector3().setFromMatrixScale(o.matrixWorld);
+  };
+  /** Largo de mundo de cada eslabon, de la raiz a la punta. */
+  const eslabones = (chain) => {
+    const p = [...chain.bones, chain.tip];
+    const out = [];
+    for (let i = 1; i < p.length; i++) {
+      out.push(worldOf(p[i - 1], new THREE.Vector3()).distanceTo(worldOf(p[i], new THREE.Vector3())));
+    }
+    return out;
+  };
+  const iguales = (a, b, tol) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < tol);
+  const razon = (a, b) => a.map((v, i) => (v / b[i]).toFixed(5)).join(' ');
+  // Los largos de mundo salen de multiplicar matrices, asi que se comparan con
+  // holgura; lo que si tiene que volver exacto es el valor local de cada hueso.
+  const HOLGURA = 1e-6;
+
+  check('el squash y stretch nace apagado',
+    rig.stretchOn === false && DEFAULTS.ik.stretch === false);
+  check('todas las cadenas apuntan su largo natural', rig.chains.every((c) => c.rest),
+    rig.chains.filter((c) => !c.rest).map((c) => c.id).join(' ') || 'todas');
+
+  settings.set('ik.stretchMax', 5);
+  check('un estirado disparatado se recorta', rig.stretchMax === 1);
+  settings.set('ik.stretchMax', 0.3);
+  check('el estirado maximo se lee de los ajustes', Math.abs(rig.stretchMax - 0.3) < 1e-9);
+
+  const brazoD = rig.get('rightArm');
+  const natural = eslabones(brazoD);
+  const total = natural.reduce((a, b) => a + b, 0);
+  const eBase = escalaMundo(brazoD.mid).x;
+  const eManoBase = escalaMundo(brazoD.tip).x;
+  const hombro = () => worldOf(brazoD.root, new THREE.Vector3());
+  const dir = V(0.3, -1, 0.4).normalize();
+  const lejos = (f) => hombro().addScaledVector(dir, total * f);
+
+  rig.hold.add('rightArm');
+  rig.setTargetWorld(brazoD, lejos(1.15));
+  rig.solveHeld();
+  check('apagado, un objetivo lejano no estira nada',
+    brazoD.stretch === 1 && iguales(eslabones(brazoD), natural, total * HOLGURA),
+    'k=' + brazoD.stretch);
+
+  settings.set('ik.stretch', true);
+  check('se enciende con ik.stretch', rig.stretchOn === true);
+  rig.invalidate();
+  rig.solveHeld();
+  const k = brazoD.stretch;
+  const dPunta = punta(brazoD).distanceTo(rig.targetWorld(brazoD, new THREE.Vector3()));
+  check('encendido, la mano llega a donde antes no alcanzaba', dPunta < total * 1e-4,
+    'd=' + dPunta.toExponential(1) + ' k=' + k.toFixed(4));
+  check('se estira lo justo para llegar, no mas',
+    Math.abs(k - 1.15 / (1 - rig.margin)) < 1e-3, 'k=' + k.toFixed(4));
+  check('cada eslabon crece en la misma proporcion',
+    iguales(eslabones(brazoD), natural.map((v) => v * k), total * HOLGURA),
+    razon(eslabones(brazoD), natural));
+
+  check('el miembro estirado adelgaza para compensar el volumen',
+    Math.abs(escalaMundo(brazoD.mid).x / eBase - 1 / Math.sqrt(k)) < 1e-6,
+    'u=' + (escalaMundo(brazoD.mid).x / eBase).toFixed(5) + ' esperado=' + (1 / Math.sqrt(k)).toFixed(5));
+  check('la mano del final no cambia de tamano',
+    Math.abs(escalaMundo(brazoD.tip).x / eManoBase - 1) < 1e-6,
+    'razon=' + (escalaMundo(brazoD.tip).x / eManoBase).toFixed(6));
+
+  const mayor = Math.max(...natural);
+  const minNat = Math.max(0, 2 * mayor - total) + total * 0.02;
+  rig.setTargetWorld(brazoD, lejos(0.002));
+  rig.invalidate();
+  rig.solveHeld();
+  check('un objetivo pegado al hombro aplasta el miembro', brazoD.stretch < 1,
+    'k=' + brazoD.stretch.toFixed(4));
+  check('el aplastado no pasa del tope',
+    Math.abs(brazoD.stretch - 1 / (1 + rig.stretchMax)) < 1e-6, 'k=' + brazoD.stretch.toFixed(5));
+  check('aplastado, la mano se acerca mas de lo que daba el pliegue',
+    hombro().distanceTo(punta(brazoD)) < minNat,
+    'd=' + hombro().distanceTo(punta(brazoD)).toFixed(5) + ' pliegue=' + minNat.toFixed(5));
+
+  rig.setTargetWorld(brazoD, lejos(1.15));
+  rig.invalidate();
+  rig.solveHeld();
+  const k1 = brazoD.stretch;
+  const largos1 = eslabones(brazoD);
+  rig.invalidate();
+  rig.solveHeld();
+  check('resolver dos veces no alarga el miembro un poco mas',
+    Math.abs(brazoD.stretch - k1) < 1e-9 && iguales(eslabones(brazoD), largos1, total * HOLGURA),
+    'k1=' + k1.toFixed(6) + ' k2=' + brazoD.stretch.toFixed(6));
+
+  rig.setTargetWorld(brazoD, lejos(4));
+  rig.invalidate();
+  rig.solveHeld();
+  check('un objetivo imposible estira solo hasta el tope',
+    Math.abs(brazoD.stretch - (1 + rig.stretchMax)) < 1e-6, 'k=' + brazoD.stretch.toFixed(5));
+
+  const estado = rig.stretchState();
+  const largosTope = eslabones(brazoD);
+  check('el estado guarda solo las cadenas estiradas',
+    Object.keys(estado).join(' ') === 'rightArm'
+    && Math.abs(estado.rightArm - brazoD.stretch) < 1e-12,
+    Object.keys(estado).join(' ') || 'ninguna');
+  rig.syncAll();
+  check('sincronizar todo deshace el estirado, que una pose solo lleva giros',
+    brazoD.stretch === 1 && iguales(eslabones(brazoD), natural, total * HOLGURA),
+    razon(eslabones(brazoD), natural));
+  rig.setStretchState(estado);
+  check('un estado guardado vuelve a poner el estirado igual',
+    Math.abs(brazoD.stretch - estado.rightArm) < 1e-12
+    && iguales(eslabones(brazoD), largosTope, total * HOLGURA),
+    razon(eslabones(brazoD), largosTope));
+  check('al volver el estirado los objetivos quedan sobre las puntas',
+    rig.targetWorld(brazoD, new THREE.Vector3()).distanceTo(punta(brazoD)) < 1e-9);
+
+  settings.set('ik.stretch', false);
+  rig.invalidate();
+  rig.solveHeld();
+  // Aqui no vale la holgura: el largo local de cada hueso y las escalas tienen que
+  // volver al valor de reposo tal cual, o el modelo se iria deformando a cada
+  // encendido y apagado.
+  check('apagarlo devuelve el largo natural, hueso a hueso',
+    brazoD.stretch === 1
+    && brazoD.rest.links.every((l) => Math.abs(l.bone.position.length() - l.len) < 1e-12)
+    && brazoD.root.scale.equals(brazoD.rest.root.scale)
+    && brazoD.rest.comp.every((c) => c.bone.scale.equals(c.scale)),
+    'k=' + brazoD.stretch);
+  check('y la mano recupera su escala',
+    Math.abs(escalaMundo(brazoD.tip).x / eManoBase - 1) < HOLGURA,
+    'razon=' + (escalaMundo(brazoD.tip).x / eManoBase).toFixed(9));
+
+  // El cuello es a la vez la punta del torso y la raiz de la cabeza: los dos
+  // factores tienen que multiplicarse en ese hueso sin pisarse el uno al otro.
+  const torso = rig.get('torso');
+  const cabeza = rig.get('head');
+  const nTorso = eslabones(torso);
+  const nCabeza = eslabones(cabeza);
+  rig.setStretch(torso, 1.2);
+  rig.setStretch(cabeza, 0.85);
+  check('dos cadenas que comparten un hueso no se pisan',
+    iguales(eslabones(torso), nTorso.map((v) => v * 1.2), 1e-6)
+    && iguales(eslabones(cabeza), nCabeza.map((v) => v * 0.85), 1e-6),
+    'torso=' + razon(eslabones(torso), nTorso) + ' cabeza=' + razon(eslabones(cabeza), nCabeza));
+  rig.resetStretch();
+  check('deshacer el estirado devuelve los largos exactos',
+    iguales(eslabones(torso), nTorso, 1e-9) && iguales(eslabones(cabeza), nCabeza, 1e-9));
+
+  rig.hold.clear();
+  rig.syncAll();
+  settings.set('ik.stretchMax', DEFAULTS.ik.stretchMax);
+}
+
 // --- rehacer el rig al cambiar de modelo ----------------------------------
 {
   rig.setCharacter(null);

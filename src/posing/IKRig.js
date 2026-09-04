@@ -25,6 +25,13 @@
  *     la ha movido no se vuelve a resolver: una cadena fijada cuesta cero
  *     mientras la figura esta quieta, y un objetivo fuera de alcance no se pasa
  *     el rato reintentando lo imposible.
+ *   - El squash y stretch (`ik.stretch`) se aplica **antes** de resolver: se
+ *     cambia el largo de los eslabones y el solucionador, que mide los huesos tal
+ *     como estan, llega al objetivo sin forzar nada. El factor se mide siempre
+ *     sobre el largo natural apuntado al construir la cadena, nunca sobre el
+ *     estirado de ahora; medirlo sobre lo que hay alargaria el miembro un poco mas
+ *     en cada solucion. El grosor se compensa con una escala uniforme en la raiz,
+ *     que por ser uniforme no cizalla la piel de un miembro doblado.
  *   - El polo (codo, rodilla) **no se guarda**: se deduce de la postura de ahora,
  *     de modo que su manejador aparece siempre al lado del codo actual y no da
  *     un salto al soltarlo. Con el miembro estirado del todo no hay plano que
@@ -42,7 +49,15 @@ const _c = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _l = new THREE.Vector3();
+const _e = new THREE.Vector3();
+const _f = new THREE.Vector3();
+const _g = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+
+/** Tope de seguridad del estirado, por si llega un valor guardado disparatado. */
+const K_MIN = 0.2;
+const K_MAX = 3;
+const pinza = (v, min, max) => Math.max(min, Math.min(max, v));
 
 /** Grupos que se encienden por separado: `ik.arms`, `ik.legs`, `ik.torso`, `ik.head`. */
 export const IK_GROUPS = ['arms', 'legs', 'torso', 'head'];
@@ -121,6 +136,42 @@ function armarVarios(def, bones) {
   };
 }
 
+/**
+ * Apunta los largos y las escalas naturales de una cadena, que es de donde se mide
+ * el squash y stretch. Si el factor se midiera sobre el estirado de ahora, el
+ * miembro se iria alargando un poco mas en cada solucion hasta quedar absurdo.
+ *
+ * Devuelve `null` si la cadena no es un camino padre-hijo seguido: entonces no hay
+ * eslabones que alargar y esa cadena se queda sin estirado, sin mas.
+ */
+function medirReposo(chain) {
+  const path = [...chain.bones, chain.tip];
+  const links = [];
+  for (let i = 1; i < path.length; i++) {
+    const hueso = path[i];
+    if (hueso.parent !== path[i - 1]) return null;
+    const len = hueso.position.length();
+    if (len < 1e-6) return null;
+    links.push({ bone: hueso, dir: hueso.position.clone().divideScalar(len), len });
+  }
+  if (!links.length) return null;
+  // Lo que cuelga de la cadena sin ser la cadena lleva la escala contraria: al
+  // estirarse el brazo adelgaza, pero la mano que hay al final no, ni los hombros
+  // que cuelgan del pecho, ni los dedos del pie.
+  const dentro = new Set(path);
+  const comp = [];
+  for (let i = 0; i < path.length; i++) {
+    const hueso = path[i];
+    // La punta entera se compensa a si misma: asi se arregla de una vez su grosor
+    // y el tamano de todo lo que lleve debajo.
+    if (i === path.length - 1) { comp.push({ bone: hueso, scale: hueso.scale.clone() }); continue; }
+    for (const hijo of hueso.children) {
+      if (!dentro.has(hijo)) comp.push({ bone: hijo, scale: hijo.scale.clone() });
+    }
+  }
+  return { path, links, comp, root: { bone: path[0], scale: path[0].scale.clone() } };
+}
+
 export class IKRig {
   /**
    * @param {import('../model/Character.js').Character|null} character
@@ -155,6 +206,17 @@ export class IKRig {
     return Number.isFinite(v) ? Math.max(0, Math.min(0.2, v)) : 0.02;
   }
 
+  /** Squash y stretch: sin almacen se da por apagado, que es lo de siempre. */
+  get stretchOn() {
+    return this.settings ? this.settings.get('ik.stretch') === true : false;
+  }
+
+  /** Cuanto puede dar de si una cadena, en tanto por uno de su largo natural. */
+  get stretchMax() {
+    const v = Number(this.settings?.get('ik.stretchMax'));
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.25;
+  }
+
   /** Rehace las cadenas a partir de los huesos que traiga el modelo. */
   rebuild() {
     this.chains.length = 0;
@@ -170,6 +232,9 @@ export class IKRig {
       chain.goal = new THREE.Vector3();
       chain.dirty = false;
       chain.pinned = this.settings?.get('ik.pins.' + def.id) === true;
+      /** Factor de estirado aplicado ahora mismo; 1 es el largo natural. */
+      chain.stretch = 1;
+      chain.rest = medirReposo(chain);
       this.chains.push(chain);
       this.byId.set(def.id, chain);
     }
@@ -281,6 +346,126 @@ export class IKRig {
     return out.multiplyScalar(Math.max(1e-4, largo * 0.4)).add(b);
   }
 
+  // ------------------------------------------------------ squash y stretch ---
+
+  /**
+   * Vuelve a montar el estirado de todas las cadenas partiendo de sus largos
+   * naturales. Se rehace entero a proposito, en vez de retocar lo que hay: el
+   * cuello es a la vez la punta del torso y la raiz de la cabeza, asi que dos
+   * cadenas pueden tocar el mismo hueso y sus factores tienen que multiplicarse
+   * sin arrastrar lo que quedo de la pasada anterior.
+   *
+   * El largo se cambia en la posicion local de cada eslabon y el grosor con una
+   * escala **uniforme** en el hueso raiz: `u = 1/raiz(k)` adelgaza el miembro
+   * justo lo que se ha estirado, y por ser uniforme no cizalla la piel cuando la
+   * cadena esta doblada, que es lo que pasaria con una escala por ejes.
+   */
+  applyStretch() {
+    for (const chain of this.chains) {
+      const rest = chain.rest;
+      if (!rest) continue;
+      rest.root.bone.scale.copy(rest.root.scale);
+      for (const l of rest.links) l.bone.position.copy(l.dir).multiplyScalar(l.len);
+      for (const c of rest.comp) c.bone.scale.copy(c.scale);
+    }
+    for (const chain of this.chains) {
+      const rest = chain.rest;
+      if (!rest || chain.stretch === 1) continue;
+      const k = chain.stretch;
+      const u = 1 / Math.sqrt(k);
+      rest.root.bone.scale.multiplyScalar(u);
+      // El largo se escribe dividido por `u` porque la escala de la raiz ya
+      // multiplica por `u` todo lo que cuelga: asi el eslabon acaba midiendo
+      // `len * k` de mundo, ni mas ni menos.
+      for (const l of rest.links) l.bone.position.copy(l.dir).multiplyScalar(l.len * k / u);
+      for (const c of rest.comp) c.bone.scale.multiplyScalar(1 / u);
+    }
+    return this;
+  }
+
+  /**
+   * Cuanto habria que estirar o aplastar una cadena para que su punta llegue al
+   * objetivo. Devuelve 1 si llega por sus propios medios, y por eso encender el
+   * squash y stretch no cambia ninguna pose que ya alcanzaba: solo entra en juego
+   * en los dos extremos, cuando el objetivo esta mas lejos de lo que da el miembro
+   * o mas cerca de lo que puede plegarse.
+   *
+   * Los largos se miden en mundo y se dividen por el estirado que ya lleva puesto,
+   * de modo que el factor sale siempre del largo natural.
+   */
+  stretchFactor(chain, targetWorld) {
+    const rest = chain?.rest;
+    if (!rest || !targetWorld) return 1;
+    const k = chain.stretch || 1;
+    let total = 0;
+    let mayor = 0;
+    worldOf(rest.path[0], _g);
+    _e.copy(_g);
+    for (let i = 1; i < rest.path.length; i++) {
+      const d = _e.distanceTo(worldOf(rest.path[i], _f)) / k;
+      total += d;
+      if (d > mayor) mayor = d;
+      _e.copy(_f);
+    }
+    if (total < 1e-6) return 1;
+    const dos = chain.kind === 'twoBone';
+    // Los mismos topes que usa el solucionador: la holgura de la articulacion solo
+    // existe en la cadena de dos huesos, y el minimo es lo que sobra del eslabon
+    // mas largo cuando los demas se plieguen contra el.
+    const max = dos ? total * (1 - this.margin) : total;
+    const min = Math.max(0, 2 * mayor - total) + (dos ? total * 0.02 : 0);
+    const d = _g.distanceTo(targetWorld);
+    let f = 1;
+    if (d > max && max > 1e-6) f = d / max;
+    else if (d < min && min > 1e-6) f = d / min;
+    const a = this.stretchMax;
+    return pinza(f, 1 / (1 + a), 1 + a);
+  }
+
+  /** Deja una cadena con este factor de estirado; 1 es su largo natural. */
+  setStretch(chain, k) {
+    if (!chain?.rest) return false;
+    const v = Number.isFinite(k) ? pinza(k, K_MIN, K_MAX) : 1;
+    if (Math.abs(v - chain.stretch) < 1e-4) return false;
+    chain.stretch = v;
+    this.applyStretch();
+    return true;
+  }
+
+  /** Devuelve todas las cadenas a su largo natural. */
+  resetStretch() {
+    let cambio = false;
+    for (const chain of this.chains) {
+      if (chain.stretch === 1) continue;
+      chain.stretch = 1;
+      cambio = true;
+    }
+    if (cambio) this.applyStretch();
+    return cambio;
+  }
+
+  /**
+   * El estirado de cada cadena. Hace falta guardarlo aparte porque una pose solo
+   * lleva giros (ver `Character.getPose()`): sin esto, deshacer devolveria los
+   * giros y dejaria el brazo largo.
+   */
+  stretchState() {
+    const out = {};
+    for (const chain of this.chains) if (chain.stretch !== 1) out[chain.id] = chain.stretch;
+    return out;
+  }
+
+  /** Restaura un estirado guardado y deja los objetivos sobre las puntas nuevas. */
+  setStretchState(state) {
+    for (const chain of this.chains) {
+      const v = Number(state?.[chain.id]);
+      chain.stretch = Number.isFinite(v) ? pinza(v, K_MIN, K_MAX) : 1;
+    }
+    this.applyStretch();
+    for (const chain of this.chains) this.sync(chain);
+    return this;
+  }
+
   // ------------------------------------------------------------ soluciones ---
 
   /**
@@ -293,6 +478,11 @@ export class IKRig {
   solve(chain, pole = null) {
     if (!chain) return false;
     const target = this.targetWorld(chain, _t);
+    // El estirado se decide antes de resolver, porque el solucionador mide los
+    // huesos tal como estan: con la cadena ya alargada llega sin forzar nada, y
+    // el resultado sigue siendo una solucion de giros.
+    if (this.stretchOn) this.setStretch(chain, this.stretchFactor(chain, target));
+    else if (chain.stretch !== 1) this.setStretch(chain, 1);
     let ok = false;
     if (chain.kind === 'twoBone') {
       const p = pole ?? this.poleWorld(chain, _l);
@@ -320,8 +510,14 @@ export class IKRig {
     return this;
   }
 
-  /** Sincroniza todas (tras cargar una pose, aplicar un preset o deshacer). */
+  /**
+   * Sincroniza todas (tras cargar una pose, aplicar un preset o deshacer). El
+   * estirado se deshace primero: una pose de la biblioteca lleva solo giros, asi
+   * que aplicarla con un brazo largo de otra pose dejaria la figura deforme sin
+   * que se hubiera pedido.
+   */
   syncAll() {
+    this.resetStretch();
     for (const chain of this.chains) this.sync(chain);
     return this;
   }
