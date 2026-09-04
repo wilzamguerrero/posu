@@ -587,6 +587,80 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
     !sw.classList.contains('hidden') && sw.textContent.trim() === 'FK', sw.className);
 }
 
+// 8f · Los ejes del giro de los huesos: es ajuste aparte del de las cajas y los
+//      solidos, y se cambia con Alt+X mientras se posa, como en cualquier 3D.
+{
+  const fk = [...document.querySelectorAll('#sidebar-host [data-panel="poses"] .group-head')]
+    .find((h) => h.textContent.includes('Cinematica directa (FK)'))?.parentElement
+    ?.querySelector('.group-body') ?? null;
+  const ejes = campo(fk, 'Ejes del giro');
+  const seg = (valor) => {
+    const b = ejes?.querySelector('.segmented button[data-value="' + valor + '"]');
+    b?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    return !!b;
+  };
+  settings.batch({ 'pose.space': 'world', 'scene.space': 'world', 'ui.manualPosing': true });
+  revisa('los ejes del giro del hueso escriben pose.space, no el de la escena',
+    seg('local') && settings.get('pose.space') === 'local'
+    && settings.get('scene.space') === 'world',
+    settings.get('pose.space') + ' / ' + settings.get('scene.space'));
+  seg('world');
+  key('x', { altKey: true });
+  revisa('Alt+X mientras se posa pasa a los ejes del propio hueso',
+    settings.get('pose.space') === 'local', settings.get('pose.space'));
+  key('x', { altKey: true });
+  revisa('y otro Alt+X vuelve a los del mundo, con el boton al dia',
+    settings.get('pose.space') === 'world'
+    && ejes?.querySelector('.segmented button[data-value="world"]')?.classList.contains('is-active'),
+    settings.get('pose.space'));
+  settings.set('ui.manualPosing', false);
+  key('x', { altKey: true });
+  revisa('sin estar posando la tecla no toca los ejes del hueso',
+    settings.get('pose.space') === 'world', settings.get('pose.space'));
+  // Y con un solido elegido manda el editor de escena: ahi lo que gira es la
+  // caja, no un hueso, asi que Alt+X es el suyo.
+  settings.set('ui.manualPosing', true);
+  app.scene = { handleKey: (ev) => ev.altKey && ev.key.toLowerCase() === 'x' };
+  key('x', { altKey: true });
+  revisa('con un solido elegido, Alt+X sigue siendo el del editor de escena',
+    settings.get('pose.space') === 'world', settings.get('pose.space'));
+  delete app.scene;
+}
+
+// 8g · Las dos rectas de construccion del panel de guias: hombros y cadera, cada
+//      una con su interruptor, y un color aparte del trazo de gesto.
+{
+  const acc = grupoPorTitulo('Linea de accion');
+  const hombros = campo(acc, 'Recta de los hombros');
+  const cadera = campo(acc, 'Recta de la cadera');
+  revisa('las guias traen las dos rectas, aparte de la linea de accion',
+    !!hombros && !!cadera && !!campo(acc, 'Linea de accion'));
+  revisa('la de los hombros escribe su ajuste',
+    marca(hombros, true) && settings.get('guides.action.shoulders') === true);
+  revisa('y la de la cadera el suyo, sin pisar a la otra',
+    marca(cadera, true) && settings.get('guides.action.hips') === true
+    && settings.get('guides.action.shoulders') === true);
+  const color = campo(acc, 'Color de hombros y cadera');
+  const entrada = color?.querySelector('input[type="color"]');
+  revisa('y tienen su propio color, distinto del trazo de accion',
+    !!entrada && entrada.value.toLowerCase() === settings.get('guides.action.color2').toLowerCase()
+    && settings.get('guides.action.color2') !== settings.get('guides.action.color'),
+    entrada?.value);
+  if (entrada) {
+    entrada.value = '#123456';
+    entrada.dispatchEvent(new window.Event('input', { bubbles: true }));
+  }
+  revisa('cambiarlo escribe guides.action.color2 y deja en paz el otro',
+    settings.get('guides.action.color2') === '#123456'
+    && settings.get('guides.action.color') !== '#123456',
+    settings.get('guides.action.color2'));
+  settings.batch({
+    'guides.action.shoulders': false,
+    'guides.action.hips': false,
+    'guides.action.color2': DEFAULTS.guides.action.color2,
+  });
+}
+
 // 9 · La firma del autor sale en Ayuda > Acerca de.
 const firma = document.querySelector('#sidebar-host .credit');
 console.log('firma:', firma ? firma.textContent.replace(/s+/g, ' ').trim() : 'NO APARECE',

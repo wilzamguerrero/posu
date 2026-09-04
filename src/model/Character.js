@@ -75,6 +75,9 @@ const _m = new THREE.Matrix4();
 const _mm = new THREE.Matrix4();
 const _cajaTmp = new THREE.Box3();
 const _vTmp = new THREE.Vector3();
+const _fTmp = new THREE.Vector3();
+const _gTmp = new THREE.Vector3();
+const _dTmp = new THREE.Vector3();
 const _i4 = new THREE.Vector4();
 const _w4 = new THREE.Vector4();
 
@@ -83,27 +86,67 @@ const DEFORM_MIN = 0.2;
 const DEFORM_MAX = 3;
 /** Un factor de escala sano: numero finito y dentro de los topes. */
 const factorDeform = (v) => Math.min(DEFORM_MAX, Math.max(DEFORM_MIN, Number.isFinite(v) ? v : 1));
+/** Los mismos tres factores, cada uno sano y en positivo. */
+const sanear = (v, out = new THREE.Vector3()) => out.set(
+  factorDeform(Math.abs(Number(v?.x ?? 1)) || 1),
+  factorDeform(Math.abs(Number(v?.y ?? 1)) || 1),
+  factorDeform(Math.abs(Number(v?.z ?? 1)) || 1),
+);
 /** ¿Un factor que no deforma nada? Entonces no se guarda. */
-const sinDeformar = (k, g) => Math.abs(k - 1) < 1e-4 && Math.abs(g - 1) < 1e-4;
+const sinDeformar = (f) => Math.abs(f.x - 1) < 1e-4
+  && Math.abs(f.y - 1) < 1e-4 && Math.abs(f.z - 1) < 1e-4;
 /**
- * Deformar un hueso son dos numeros, no tres: **largo** (`k`) y **grosor** (`g`).
- * Un factor por eje suena a mas libertad, pero sobre un esqueleto de verdad se ve
- * mal, y por dos razones que ninguna escala local arregla:
+ * Deformar un hueso es **un factor por cada uno de sus tres ejes**, y cada eje va
+ * por su cuenta: tirar de un solo manejador del giroscopio da de si solo por ahi, y
+ * tirar del centro cambia los tres a la vez. Los tres no se aplican igual, y ahi
+ * esta lo interesante.
  *
- *   - Una escala no uniforme sobre un hueso girado **cizalla** todo lo que cuelga
- *     de el: en Mixamo el pie va girado respecto a la espinilla, asi que estirar
- *     la espinilla por su eje dejaba el pie sesgado, como un paralelogramo.
- *   - Ese sesgo no se puede deshacer desde el hijo, porque una escala girada ya no
- *     es diagonal: el error se hereda cadena abajo por mucho que se compense.
+ * El eje que corre **a lo largo** del hueso no se escala: mueve la articulacion de
+ * abajo, que es lo mismo que hace el estirado de las cadenas de IK. La piel se
+ * estira sola entre las dos con el degradado de los pesos, en vez de dar un escalon
+ * justo en la articulacion.
  *
- * Asi que aqui el largo **no se escala**: se mueve la articulacion de abajo, que es
- * lo mismo que hace el estirado de las cadenas de IK, y la piel se estira sola
- * entre las dos con el degradado suave de los pesos en vez de dar un escalon en la
- * articulacion. El grosor si es escala, pero **uniforme**, la unica que nunca
- * cizalla, y se le descuenta al hijo dividiendo por ese mismo numero: exacto,
- * este girado como este. Resultado: en toda la figura `bone.scale` solo lleva
- * factores uniformes, y ni la deformacion a mano ni el squash del rig sesgan nada.
+ * Los otros dos —el **grosor**— si son `bone.scale`, y ahi aparece el problema de
+ * siempre: una escala no uniforme sobre un hueso girado **cizalla** todo lo que
+ * cuelga de el (en un esqueleto de Mixamo el pie va girado respecto a la espinilla),
+ * y ese sesgo no se puede deshacer desde el hijo con posicion-giro-escala, porque
+ * una escala girada ya no es diagonal. La salida no es renunciar a los ejes: es
+ * dejar de pedirle al hijo que lo arregle con su TRS y multiplicarle la matriz local
+ * por el inverso del grosor del padre (`updateMatrixCompensada`). Dos diagonales
+ * conmutan, asi que se cancelan exactas y el subarbol entero queda como si el padre
+ * no estuviera deformado: engordar la rodilla por un solo eje no engorda el pie, ni
+ * lo sesga, y `matrixWorld` sigue siendo giro por escala diagonal en todos los
+ * huesos, que es lo que necesitan el giroscopio y el retargeting para descomponer.
  */
+
+/**
+ * Hijos a los que se les esta descontando el grosor del padre, y por cuanto. Va en
+ * un WeakMap y no en el hueso para no ensuciar el modelo ni lo que se guarda.
+ */
+const COMPENSA = new WeakMap();
+
+/**
+ * El `updateMatrix` de un hueso al que hay que descontarle el grosor de su padre.
+ * Three compone la matriz local con posicion, giro y escala; aqui se le multiplica
+ * **por delante** el inverso de ese grosor, que es escalar las tres primeras filas
+ * —la columna de la traslacion incluida, y por eso la articulacion cae donde toca—.
+ *
+ * Es el «inherit scale: none» de Blender, exacto para cualquier giro. Three lo
+ * respeta porque tanto `updateMatrixWorld` como `updateWorldMatrix` llaman a
+ * `this.updateMatrix()`, y se quita con `delete hijo.updateMatrix`, que vuelve a
+ * descubrir el del prototipo.
+ */
+function updateMatrixCompensada() {
+  this.matrix.compose(this.position, this.quaternion, this.scale);
+  const inv = COMPENSA.get(this);
+  if (inv) {
+    const e = this.matrix.elements;
+    e[0] *= inv.x; e[4] *= inv.x; e[8] *= inv.x; e[12] *= inv.x;
+    e[1] *= inv.y; e[5] *= inv.y; e[9] *= inv.y; e[13] *= inv.y;
+    e[2] *= inv.z; e[6] *= inv.z; e[10] *= inv.z; e[14] *= inv.z;
+  }
+  this.matrixWorldNeedsUpdate = true;
+}
 
 
 export class Character {
@@ -146,13 +189,16 @@ export class Character {
       offset: new Map(),
     };
     /**
-     * Deformacion del usuario: clave de hueso -> `{ k, g }`, el largo y el grosor
-     * de ese hueso. Es una capa aparte del reposo y del estirado del IK; las tres
-     * se escriben juntas en `applyDeform()` (y en `IKRig.applyStretch()`) para que
-     * ninguna pise a las otras. Viaja con la pose, asi que se guarda y se deshace
-     * con ella.
+     * Deformacion del usuario: clave de hueso -> `Vector3`, un factor por cada eje
+     * local de ese hueso. Es una capa aparte del reposo y del estirado del IK; las
+     * tres se escriben juntas en `applyDeform()` (y en `IKRig.applyStretch()`) para
+     * que ninguna pise a las otras. Viaja con la pose, asi que se guarda y se
+     * deshace con ella.
      */
     this.deform = new Map();
+    // Hijos con el grosor del padre descontado a mano: hay que devolverles su
+    // `updateMatrix` cuando la deformacion se va, o arrastrarian la compensacion.
+    this.deformComp = new Set();
     // El eje que corre a lo largo de cada hueso (hueso -> 0/1/2, o -1 si no tiene
     // hijos). Se mide una vez por modelo, no en cada arrastre.
     this.deformAxis = new Map();
@@ -886,24 +932,29 @@ export class Character {
   // ------------------------------------------------------------ deformacion ---
 
   /**
-   * La deformacion de un hueso puesta en sus tres ejes, que es como la entiende el
-   * giroscopio: el largo en el eje que corre a lo largo del hueso y el grosor en
-   * los otros dos. Asi el manejador que el usuario arrastra a lo largo del hueso es
-   * justo el que lo alarga. (1,1,1) si no esta deformado.
+   * La deformacion de un hueso en sus tres ejes locales, que es como la entiende el
+   * giroscopio: el manejador que sale a lo largo del hueso es justo el que lo
+   * alarga, y los otros dos le cambian el grosor cada uno por su lado. (1,1,1) si
+   * no esta deformado.
    */
   boneDeform(key, out = new THREE.Vector3()) {
     const f = this.deform.get(key);
-    if (!f) return out.set(1, 1, 1);
-    out.set(f.g, f.g, f.g);
-    const i = this.lengthAxis(this.bones[key]);
-    if (i >= 0) out.setComponent(i, f.k);
-    return out;
+    return f ? out.copy(f) : out.set(1, 1, 1);
   }
 
-  /** Los dos numeros de la deformacion de un hueso: largo y grosor. */
+  /**
+   * La misma deformacion resumida en dos numeros —**largo** y **grosor**— para
+   * quien no trabaja por ejes: los tiradores de posicion y el squash de las
+   * cadenas. El grosor es la media geometrica de los dos ejes que cruzan el hueso,
+   * o sea el radio de una seccion del mismo area.
+   */
   boneFactors(key) {
     const f = this.deform.get(key);
-    return { k: f?.k ?? 1, g: f?.g ?? 1 };
+    if (!f) return { k: 1, g: 1 };
+    const a = [f.x, f.y, f.z];
+    const i = this.lengthAxis(this.bones[key]);
+    if (i < 0) return { k: 1, g: Math.cbrt(a[0] * a[1] * a[2]) };
+    return { k: a[i], g: Math.sqrt(a[(i + 1) % 3] * a[(i + 2) % 3]) };
   }
 
   /**
@@ -929,22 +980,25 @@ export class Character {
   }
 
   /**
-   * Reparte una escala por ejes (la que trae el giroscopio) en largo y grosor. El
-   * grosor sale de la media geometrica de los dos ejes de al lado, asi que pedir
-   * 1,4 en uno solo engorda la mitad de lo que pedirlo en los dos: el hueso
-   * responde a lo que se arrastra sin poder acabar con seccion ovalada, que es lo
-   * que cizallaba la piel. Un hueso sin hijos no tiene largo, y ahi lo que se pida
-   * se reparte entero como grosor.
+   * La vuelta de `boneFactors()`: el largo y el grosor puestos en los tres ejes del
+   * hueso. Un hueso sin hijos no tiene largo, y ahi los dos numeros se van al
+   * grosor de los tres ejes.
    */
-  deformFactors(key, scale) {
-    const eje = (v) => Math.abs(Number(v ?? 1)) || 1;
-    const a = [eje(scale?.x), eje(scale?.y), eje(scale?.z)];
+  #ejes(key, k, g, out = new THREE.Vector3()) {
     const i = this.lengthAxis(this.bones[key]);
-    if (i < 0) return { k: 1, g: factorDeform(Math.cbrt(a[0] * a[1] * a[2])) };
-    return {
-      k: factorDeform(a[i]),
-      g: factorDeform(Math.sqrt(a[(i + 1) % 3] * a[(i + 2) % 3])),
-    };
+    out.set(g, g, g);
+    if (i >= 0) out.setComponent(i, k);
+    return sanear(out, out);
+  }
+
+  /** Devuelve su `updateMatrix` a los hijos que llevan el grosor descontado. */
+  #soltarComp() {
+    if (!this.deformComp) return;
+    for (const hijo of this.deformComp) {
+      COMPENSA.delete(hijo);
+      delete hijo.updateMatrix;
+    }
+    this.deformComp.clear();
   }
 
   /** ¿Hay algun hueso con la escala cambiada? */
@@ -953,35 +1007,33 @@ export class Character {
   }
 
   /**
-   * Deforma un hueso desde una escala por ejes, que es lo que arrastra el
-   * giroscopio: se reparte en largo y grosor y entra por el mismo embudo que todo
-   * lo demas.
+   * El embudo de la deformacion: los tres factores de un hueso, tal cual los pide
+   * el giroscopio. Los factores neutros se borran del mapa para que la pose
+   * guardada no se llene de unos. Devuelve `true` si algo cambio, para que quien
+   * llame sepa si tiene que registrar el paso.
    */
   setBoneScale(key, scale) {
     if (!this.bones[key]) return false;
-    const f = this.deformFactors(key, scale);
-    return this.setBoneFactors(key, f.k, f.g);
-  }
-
-  /**
-   * El embudo de la deformacion: el largo y el grosor de un hueso. Los factores
-   * neutros se borran del mapa para que la pose guardada no se llene de unos.
-   * Devuelve `true` si algo cambio, para que quien llame sepa si tiene que
-   * registrar el paso.
-   */
-  setBoneFactors(key, k, g) {
-    if (!this.bones[key]) return false;
-    const nk = factorDeform(k);
-    const ng = factorDeform(g);
-    if (sinDeformar(nk, ng)) {
+    const f = sanear(scale, _fTmp);
+    if (sinDeformar(f)) {
       if (!this.deform.delete(key)) return false;
     } else {
-      const f = this.deform.get(key);
-      if (f && Math.abs(f.k - nk) < 1e-9 && Math.abs(f.g - ng) < 1e-9) return false;
-      this.deform.set(key, { k: nk, g: ng });
+      const v = this.deform.get(key);
+      if (v && v.distanceToSquared(f) < 1e-18) return false;
+      if (v) v.copy(f);
+      else this.deform.set(key, f.clone());
     }
     this.applyDeform();
     return true;
+  }
+
+  /**
+   * Deforma un hueso con los dos numeros de siempre —largo y grosor— por el mismo
+   * embudo. Lo usan los tiradores de posicion, que arrastran esos dos y no ejes.
+   */
+  setBoneFactors(key, k, g) {
+    if (!this.bones[key]) return false;
+    return this.setBoneScale(key, this.#ejes(key, factorDeform(k), factorDeform(g), _gTmp));
   }
 
   /**
@@ -990,13 +1042,13 @@ export class Character {
    * desde el reposo, asi que llamar dos veces no acumula nada y el orden del mapa
    * da igual (multiplicar por un numero conmuta).
    *
-   * El grosor no se hereda: a cada hijo se le divide por el mismo factor uniforme
-   * del padre (el «segment scale compensate» de Maya, el «inherit scale: none» de
-   * Blender), y al ser uniforme la cuenta es exacta, este el hijo girado como este.
-   * Engordar la rodilla no engorda el pie, ni aunque tambien este engordado el
-   * muslo. El largo mueve la articulacion de abajo, y por eso deja apuntado en
-   * `deformLength` cuanto ha alargado la traslacion de cada hijo: asi el rig de IK
-   * multiplica ahi su propio estirado en vez de pisarlo.
+   * El grosor no se hereda: a cada hijo se le descuenta el del padre por delante de
+   * su matriz local (el «segment scale compensate» de Maya, el «inherit scale:
+   * none» de Blender), y la cuenta es exacta aunque el grosor no sea uniforme y el
+   * hijo vaya girado. Engordar la rodilla no engorda el pie, ni aunque tambien este
+   * engordado el muslo. El largo mueve la articulacion de abajo, y por eso deja
+   * apuntado en `deformLength` cuanto ha alargado la traslacion de cada hijo: asi el
+   * rig de IK multiplica ahi su propio estirado en vez de pisarlo.
    *
    * Devuelve `false` si aun no hay esqueleto, para que el rig de IK sepa que tiene
    * que apanarse con sus propias medidas de reposo.
@@ -1008,24 +1060,38 @@ export class Character {
       if (r) bone.scale.copy(r);
       else bone.scale.set(1, 1, 1);
     }
-    // Las traslaciones que se alargaron la vez anterior vuelven al reposo: si no,
-    // al quitar la deformacion la articulacion se quedaria donde la dejo el largo.
+    // Las traslaciones que se alargaron la vez anterior vuelven al reposo, y los
+    // hijos que descontaban grosor recuperan su `updateMatrix`: si no, al quitar la
+    // deformacion la articulacion se quedaria donde la dejo el largo y el hijo
+    // seguiria descontando un grosor que ya no esta.
     for (const hijo of this.deformLength.keys()) {
       const o = this.rest.offset.get(hijo);
       if (o) hijo.position.copy(o);
     }
     this.deformLength.clear();
+    this.#soltarComp();
     for (const [key, f] of this.deform) {
       const bone = this.bones[key];
       if (!bone) continue;
-      bone.scale.multiplyScalar(f.g);
-      // El largo se escribe dividido por el grosor porque la escala del hueso ya
-      // multiplica por `g` todo lo que cuelga: asi el eslabon acaba midiendo `k` de
-      // mundo, y engordar un hueso no le mueve la articulacion de abajo.
-      const largo = f.k / f.g;
+      const i = this.lengthAxis(bone);
+      // El eje del hueso sale de la escala —lo aplica la articulacion de abajo— y
+      // los otros dos se quedan como escala del hueso, cada uno por su cuenta.
+      _dTmp.copy(f);
+      const largo = i >= 0 ? _dTmp.getComponent(i) : 1;
+      if (i >= 0) _dTmp.setComponent(i, 1);
+      bone.scale.multiply(_dTmp);
+      const grueso = Math.abs(_dTmp.x - 1) > 1e-9 || Math.abs(_dTmp.y - 1) > 1e-9
+        || Math.abs(_dTmp.z - 1) > 1e-9;
+      const inv = grueso
+        ? new THREE.Vector3(1 / _dTmp.x, 1 / _dTmp.y, 1 / _dTmp.z)
+        : null;
       for (const hijo of bone.children) {
         if (!hijo.isBone) continue;
-        hijo.scale.multiplyScalar(1 / f.g);
+        if (inv) {
+          COMPENSA.set(hijo, inv);
+          hijo.updateMatrix = updateMatrixCompensada;
+          this.deformComp.add(hijo);
+        }
         const o = this.rest.offset.get(hijo);
         if (!o || Math.abs(largo - 1) < 1e-9) continue;
         hijo.position.copy(o).multiplyScalar(largo);
@@ -1035,10 +1101,10 @@ export class Character {
     return true;
   }
 
-  /** Copia serializable de la deformacion: largo y grosor de cada hueso. */
+  /** Copia serializable de la deformacion: los tres ejes de cada hueso. */
   deformState() {
     const out = {};
-    for (const [key, f] of this.deform) out[key] = [f.k, f.g];
+    for (const [key, f] of this.deform) out[key] = [f.x, f.y, f.z];
     return out;
   }
 
@@ -1047,13 +1113,13 @@ export class Character {
     this.deform.clear();
     for (const [key, arr] of Object.entries(state ?? {})) {
       if (!Array.isArray(arr) || !this.bones[key]) continue;
-      // Dos numeros son largo y grosor. Tres son una escala por ejes, de una pose
-      // guardada antes de que la deformacion tuviera esta forma, y se reparte igual
-      // que la que llega del giroscopio.
+      // Tres numeros son los tres ejes del hueso. Dos son el largo y el grosor de
+      // una pose guardada cuando la deformacion eran solo esos dos, y se reparten
+      // como los reparte cualquiera que trabaje con esos dos numeros.
       const f = arr.length > 2
-        ? this.deformFactors(key, { x: arr[0], y: arr[1], z: arr[2] })
-        : { k: factorDeform(arr[0] ?? 1), g: factorDeform(arr[1] ?? 1) };
-      if (sinDeformar(f.k, f.g)) continue;
+        ? sanear({ x: arr[0], y: arr[1], z: arr[2] })
+        : this.#ejes(key, factorDeform(arr[0] ?? 1), factorDeform(arr[1] ?? 1));
+      if (sinDeformar(f)) continue;
       this.deform.set(key, f);
     }
     this.applyDeform();
@@ -1136,6 +1202,7 @@ export class Character {
     this.deform.clear();
     this.deformAxis.clear();
     this.deformLength.clear();
+    this.#soltarComp();
     this.boneBounds = { anatomia: [], maniqui: [], esqueleto: [] };
     this.restHeight = 1;
     this.restBox.makeEmpty();

@@ -236,7 +236,188 @@ check('por el costado tambien son dos', costado.fills.length === 2,
 settings.set('guides.action.legPath', 'cruzado');
 settings.set('guides.action.legs', false);
 
-/* ── 5 · Exageracion y fantasma ──────────────────────────────────────── */
+/* ── 5 · Las rectas de los hombros y de la cadera ────────────────────── */
+// Son lineas de construccion: van rectas y lo que se lee es su inclinacion, asi
+// que se comprueba que pasan por las dos articulaciones, que salen por fuera de
+// ellas y que no se disfrazan del trazo de gesto.
+check('con todo apagado no queda nada activo', linea.active === false);
+settings.set('guides.action.shoulders', true);
+check('la recta de los hombros enciende el trazo por si sola', linea.active === true);
+const hombros = fakeCtx();
+linea.draw(hombros, W, H, 1);
+check('es un trazo suelto de dos puntos, sin relleno ni curva',
+  hombros.strokes === 1 && hombros.fills.length === 0 && hombros.puntos.length === 2,
+  hombros.strokes + ' trazos · ' + hombros.puntos.length + ' puntos');
+check('con su propio color y mas fina que el trazo de accion',
+  hombros.strokeStyle === settings.get('guides.action.color2')
+  && hombros.strokeStyle !== settings.get('guides.action.color')
+  && hombros.lineWidth < settings.get('guides.action.width'),
+  hombros.strokeStyle + ' · ' + hombros.lineWidth);
+
+/** Cuanto se sale un punto de la recta que pasa por dos articulaciones, en px. */
+const fuera = (a, b, p) => Math.abs((p[0] - a.x) * (b.y - a.y) - (p[1] - a.y) * (b.x - a.x))
+  / Math.hypot(b.x - a.x, b.y - a.y);
+/** Angulo de la recta dibujada, para comparar dos inclinaciones. */
+const inclina = (c, i = 0) => Math.atan2(c.puntos[i * 2 + 1][1] - c.puntos[i * 2][1],
+  c.puntos[i * 2 + 1][0] - c.puntos[i * 2][0]);
+{
+  const a = px('leftArm');
+  const b = px('rightArm');
+  const [p, q] = hombros.puntos;
+  const largo = Math.hypot(b.x - a.x, b.y - a.y);
+  check('la recta pasa por los dos encajes del brazo, que es donde se ven los hombros',
+    fuera(a, b, p) < 0.01 && fuera(a, b, q) < 0.01,
+    fuera(a, b, p).toExponential(1) + ' / ' + fuera(a, b, q).toExponential(1) + ' px');
+  check('y se prolonga por fuera de los dos',
+    Math.hypot(q[0] - p[0], q[1] - p[1]) > largo * 1.2
+    && Math.min(p[0], q[0]) < Math.min(a.x, b.x) - 1
+    && Math.max(p[0], q[0]) > Math.max(a.x, b.x) + 1,
+    'recta de ' + Math.hypot(q[0] - p[0], q[1] - p[1]).toFixed(0)
+    + ' px · hombros ' + largo.toFixed(0) + ' px');
+  // La clavicula nace pegada al cuello: de raiz a raiz la recta salia mucho mas
+  // corta que los hombros que se ven, que es lo que se veia mal.
+  const raices = Math.hypot(px('rightShoulder').x - px('leftShoulder').x,
+    px('rightShoulder').y - px('leftShoulder').y);
+  check('y bastante mas ancha que la distancia entre las dos claviculas',
+    largo > raices * 2,
+    'hombros ' + largo.toFixed(0) + ' px · claviculas ' + raices.toFixed(0) + ' px');
+}
+
+// No todo esqueleto trae clavicula, y a esta recta le da igual: se apoya en los
+// brazos, asi que sin ellas sale exactamente la misma.
+{
+  const clav = { leftShoulder: bones.leftShoulder, rightShoulder: bones.rightShoulder };
+  delete bones.leftShoulder;
+  delete bones.rightShoulder;
+  const sinClav = fakeCtx();
+  linea.draw(sinClav, W, H, 1);
+  check('sin claviculas la recta de los hombros no se mueve',
+    sinClav.strokes === 1 && sinClav.puntos.length === 2
+    && sinClav.puntos.every((p, i) => Math.hypot(p[0] - hombros.puntos[i][0],
+      p[1] - hombros.puntos[i][1]) < 1e-9),
+    sinClav.strokes + ' trazos');
+  Object.assign(bones, clav);
+}
+
+// Y si los dos lados caen en el mismo punto —la figura vista de canto— no hay
+// recta que trazar: dejarla salir daria un palo apuntando a cualquier lado.
+{
+  const sitio = bones.rightArm.position.clone();
+  bones.rightArm.position.copy(bones.leftArm.position);
+  raiz.updateMatrixWorld(true);
+  const encima = fakeCtx();
+  linea.draw(encima, W, H, 1);
+  check('con los dos hombros en el mismo punto no se traza nada',
+    encima.strokes === 0 && encima.puntos.length === 0, encima.strokes + ' trazos');
+  bones.rightArm.position.copy(sitio);
+  raiz.updateMatrixWorld(true);
+}
+
+// Las dos juntas: es la pareja lo que se mira.
+settings.set('guides.action.hips', true);
+const dos = fakeCtx();
+linea.draw(dos, W, H, 1);
+check('las dos rectas son dos trazos de dos puntos cada uno',
+  dos.strokes === 2 && dos.puntos.length === 4, dos.strokes + ' trazos');
+{
+  const a = px('leftUpLeg');
+  const b = px('rightUpLeg');
+  check('la segunda pasa por las dos caderas',
+    fuera(a, b, dos.puntos[2]) < 0.01 && fuera(a, b, dos.puntos[3]) < 0.01,
+    fuera(a, b, dos.puntos[2]).toExponential(1) + ' px');
+}
+
+// Volcar la cadera las saca de paralelas, que es lo que se lee de la pareja.
+{
+  const sitio = bones.rightUpLeg.position.clone();
+  bones.rightUpLeg.position.y += 0.09;
+  raiz.updateMatrixWorld(true);
+  const volcada = fakeCtx();
+  linea.draw(volcada, W, H, 1);
+  // El seno de la diferencia: da igual por que punta se haya dibujado cada una.
+  const g = Math.abs(Math.sin(inclina(volcada, 0) - inclina(volcada, 1)));
+  check('con la cadera volcada las dos no salen paralelas: eso es el contrapposto',
+    g > 0.02, (Math.asin(g) * 180 / Math.PI).toFixed(1) + ' grados de diferencia');
+  bones.rightUpLeg.position.copy(sitio);
+  raiz.updateMatrixWorld(true);
+}
+
+// Y se ensanchan con la figura. Engordar el pecho no mueve los hombros —a cada
+// hijo se le descuenta la escala del padre, que es lo que evita que se cizalle la
+// piel—, pero el cuerpo se ve mas ancho y la recta tiene que crecer con el. El
+// personaje de juguete no deforma nada: se le presta lo que la guia consulta.
+{
+  const UNO = new THREE.Vector3(1, 1, 1);
+  const deform = new Map();
+  character.lengthAxis = () => 1;               // la Y a lo largo del hueso
+  character.boneDeform = (key, out = new THREE.Vector3()) => out.copy(deform.get(key) ?? UNO);
+  /** Largo de una de las rectas dibujadas. */
+  const largoDe = (c, i = 0) => Math.hypot(c.puntos[i * 2 + 1][0] - c.puntos[i * 2][0],
+    c.puntos[i * 2 + 1][1] - c.puntos[i * 2][1]);
+  /** Centro de una de las rectas dibujadas. */
+  const centroDe = (c, i = 0) => [(c.puntos[i * 2][0] + c.puntos[i * 2 + 1][0]) / 2,
+    (c.puntos[i * 2][1] + c.puntos[i * 2 + 1][1]) / 2];
+  const antes = fakeCtx();
+  linea.draw(antes, W, H, 1);
+  check('sin deformar nada salen exactamente las mismas dos rectas',
+    Math.abs(largoDe(antes) - largoDe(dos)) < 1e-9
+    && Math.abs(largoDe(antes, 1) - largoDe(dos, 1)) < 1e-9,
+    largoDe(antes).toFixed(1) + ' px');
+
+  deform.set('spine2', new THREE.Vector3(1.5, 1, 1));
+  const ancho = fakeCtx();
+  linea.draw(ancho, W, H, 1);
+  // No sale 1,5 clavado porque el factor se mide a lo largo de la recta, y esta va
+  // algo inclinada: es el estirado que le toca a su direccion.
+  check('engordar el pecho al ancho ensancha la recta de los hombros otro tanto',
+    Math.abs(largoDe(ancho) / largoDe(antes) - 1.5) < 0.02,
+    (largoDe(ancho) / largoDe(antes)).toFixed(3) + ' veces');
+  check('crece por las dos puntas, sin irse de sitio',
+    Math.hypot(centroDe(ancho)[0] - centroDe(antes)[0],
+      centroDe(ancho)[1] - centroDe(antes)[1]) < 1e-9);
+  check('y la de la cadera no se entera',
+    Math.abs(largoDe(ancho, 1) - largoDe(antes, 1)) < 1e-9);
+
+  deform.set('spine2', new THREE.Vector3(1, 1, 1.6));
+  const fondo = fakeCtx();
+  linea.draw(fondo, W, H, 1);
+  check('engordarlo de fondo no la ensancha: cuenta el ancho que mira la recta',
+    Math.abs(largoDe(fondo) - largoDe(antes)) < 1e-9, largoDe(fondo).toFixed(1) + ' px');
+
+  deform.set('spine2', new THREE.Vector3(1, 2.5, 1));
+  const alto = fakeCtx();
+  linea.draw(alto, W, H, 1);
+  check('ni alargarlo: el largo no escala, mueve la articulacion, y eso ya se ve',
+    Math.abs(largoDe(alto) - largoDe(antes)) < 1e-9, largoDe(alto).toFixed(1) + ' px');
+
+  deform.clear();
+  deform.set('hips', new THREE.Vector3(1.4, 1, 1));
+  const pelvis = fakeCtx();
+  linea.draw(pelvis, W, H, 1);
+  check('la de la cadera la ensancha su propio hueso, sin tocar la de los hombros',
+    Math.abs(largoDe(pelvis, 1) / largoDe(antes, 1) - 1.4) < 0.02
+    && Math.abs(largoDe(pelvis) - largoDe(antes)) < 1e-9,
+    (largoDe(pelvis, 1) / largoDe(antes, 1)).toFixed(3) + ' veces');
+
+  deform.set('hips', new THREE.Vector3(0.6, 1, 1));
+  const estrecha = fakeCtx();
+  linea.draw(estrecha, W, H, 1);
+  check('y adelgazarla la acorta, que se mide la figura y no el hueso',
+    Math.abs(largoDe(estrecha, 1) / largoDe(antes, 1) - 0.6) < 0.02,
+    (largoDe(estrecha, 1) / largoDe(antes, 1)).toFixed(3) + ' veces');
+
+  delete character.lengthAxis;
+  delete character.boneDeform;
+}
+settings.set('guides.action.shoulders', false);
+const soloCadera = fakeCtx();
+linea.draw(soloCadera, W, H, 1);
+check('cada una se enciende y se apaga por su lado',
+  linea.active === true && soloCadera.strokes === 1, soloCadera.strokes + ' trazos');
+settings.set('guides.action.hips', false);
+check('y apagando las dos vuelve a no haber nada activo', linea.active === false);
+
+/* ── 6 · Exageracion y fantasma ──────────────────────────────────────── */
 settings.set('guides.action.ghost', true);
 // Solo el fantasma: asi los puntos salen en el mismo orden con cualquier
 // exageracion y se pueden comparar uno a uno.
@@ -269,7 +450,7 @@ check('exagerar aparta el fantasma de la pose real', d1 > 4, d1.toFixed(1) + ' p
 check('y a mas exageracion, mas separacion', d1 > d2 + 1,
   '0.4 -> ' + d2.toFixed(1) + ' px · 0.9 -> ' + d1.toFixed(1) + ' px');
 
-/* ── 6 · De perfil el trazo no puede desaparecer ─────────────────────── */
+/* ── 7 · De perfil el trazo no puede desaparecer ─────────────────────── */
 // Brazos colgando y camara de canto: los dos brazos se proyectan casi encima, el
 // trazo vuelve sobre si mismo y la cuerda entre las dos manos se queda en nada.
 // Con un solo degradado por esa cuerda, todo el trazo caia fuera del eje y se
@@ -316,7 +497,7 @@ check('de frente y con los brazos abiertos basta un relleno', frente.fills.lengt
   frente.fills.length + ' rellenos');
 settings.set('guides.action.arms', false);
 
-/* ── 7 · Sin figura no se dibuja ─────────────────────────────────────── */
+/* ── 8 · Sin figura no se dibuja ─────────────────────────────────────── */
 linea.setCharacter(null);
 ctx = fakeCtx();
 linea.draw(ctx, W, H, 1);

@@ -800,6 +800,14 @@ export class UI {
         ev.preventDefault();
         return;
       }
+      // Alt+X con la figura en pose: los ejes del giro de los huesos. El editor de
+      // escena ya se ha quedado con la tecla si habia un solido elegido, que ahi lo
+      // que se esta girando es el solido y no un hueso.
+      if (ev.altKey && ev.key.toLowerCase() === 'x' && s.get('ui.manualPosing') === true) {
+        ev.preventDefault();
+        s.set('pose.space', s.get('pose.space') === 'local' ? 'world' : 'local');
+        return;
+      }
       if (ev.altKey) return;
 
       switch (ev.key) {

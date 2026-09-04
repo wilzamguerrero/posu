@@ -11,6 +11,15 @@
  *     cruzando el torso, hasta el pie del lado contrario. No son segmentos entre
  *     articulaciones: son una sola curva que fluye, que sale y entra del dibujo
  *     prolongandose por las puntas y desvaneciendose en ellas.
+ *   - **Rectas de los hombros y de la cadera**: lineas de construccion, no de
+ *     gesto. Unen los dos hombros y las dos caderas, se prolongan un poco por
+ *     fuera y van rectas a proposito: no siguen el cuerpo, lo miden. Es lo que se
+ *     mira justo despues de la linea de accion — si las dos van paralelas la
+ *     figura esta plantada, y si se cruzan hay contrapposto. Por eso van mas
+ *     finas y en su propio color, para no confundirlas con los trazos de gesto.
+ *     Miden la figura que se ve, no el esqueleto: la de los hombros va de encaje
+ *     de brazo a encaje de brazo, y las dos se ensanchan con el cuerpo cuando se
+ *     le deforma el tronco.
  *   - **Exageracion**: amplifica la curva de la linea de accion y, si se pide,
  *     dibuja el mismo personaje llevado a esa exageracion, para ver de un vistazo
  *     hacia donde conviene empujar la pose.
@@ -26,6 +35,10 @@ import {
 } from '../draw/stroke.js';
 
 const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _fac = new THREE.Vector3();
+const _q = new THREE.Quaternion();
 
 /** Columna, de la cabeza a la cadera: el tronco de la linea de accion. */
 const COLUMNA = ['head', 'neck', 'spine2', 'spine1', 'spine', 'hips'];
@@ -59,6 +72,33 @@ const RITMO_PIERNAS = {
     ['rightShoulder', 'spine1', 'rightUpLeg', 'rightLeg', 'rightFoot'],
   ],
 };
+
+/**
+ * Las dos cinturas: la escapular (los hombros) y la pelvica (las caderas).
+ *
+ * `lados` da el punto de cada lado, con su respaldo por si el esqueleto no trae
+ * ese hueso. La de los hombros se apoya en el **encaje del brazo**, no en la raiz
+ * de la clavicula: la clavicula nace pegada al cuello, y una recta entre las dos
+ * raices sale mucho mas corta que los hombros que se ven. De paso, alargar la
+ * clavicula —que es como se ensancha de hombros una figura— mueve ese encaje, asi
+ * que la recta se ensancha con ella sin tener que hacer nada.
+ *
+ * `centro` es el hueso del tronco que sostiene la cintura: el que la ensancha
+ * cuando se le engorda el grosor (ver `#girdleSpread`).
+ */
+const CINTURAS = {
+  shoulders: {
+    lados: [['leftArm', 'leftShoulder'], ['rightArm', 'rightShoulder']],
+    centro: ['spine2', 'spine1', 'spine'],
+  },
+  hips: {
+    lados: [['leftUpLeg'], ['rightUpLeg']],
+    centro: ['hips', 'spine'],
+  },
+};
+
+/** Cuanto se prolonga cada recta por fuera del cuerpo, en fraccion de su largo. */
+const CINTURA_EXT = 0.18;
 
 /** Tramo de columna que da su curvatura al ritmo por el costado. */
 const COLUMNA_RITMO = ['spine2', 'spine1', 'spine'];
@@ -142,7 +182,7 @@ export class ActionLine {
   /** ¿Hay algun trazo encendido? */
   get active() {
     const a = this.settings.get('guides.action');
-    return !!(a && (a.line || a.arms || a.legs || a.ghost));
+    return !!(a && (a.line || a.arms || a.legs || a.shoulders || a.hips || a.ghost));
   }
 
   /** Cuanto se amplifica la curva: 0 = la pose tal cual. */
@@ -188,6 +228,14 @@ export class ActionLine {
       for (const cadena of this.#legPoints(P)) {
         this.#flow(ctx, cadena, grosor * 0.78, a.color, alfa * 0.92);
       }
+    }
+    // Las dos rectas de construccion van mas finas y en su propio color: se leen
+    // por la inclinacion, no por el trazo.
+    if (a.shoulders || a.hips) {
+      const c2 = a.color2 || a.color;
+      const fino = Math.max(1, grosor * 0.5);
+      if (a.shoulders) this.#girdleLine(ctx, ch, P, CINTURAS.shoulders, fino, c2, alfa);
+      if (a.hips) this.#girdleLine(ctx, ch, P, CINTURAS.hips, fino, c2, alfa);
     }
     if (a.ghost && campo) this.#ghost(ctx, P, campo, e, dpr, alfa);
 
@@ -330,6 +378,69 @@ export class ActionLine {
     const y = (a.y + b.y) / 2;
     if (!cuello) return { x, y };
     return { x: x + (cuello.x - x) * 0.35, y: y + (cuello.y - y) * 0.35 };
+  }
+
+  /**
+   * La recta de una cintura, la de los hombros o la de la cadera. Es lo que mira un
+   * dibujante justo despues de la linea de accion: si las dos van paralelas la
+   * figura esta plantada, y si se cruzan hay contrapposto. Van rectas a proposito
+   * —no siguen el cuerpo, lo miden— y se prolongan un poco por fuera, que es como se
+   * traza una linea de construccion a mano.
+   */
+  #girdleLine(ctx, ch, P, cintura, grosor, color, alfa) {
+    const claveA = cintura.lados[0].find((k) => P.has(k));
+    const claveB = cintura.lados[1].find((k) => P.has(k));
+    if (!claveA || !claveB) return;
+    const a = P.get(claveA);
+    const b = P.get(claveB);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    // Figura de perfil: los dos lados caen en el mismo punto y no hay recta que
+    // trazar. Dejarla salir daria un palo de dos pixeles apuntando a cualquier lado.
+    if (Math.hypot(dx, dy) < 4) return;
+    // Prolongarla por fuera y ensancharla con el tronco son la misma cuenta: cuanto
+    // se aparta cada punta de la otra. Puesto asi sale la recta de siempre, la
+    // prolongacion incluida, multiplicada por lo que se haya ensanchado el cuerpo.
+    const f = this.#girdleSpread(ch, cintura, claveA, claveB);
+    const ext = CINTURA_EXT * f + (f - 1) / 2;
+    ctx.save();
+    ctx.globalAlpha = alfa;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = grosor;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(a.x - dx * ext, a.y - dy * ext);
+    ctx.lineTo(b.x + dx * ext, b.y + dy * ext);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Cuanto ensancha una cintura el grosor del hueso que la sostiene. Engordar el
+   * pecho no mueve los hombros: a cada hijo se le descuenta la escala del padre
+   * —que es lo que evita que se cizalle la piel—, asi que las articulaciones se
+   * quedan donde estaban mientras el cuerpo se ensancha, y la recta se quedaria
+   * corta. Se mide llevando la direccion de la recta a los ejes del hueso y
+   * estirandola con los factores de ese hueso: engordar el pecho al ancho ensancha
+   * la recta de los hombros lo mismo, y engordarlo de fondo no le hace nada. El eje
+   * del largo se deja en 1 porque ese no escala —mueve la articulacion de abajo— y
+   * eso ya se nota en el sitio de las dos puntas.
+   */
+  #girdleSpread(ch, cintura, claveA, claveB) {
+    if (typeof ch?.boneDeform !== 'function') return 1;
+    const clave = cintura.centro.find((k) => ch.bones?.[k]);
+    const hueso = clave ? ch.bones[clave] : null;
+    const a = ch.bones?.[claveA];
+    const b = ch.bones?.[claveB];
+    if (!hueso || !a || !b) return 1;
+    const f = ch.boneDeform(clave, _fac);
+    if (Math.abs(f.x - 1) < 1e-6 && Math.abs(f.y - 1) < 1e-6 && Math.abs(f.z - 1) < 1e-6) return 1;
+    const eje = ch.lengthAxis?.(hueso) ?? -1;
+    if (eje >= 0) f.setComponent(eje, 1);
+    const d = _dir.copy(b.getWorldPosition(_v)).sub(a.getWorldPosition(_v2));
+    if (d.lengthSq() < 1e-12) return 1;
+    d.applyQuaternion(hueso.getWorldQuaternion(_q).invert()).normalize();
+    return Math.hypot(d.x * f.x, d.y * f.y, d.z * f.z);
   }
 
   /**
@@ -520,6 +631,7 @@ export class ActionLine {
     const claves = new Set([
       'headTop', ...COLUMNA, ...COLUMNA_RITMO, ...RITMO_BRAZOS.flat(),
       ...Object.values(RITMO_PIERNAS).flat(2), ...Object.values(PIERNA).flat(),
+      ...Object.values(CINTURAS).flatMap((c) => c.lados.flat()),
       'leftShoulder', 'rightShoulder',
     ]);
     for (const [a, b] of HUESOS) { claves.add(a); claves.add(b); }

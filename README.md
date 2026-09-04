@@ -72,9 +72,11 @@ npm run deploy       # build + wrangler pages deploy dist
 | Clavar o soltar el control elegido (pies en el suelo al agacharse) | tecla `X` o panel **Poses › Cinemática inversa (IK)** |
 | Enseñar solo los controles que hay junto al puntero | tecla `N` o panel **Poses › Pose manual** |
 | Squash y stretch (la cadena se estira para llegar y se aplasta al plegarse) | panel **Poses › Cinemática inversa (IK)** |
-| Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Poses › Cinemática directa (FK)**, **Escena › Manipulador** o `Alt+X` |
+| Ejes del giro de un hueso: los del **mundo** o los del **propio hueso** | `Alt+X` posando, o panel **Poses › Cinemática directa (FK)** |
+| Ejes del gizmo de cajas y sólidos (ajuste aparte del de los huesos) | panel **Escena › Manipulador**, o `Alt+X` con un sólido elegido |
 | Caja envolvente al pasar el ratón, del elemento elegido o de todos | panel **Escena › Caja envolvente** o el botón **Caja** |
 | Línea de acción, ritmos brazo a brazo y hombro a pierna (cruzado, por su lado o por el costado), fantasma exagerado | panel **Guías › Línea de acción** |
+| Rectas de construcción de los **hombros** (de encaje a encaje del brazo) y de la **cadera**, con su propio color, y ensanchándose con la figura al deformarle el tronco | panel **Guías › Línea de acción** |
 | Dibujar sobre el visor con presión de pluma | tecla `D`; `Alt` para orbitar sin salir |
 | Gestos de mano, curvatura por dedo, apertura y pulgar | panel **Poses › Manos y dedos** |
 | Altura en metros, posición y giro de la figura activa | panel **Poses › Colocación** |
@@ -112,7 +114,7 @@ src/
   posing/              ManualPosing (gizmo de huesos con historial y deformación), IKRig (cadenas de cinemática inversa, squash y stretch), proximity (cercanía al puntero en pantalla)
   draw/                Sketch (lápiz sobre el visor) y stroke.js (geometría del trazo)
   scene/               SceneEditor, Bounds (cajas envolventes), primitivas, luces insertables
-  guides/              Guides, Perspective y ActionLine (acción, ritmos y fantasma)
+  guides/              Guides, Perspective y ActionLine (acción, ritmos, cinturas, fantasma)
   search/              ImageSearch (cliente del buscador de imágenes)
   ui/                  panels, UI, Readout, widgets, icons (Lucide), Toast, SearchBar
   styles/              theme.css (tokens de VS Code Dark Modern) + app.css
@@ -160,8 +162,9 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   encenderla no cambia ninguna pose que ya llegaba. El factor se mide siempre sobre
   el largo natural apuntado al construir la cadena, nunca sobre el estirado de ahora,
   que si no el brazo se alargaría un poco más en cada solución; y el grosor se
-  compensa con una escala **uniforme** en el hueso raíz (`1/√k`), que por ser
-  uniforme no cizalla la piel de un miembro doblado como haría una escala por ejes.
+  compensa con una escala **uniforme** en el hueso raíz (`1/√k`), uniforme porque el
+  aplastado es de la cadena entera y no de un lado del hueso: el grosor por ejes que
+  se pide a mano es otra capa, y se multiplica encima sin estorbar a esta.
   Todo se rehace desde el reposo en cada cambio, porque el cuello es a la vez la
   punta del torso y la raíz de la cabeza y los dos factores tienen que multiplicarse
   en ese hueso. Una pose guardada lleva giros y el largo y el grosor de cada hueso,
@@ -191,31 +194,41 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
 - **Deformar los huesos: el aplastado a mano del rig de dibujo animado.** Con `R` el
   gizmo deforma el hueso del control elegido, en los dos modos y también en un hueso
   de en medio como la rodilla o el codo, que es lo que no daba la cinemática inversa
-  por sí sola. Deformar son **dos números**, no una escala de tres ejes: **largo** y
-  **grosor**. El tirador que va a lo largo del hueso lo alarga y los otros dos lo
-  engordan; si se piden distintos, el grosor sale de la media geométrica de los dos,
-  así que la sección nunca queda ovalada. El largo **no se escala**: se mueve la
-  articulación de abajo (`hijo.position = reposo × k/g`), el mismo mecanismo que el
+  por sí sola. **Cada eje va por su cuenta**: la flecha que se arrastra dimensiona
+  **solo** ese eje —engordar una pantorrilla por un lado y dejar el otro como estaba,
+  como en Maya o Blender—, y para crecer a lo ancho, largo y fondo a la vez está el
+  **cuadro del centro** del gizmo, que pide los tres. Los ejes son los del **propio
+  hueso**, no los de la escena, y el del largo no se supone: se mide del hijo en
+  reposo (`Character.lengthAxis`). Ese, el del largo, **no se escala**: se mueve la
+  articulación de abajo (`hijo.position = reposo × k`), el mismo mecanismo que el
   estirado de las cadenas, y por eso la piel se estira con el degradado de los pesos
   en vez de dar un escalón en la rodilla —era el largo por escala lo que se veía
-  forzado—. El grosor sí es escala, pero **uniforme**, y a cada hijo se le divide por
-  ella (`1/g`): el *segment scale compensate* de Maya, aquí exacto, sin importar cómo
-  esté girado el hijo ni cuántos huesos seguidos se deformen. Como en toda la figura
-  las escalas quedan uniformes, nada cizalla la piel y al nieto no le queda ningún
-  resto: los dos límites que este apartado avisaba antes han dejado de existir. El
-  eje del largo no se supone, se mide del hijo en reposo (`Character.deformAxis`).
+  forzado—. Los otros dos sí son escala del hueso, y ahí sí puede quedar la sección
+  **ovalada**, que es justo lo que antes no se dejaba pedir: una escala no uniforme
+  girada dejaba de ser diagonal y le cizallaba la piel al hijo, y ninguna escala
+  local del hijo podía deshacerla. Lo que se le descuenta al hijo ahora no es un
+  número por eje sino **la matriz entera del padre**: cada hijo compone su matriz
+  local y la multiplica por la inversa del grosor (`inv(G)` dentro de su
+  `updateMatrix`, `Character.js`), así que los factores se cancelan exactamente
+  —sea cual sea el giro del hijo y cuántos huesos seguidos se deformen— y al nieto no
+  le queda ningún resto. Es el *segment scale compensate* de Maya, pero hecho en la
+  matriz. Y como cada hueso sigue siendo giro por escala diagonal, el gizmo y el
+  retargeting pueden seguir descomponiendo sus matrices, que es de lo que viven.
   Las tres capas —reposo, lo que pide el usuario y el estirado de la cadena— las
   compone un solo camino: `IKRig.applyStretch` llama primero a
   `Character.applyDeform` y luego **multiplica** encima (`Character.deformLength`
   dice cuánto había alargado cada articulación), así que un hueso alargado a mano
   dentro de una cadena estirada mantiene lo suyo. Al arrastrar, el gizmo no manda tal
-  cual: se suaviza contra el valor que había al apretar (`ajustarDeform`, exponente
+  cual: se suaviza contra el valor que había al apretar (`ajustarEjes`, exponente
   0,55), que por ser función del puntero no se va acumulando solo, y con **Conservar
-  el volumen** puesto alargar adelgaza y acortar ensancha (`g ÷ √k`), el mismo
-  aplastado que hace el squash de las cadenas. La deformación va de 0,2 a 3, viaja
-  con la pose (`pose.scales`, largo y grosor por hueso; las poses viejas de tres ejes
-  se reparten al cargarlas), y por eso se guarda en la biblioteca, se exporta, se
-  copia al duplicar una figura y vuelve con `Ctrl+Z` sin código aparte.
+  el volumen** puesto alargar adelgaza y acortar ensancha (`÷ √k`), el mismo
+  aplastado que hace el squash de las cadenas. El volumen solo se cobra en los ejes
+  que **no** se están arrastrando, que si no el cuadro del centro adelgazaría a la
+  vez que engorda y no habría manera de crecer de tamaño. La deformación va de 0,2 a
+  3, viaja con la pose (`pose.scales`, los tres ejes de cada hueso tocado, en los
+  ejes del propio hueso; las poses guardadas cuando eran dos números —largo y
+  grosor— se reparten al abrirlas), y por eso se guarda en la biblioteca, se exporta,
+  se copia al duplicar una figura y vuelve con `Ctrl+Z` sin código aparte.
 - **Deformar por posición, que es como se deforma en un rig de verdad.** Con la
   inversa puesta, girar el hueso ya no es una opción —lo resuelve el solver—, así
   que el cartón se pide **colocando** cosas. Dos tiradores, los dos del interruptor

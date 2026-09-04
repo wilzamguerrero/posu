@@ -1025,12 +1025,12 @@ function posesPanel(app) {
     group({ id: 'ps-fk', title: 'Cinematica directa (FK)', icon: 'rotate-3d' }, [
       notice('info', 'Girar hueso a hueso, del hombro a la mano: cada giro arrastra lo que cuelga de el, como en un maniqui de madera. Es el modo de la tecla I por la mitad de la izquierda; en modo inverso solo quedan las esferas de los huesos que no lleva ninguna cadena encendida, y para recuperar el resto se apaga esa cadena en <b>Cadenas</b>.'),
       segmented({
-        label: 'Ejes del giro', path: 'scene.space',
+        label: 'Ejes del giro', path: 'pose.space',
         options: [
           { value: 'world', label: 'Mundo', icon: 'globe' },
           { value: 'local', label: 'Hueso', icon: 'box' },
         ],
-        hint: 'Alt+X. «Mundo» gira sobre los ejes de la escena; «Hueso» sobre los del propio hueso, que es lo comodo para doblar un codo o una rodilla.',
+        hint: 'Alt+X mientras se posa. «Mundo» gira sobre los ejes de la escena; «Hueso» sobre los del propio hueso, que es lo comodo para doblar un codo o una rodilla. Es ajuste aparte del de las cajas y los solidos, que tienen el suyo en el editor de escena.',
       }),
       select({
         label: 'Imantado', path: 'scene.snap',
@@ -1222,6 +1222,10 @@ function guidesPanel(app) {
         ],
         hint: 'Por el costado no pasa por la columna: baja del hombro a la pierna de su lado casi recto, pero llevandose la curvatura de la espalda (si la figura se dobla, el trazo se dobla).',
       }),
+      toggle({ path: 'guides.action.shoulders', label: 'Recta de los hombros',
+        hint: 'Une los dos hombros y se prolonga a los lados: mide cuanto estan volcados.' }),
+      toggle({ path: 'guides.action.hips', label: 'Recta de la cadera',
+        hint: 'La misma medida en la pelvis. Si las dos rectas se cruzan hay contrapposto; si van paralelas la figura esta plantada.' }),
       slider({ label: 'Exageracion', path: 'guides.action.exaggeration', min: 0, max: 1.5, step: 0.05,
         format: (v) => Math.round(v * 100) + ' %',
         hint: 'Amplifica la curva del movimiento. El trazo exagerado sale de puntos junto al real.' }),
@@ -1230,8 +1234,9 @@ function guidesPanel(app) {
       slider({ label: 'Grosor del trazo', path: 'guides.action.width', min: 1, max: 16, step: 0.5,
         format: (v) => v.toFixed(1) + ' px' }),
       color({ path: 'guides.action.color', label: 'Color del trazo' }),
+      color({ path: 'guides.action.color2', label: 'Color de hombros y cadera' }),
       slider({ label: 'Opacidad', path: 'guides.action.opacity', min: 0.1, max: 1, step: 0.01 }),
-      notice('info', 'Los trazos se calculan sobre la figura que <b>posa</b> y se rehacen con la pose. Cada uno se prolonga un poco mas alla de las articulaciones y se <b>desvanece</b> afilandose en las dos puntas, como un gesto de lapiz.', 'spline'),
+      notice('info', 'Los trazos se calculan sobre la figura que <b>posa</b> y se rehacen con la pose. Cada uno se prolonga un poco mas alla de las articulaciones y se <b>desvanece</b> afilandose en las dos puntas, como un gesto de lapiz. Las dos rectas de hombros y cadera son lineas de <b>construccion</b>: van rectas, mas finas y en su propio color.', 'spline'),
     ]),
     group({ id: 'gu-prop', title: 'Proporcion', icon: 'ruler' }, [
       toggle({ path: 'guides.heads', label: 'Canon de cabezas' }),

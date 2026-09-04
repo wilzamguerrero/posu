@@ -112,10 +112,17 @@ export const DEFAULTS = {
    * `proximityRadius` es el radio de ese entorno en fraccion de la altura del
    * visor, no en pixeles, para que se comporte igual en una pantalla grande que en
    * un portatil.
+   *
+   * `space` son los ejes sobre los que gira un hueso, y es ajuste aparte del de la
+   * escena (`scene.space`): en una caja "local" son sus tres caras, pero en un hueso
+   * son los ejes con los que el esqueleto se dibujo, que es justo lo que se quiere
+   * para doblar un codo o inclinar una vertebra. Se cambia con `Alt+X` mientras se
+   * posa, como en cualquier programa de 3D.
    */
   pose: {
     proximity: false,
     proximityRadius: 0.16,
+    space: 'world',             // world | local (los ejes del propio hueso)
     // Deformar un hueso conservando el bulto: al alargarlo se adelgaza y al
     // acortarlo se ensancha, como el squash de las cadenas de IK. Apagado, el largo
     // y el grosor son independientes.
@@ -365,9 +372,14 @@ export const DEFAULTS = {
       legs: false,
       legPath: 'cruzado',       // cruzado | mismo | costado (ver ActionLine)
       ghost: false,
+      // Las dos rectas de construccion: la que une los hombros y la que une las
+      // caderas. Se leen por su inclinacion, asi que van rectas y de otro color.
+      shoulders: false,
+      hips: false,
       exaggeration: 0.4,        // 0 = tal cual esta posado
       width: 5,                 // grosor del trazo en px
       color: '#ff6b57',
+      color2: '#5ee0d0',        // hombros y cadera
       opacity: 0.9,
     },
   },

@@ -13,9 +13,11 @@
  *   - El giroscopio trabaja en coordenadas de mundo; la rotacion se convierte a
  *     local con  local = padreMundo⁻¹ * mundo, que es la misma algebra que usan
  *     los motores de retargeting.
- *   - Los ejes del giroscopio y el imantado son los mismos ajustes del editor de
- *     escena (`scene.space` y `scene.snap`): "Mundo" gira el hueso sobre los ejes
- *     de la escena y "Local" sobre los del propio hueso.
+ *   - Los ejes del giro son ajuste propio del posado (`pose.space`, tecla `Alt+X`),
+ *     aparte del de la escena: "Mundo" gira el hueso sobre los ejes de la escena y
+ *     "Hueso" sobre los suyos, que es lo comodo para doblar un codo. El imantado
+ *     (`scene.snap`) si es el mismo. El giroscopio de deformar va siempre por los
+ *     ejes del hueso, que son los unicos que significan algo al engordarlo.
  *   - Cada gesto completo (pointerdown -> pointerup) es un paso de deshacer.
  *
  * Encima de todo eso vive la cinematica inversa (`ik.enabled`), que es la otra
@@ -110,8 +112,12 @@ const DEFORM_PASO = 0.05;
  *     que el squash de las cadenas de IK (`u = 1/√k`), y por eso un hueso estirado
  *     a mano y uno estirado por el rig se ven igual.
  *
+ * Esto trabaja con los dos numeros —largo y grosor—, que es lo que arrastran los
+ * tiradores de posicion. El giroscopio va por ejes y pasa por `ajustarEjes`, que
+ * hace las mismas dos correcciones.
+ *
  * @param {{k:number,g:number}} inicio  largo y grosor al empezar el arrastre
- * @param {{k:number,g:number}} pedido  largo y grosor que sale del giroscopio
+ * @param {{k:number,g:number}} pedido  largo y grosor que sale del tirador
  * @returns {{k:number,g:number}} lo que hay que escribirle al hueso
  */
 export function ajustarDeform(inicio, pedido, { volumen = true, suave = DEFORM_SUAVE, paso = 0 } = {}) {
@@ -124,6 +130,39 @@ export function ajustarDeform(inicio, pedido, { volumen = true, suave = DEFORM_S
   if (volumen) g /= Math.sqrt(k / k0);
   const red = (v) => (paso > 0 ? Math.round(v / paso) * paso : v);
   return { k: red(k), g: red(g) };
+}
+
+/**
+ * Lo mismo pero eje a eje, que es como arrastra el giroscopio de escala: sus tres
+ * manejadores son los tres ejes del hueso, y cada uno va por su cuenta. Tirar del
+ * de arriba lo alarga, tirar de uno de lado lo engorda **solo por ese lado** —una
+ * seccion ovalada es lo que se pide para un antebrazo o una pantorrilla—, y tirar
+ * del centro le cambia las tres medidas a la vez.
+ *
+ * El volumen se descuenta **solo en los ejes que el usuario no ha tocado**: alargar
+ * un hueso lo adelgaza (el squash de dibujo animado), pero arrastrar el centro para
+ * hacerlo todo mas grande no tiene por que adelgazar nada, que ahi el usuario esta
+ * pidiendo las tres medidas y no hay nada que repartir.
+ *
+ * @param {{x:number,y:number,z:number}} inicio  los tres factores al empezar
+ * @param {{x:number,y:number,z:number}} pedido  los tres que salen del giroscopio
+ * @returns {{x:number,y:number,z:number}} lo que hay que escribirle al hueso
+ */
+export function ajustarEjes(inicio, pedido, { eje = -1, volumen = true, suave = DEFORM_SUAVE, paso = 0 } = {}) {
+  const i0 = [inicio?.x, inicio?.y, inicio?.z].map((v) => (v > 0 ? v : 1));
+  const p0 = [pedido?.x, pedido?.y, pedido?.z].map((v, j) => (v > 0 ? v : i0[j]));
+  const out = i0.map((v, j) => v * (p0[j] / v) ** suave);
+  // Lo que ha cambiado el largo en este arrastre es lo que se le descuenta al
+  // grosor, y solo a los ejes que no se estan arrastrando.
+  const r = eje >= 0 ? out[eje] / i0[eje] : 1;
+  if (volumen && Math.abs(r - 1) > 1e-6) {
+    for (let j = 0; j < 3; j++) {
+      if (j === eje || Math.abs(p0[j] / i0[j] - 1) > 1e-3) continue;
+      out[j] /= Math.sqrt(r);
+    }
+  }
+  const red = (v) => (paso > 0 ? Math.round(v / paso) * paso : v);
+  return { x: red(out[0]), y: red(out[1]), z: red(out[2]) };
 }
 
 /**
@@ -256,12 +295,13 @@ export class ManualPosing {
     this.gizmo = new TransformControls(viewport.cameras.active, viewport.renderer.domElement);
     this.gizmo.setMode('rotate');
     this.gizmo.size = 0.85;
-    // Ejes e imantado compartidos con el gizmo de la escena: girar un hueso "en
-    // el mundo" es lo que se espera al haber elegido esos ejes en el panel.
-    this.gizmo.setSpace(settings.get('scene.space') === 'local' ? 'local' : 'world');
+    // Los ejes del giro son los del panel de poses, no los del editor de escena: en
+    // un hueso "sobre si mismo" quiere decir otra cosa que en una caja, y con dos
+    // ajustes cada cosa se deja como se quiera tener.
+    this.gizmo.setSpace(settings.get('pose.space') === 'local' ? 'local' : 'world');
     this.#applySnap(settings.get('scene.snap'));
     this.offs = [
-      settings.on('scene.space', (v) => this.gizmo.setSpace(v === 'local' ? 'local' : 'world')),
+      settings.on('pose.space', (v) => this.gizmo.setSpace(v === 'local' ? 'local' : 'world')),
       settings.on('scene.snap', (v) => this.#applySnap(v)),
       // Mover o girar es el mismo ajuste que en el editor de escena (teclas W/E),
       // asi que el control de una mano sirve para las dos cosas sin botones nuevos.
@@ -279,7 +319,7 @@ export class ManualPosing {
         // aqui, que es tambien de donde parte el giroscopio (`_scaleStart`), asi que
         // arrastrar es una funcion del raton y no se va acumulando por fotograma.
         this.deformStart = this.#deformable(this.selected)
-          ? this.character.boneFactors(this.selected.boneKey)
+          ? this.character.boneDeform(this.selected.boneKey, new THREE.Vector3())
           : null;
         // Y los tiradores de posicion se miden contra el esqueleto tal como estaba
         // al empezar. Releer el marco en cada evento es una realimentacion: alargar
@@ -709,20 +749,24 @@ export class ManualPosing {
 
   /**
    * Deforma el hueso del manejador con lo que arrastra el giroscopio, pasado antes
-   * por `ajustarDeform`: suavizado para que no se dispare y con el volumen puesto
-   * si esta pedido. La deformacion vive en el personaje, asi que viaja con la pose
-   * y se deshace con ella; el estirado del IK se vuelve a poner encima, que es lo
-   * que compone las tres capas.
+   * por `ajustarEjes`: eje a eje, suavizado para que no se dispare y con el volumen
+   * puesto si esta pedido. En modo escala el giroscopio de three orienta sus
+   * manejadores con el giro de mundo del objeto, y el proxy lleva el del hueso, asi
+   * que sus tres ejes son ya los tres ejes del hueso: lo que se arrastra es lo que
+   * se engorda. La deformacion vive en el personaje, asi que viaja con la pose y se
+   * deshace con ella; el estirado del IK se vuelve a poner encima, que es lo que
+   * compone las tres capas.
    */
   #deformBone(entry) {
     if (!this.#deformable(entry)) return;
     const key = entry.boneKey;
-    const f = ajustarDeform(this.deformStart ?? this.character.boneFactors(key),
-      this.character.deformFactors(key, this.proxy.scale), {
+    const f = ajustarEjes(this.deformStart ?? this.character.boneDeform(key, _s),
+      this.proxy.scale, {
+        eje: this.character.lengthAxis(this.character.bones[key]),
         volumen: this.settings.get('pose.deformVolume') !== false,
         paso: this.deformStep,
       });
-    this.character.setBoneFactors(key, f.k, f.g);
+    this.character.setBoneScale(key, f);
     // Y de vuelta al giroscopio lo que el hueso tiene de verdad, con los topes y el
     // suavizado ya puestos, para que no quede apuntando a un tamano que no existe.
     this.character.boneDeform(key, this.proxy.scale);
@@ -886,11 +930,16 @@ export class ManualPosing {
       if (ks.length === 2) txt = 'largos ' + ks[0].toFixed(2) + ' + ' + ks[1].toFixed(2);
     } else {
       const key = this.#deformKey(entry);
-      const f = key ? this.character.boneFactors(key) : null;
-      txt = !f ? ''
-        : (Math.abs(f.k - 1) < 1e-4 && Math.abs(f.g - 1) < 1e-4)
-          ? 'sin deformar'
-          : 'largo ' + f.k.toFixed(2) + ' · grosor ' + f.g.toFixed(2);
+      if (key) {
+        // Los tres ejes tal cual, que es lo que se esta arrastrando: el largo y
+        // luego el grosor, un numero si los dos lados van iguales y dos si no.
+        const a = this.character.boneDeform(key, _s).toArray();
+        const i = this.character.lengthAxis(this.character.bones[key]);
+        const g = i >= 0 ? [a[(i + 1) % 3], a[(i + 2) % 3]] : a;
+        txt = a.every((v) => Math.abs(v - 1) < 1e-4) ? 'sin deformar'
+          : 'largo ' + (i >= 0 ? a[i] : 1).toFixed(2) + ' · grosor '
+            + [...new Set(g.map((v) => v.toFixed(2)))].join(' × ');
+      }
     }
     if (this.settings.get('ui.boneDeform') !== txt) this.settings.set('ui.boneDeform', txt);
   }
