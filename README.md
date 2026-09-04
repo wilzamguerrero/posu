@@ -66,15 +66,18 @@ npm run deploy       # build + wrangler pages deploy dist
 | Buscar una imagen de referencia en la web | tecla `Espacio` o la lupa de la barra del visor |
 | Congelar la pose | tecla `C` |
 | Posar huesos a mano con el gizmo | tecla `G`; deshacer con `Ctrl+Z` |
+| Cambiar de modo del rig: cinemática **directa (FK)** ↔ **inversa (IK)** | tecla `I` o panel **Poses › Pose manual › Modo del rig** |
 | Posar arrastrando manos y pies (cinemática inversa) | tecla `I`; `W` mueve el control, `E` gira la punta |
-| Clavar o soltar el control elegido (pies en el suelo al agacharse) | tecla `X` o panel **Poses › Cinemática inversa** |
+| Deformar un hueso: engordar una rodilla, aplastar una cabeza | tecla `R` con un control elegido; panel **Poses › Deformar los huesos** |
+| Clavar o soltar el control elegido (pies en el suelo al agacharse) | tecla `X` o panel **Poses › Cinemática inversa (IK)** |
 | Enseñar solo los controles que hay junto al puntero | tecla `N` o panel **Poses › Pose manual** |
-| Squash y stretch (la cadena se estira para llegar y se aplasta al plegarse) | panel **Poses › Cinemática inversa** |
-| Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Escena › Manipulador** o `Alt+X` |
+| Squash y stretch (la cadena se estira para llegar y se aplasta al plegarse) | panel **Poses › Cinemática inversa (IK)** |
+| Ejes del gizmo (mundo / propios) para objetos **y para huesos** | panel **Poses › Cinemática directa (FK)**, **Escena › Manipulador** o `Alt+X` |
 | Caja envolvente al pasar el ratón, del elemento elegido o de todos | panel **Escena › Caja envolvente** o el botón **Caja** |
 | Línea de acción, ritmos brazo a brazo y hombro a pierna (cruzado, por su lado o por el costado), fantasma exagerado | panel **Guías › Línea de acción** |
 | Dibujar sobre el visor con presión de pluma | tecla `D`; `Alt` para orbitar sin salir |
-| Gestos de mano, curvatura por dedo, apertura y pulgar | panel **Figura › Manos** |
+| Gestos de mano, curvatura por dedo, apertura y pulgar | panel **Poses › Manos y dedos** |
+| Altura en metros, posición y giro de la figura activa | panel **Poses › Colocación** |
 | Mover las falanges con tus propios dedos | panel **Captura › Dedos por cámara** |
 | Delegado GPU/CPU, ritmo de análisis y recorte cuadrado | panel **Captura › Detector** |
 | Guardar, aplicar, exportar e importar poses | panel **Poses** |
@@ -103,10 +106,10 @@ src/
   config.js            valores por defecto y constantes (una sola fuente de verdad)
   core/                Settings, Viewport, CameraRig, Lighting, Stage, PostFX, shaders
   core/errors.js       traduce Event/ErrorEvent a texto legible
-  model/               Character (carga GLB/FBX, mallas compartidas, materiales), HandRig, boneMap, variants
+  model/               Character (carga GLB/FBX, mallas compartidas, materiales, escala de huesos), HandRig, boneMap, variants
   pose/                DirectRetargeter, KalidokitRetargeter, PoseEngine, OneEuroFilter, PoseLibrary, ik (solucionadores)
   mocap/               PoseDetector y HandTracker (MediaPipe), SquarePad, MocapSource, Overlay2D
-  posing/              ManualPosing (gizmo de huesos con historial), IKRig (cadenas de cinemática inversa), proximity (cercanía al puntero en pantalla)
+  posing/              ManualPosing (gizmo de huesos con historial y deformación), IKRig (cadenas de cinemática inversa, squash y stretch), proximity (cercanía al puntero en pantalla)
   draw/                Sketch (lápiz sobre el visor) y stroke.js (geometría del trazo)
   scene/               SceneEditor, Bounds (cajas envolventes), primitivas, luces insertables
   guides/              Guides, Perspective y ActionLine (acción, ritmos y fantasma)
@@ -161,8 +164,39 @@ functions/api/         las dos rutas en Cloudflare Pages: img-search e img-proxy
   uniforme no cizalla la piel de un miembro doblado como haría una escala por ejes.
   Todo se rehace desde el reposo en cada cambio, porque el cuello es a la vez la
   punta del torso y la raíz de la cabeza y los dos factores tienen que multiplicarse
-  en ese hueso. Una pose guardada lleva solo giros, así que el estirado viaja aparte
-  (`IKRig.stretchState`) y aplicar una pose de la biblioteca devuelve los largos.
+  en ese hueso. Una pose guardada lleva giros y escalas de hueso, pero no el estirado
+  de las cadenas: ese viaja aparte (`IKRig.stretchState`), porque devolver los largos
+  sin devolver su factor los iría alargando en cada solución. Cambiar de modo sí lo
+  respeta, que es lo del punto siguiente.
+- **Directa y inversa son dos modos del mismo rig, no dos programas.** El panel
+  **Poses** manda sobre todo: el modo (`Directa (FK)` / `Inversa (IK)`, tecla `I`),
+  qué hace el gizmo (`W` mover, `E` girar, `R` deformar), y luego un grupo por
+  cinemática con lo suyo —ejes del giro e imantado en la directa; rombos, fijaciones,
+  holgura y squash en la inversa—. Girar hueso a hueso no se apaga nunca: en modo
+  inverso sigue mandando en cualquier hueso que no sea la punta de una cadena
+  encendida, igual que en un rig de producción. Y al salir del modo inverso se
+  sincronizan los objetivos **sin** deshacer el estirado
+  (`IKRig.syncAll({ stretch: false })`), así que un aplastado puesto en inverso no se
+  desinfla al volver a directo: la silueta es la misma a los dos lados del
+  interruptor. Apagar el squash a mano sí devuelve los largos, que para eso está.
+- **Deformar los huesos: el aplastado a mano del rig de dibujo animado.** Con `R` el
+  gizmo escala el hueso del control elegido, en los dos modos y también en un hueso
+  de en medio como la rodilla o el codo, que es lo que no daba la cinemática inversa
+  por sí sola. La escala de cada hueso sale de multiplicar tres capas —reposo × lo
+  que pide el usuario × el estirado de la cadena— y las escribe un solo camino
+  (`IKRig.applyStretch` llama primero a `Character.applyDeform` y multiplica su factor
+  encima), así que ninguna capa pisa a las otras. Lo que cuelga del hueso conserva su
+  tamaño, como el *segment scale compensate* de Maya: a cada hijo se le divide por lo
+  que hereda, y no componente a componente sino contando su giro (la norma de cada
+  columna de `diag(f)·R`), porque en un esqueleto de Mixamo el pie está girado
+  respecto a la espinilla y dividir por ejes le dejaba puesto el estirón en el eje
+  equivocado. Así engordar la rodilla no engorda el pie. La deformación va de 0,2 a
+  3, viaja con la pose (`pose.scales`), y por eso se guarda en la biblioteca, se
+  exporta, se copia al duplicar una figura y vuelve con `Ctrl+Z` sin código aparte.
+  Dos límites que conviene saber: una escala **por ejes** sobre un hueso girado
+  cizalla la piel (la uniforme nunca), y con dos huesos seguidos deformados al nieto
+  le queda un resto pequeño, porque una escala girada ya no es diagonal y ninguna
+  escala local la deshace del todo.
 - **Solo los controles que hacen falta.** Una figura entera pasa de cuarenta
   manejadores y de espaldas se tapan unos a otros. Con `N` solo se ven los del
   entorno del puntero: cada manejador se proyecta a pantalla y se mide su distancia

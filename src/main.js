@@ -490,6 +490,9 @@ async function main() {
 
   actions.resetPose = () => {
     posing.mark?.();
+    // El reposo es el del archivo: tambien se van las escalas de hueso, que son
+    // parte de la pose y no del personaje.
+    figures.active?.clearDeform();
     engine.release();
     hands.apply();          // el reposo borra los dedos: se recuperan los valores
     posing.syncRig?.();     // los objetivos vuelven al reposo con la figura
@@ -509,6 +512,32 @@ async function main() {
     rigWrite(() => hands.mirror(side));
     viewport.invalidateShadows();
     toast(side === 'left' ? 'Mano izquierda copiada en la derecha' : 'Mano derecha copiada en la izquierda');
+  };
+  /**
+   * Devolver el tamano de un hueso, o de todos. Es el gesto contrario a deformar
+   * con `R`: se hace desde aqui porque tiene que anotar el paso y volver a poner
+   * el estirado de las cadenas encima.
+   */
+  actions.resetBoneDeform = () => {
+    const key = posing.selectedBoneKey;
+    if (!key) {
+      toast('Elige antes un control para devolverle su tamano', 'warn');
+      return false;
+    }
+    if (!posing.clearDeform(key)) {
+      toast('Ese hueso no esta deformado');
+      return false;
+    }
+    toast('Tamano original: ' + (BONE_LABELS[key] ?? key).toLowerCase());
+    return true;
+  };
+  actions.clearDeform = () => {
+    if (!posing.clearDeform(null)) {
+      toast('No hay huesos deformados');
+      return false;
+    }
+    toast('Deformaciones quitadas');
+    return true;
   };
   actions.presetPose = (tipo) => {
     settings.set('mocap.frozen', true);

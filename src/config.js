@@ -413,6 +413,8 @@ export const DEFAULTS = {
     selectedBone: '',
     /** Clave canonica del hueso seleccionado (`selectedBone` es la etiqueta). */
     selectedBoneKey: '',
+    /** Lectura de la deformacion del hueso elegido; la escribe el posado. */
+    boneDeform: '',
   },
 };
 

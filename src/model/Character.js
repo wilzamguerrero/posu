@@ -78,6 +78,36 @@ const _vTmp = new THREE.Vector3();
 const _i4 = new THREE.Vector4();
 const _w4 = new THREE.Vector4();
 
+// --- Deformacion de huesos (rig tipo dibujo animado) ---
+const DEFORM_MIN = 0.2;
+const DEFORM_MAX = 3;
+/** Un factor de escala sano: numero finito y dentro de los topes. */
+const factorDeform = (v) => Math.min(DEFORM_MAX, Math.max(DEFORM_MIN, Number.isFinite(v) ? v : 1));
+/** ¿Es un factor que no deforma nada? Entonces no se guarda. */
+const sinDeformar = (x, y, z) =>
+  Math.abs(x - 1) < 1e-4 && Math.abs(y - 1) < 1e-4 && Math.abs(z - 1) < 1e-4;
+const _mDef = new THREE.Matrix4();
+const _vDef = new THREE.Vector3();
+/**
+ * Cuanto hay que dividir la escala de un hijo para que no herede el tamano de su
+ * padre deformado. El factor del padre esta en los ejes del padre y la escala del
+ * hijo en los suyos, asi que dividir componente a componente solo vale si el hijo
+ * no esta girado respecto a su padre, y en un esqueleto de Mixamo casi siempre lo
+ * esta. Lo que se mide aqui es cuanto crece cada eje del hijo dentro del padre: la
+ * norma de la columna correspondiente de `diag(f) · R`. Con el hijo sin girar sale
+ * el propio `f`, y girado sale el tamano exacto. El sesgo que deja una escala no
+ * uniforme bajo un giro no lo arregla ninguna escala, y por eso deformar de forma
+ * uniforme es lo unico que nunca cizalla la piel.
+ */
+function compensacion(f, quat, out = _vDef) {
+  const e = _mDef.makeRotationFromQuaternion(quat).elements;
+  return out.set(
+    Math.hypot(f.x * e[0], f.y * e[1], f.z * e[2]),
+    Math.hypot(f.x * e[4], f.y * e[5], f.z * e[6]),
+    Math.hypot(f.x * e[8], f.y * e[9], f.z * e[10]),
+  );
+}
+
 
 export class Character {
   constructor(settings) {
@@ -108,7 +138,23 @@ export class Character {
     this.bones = {};
     this.missing = [];          // todas las claves sin hueso
     this.missingRequired = []; // solo las que la aplicacion necesita
-    this.rest = { local: new Map(), world: new Map(), position: new Map() };
+    // local/world: rotacion de reposo (local y de mundo); position: donde cae
+    // cada hueso en el mundo; scale/offset: tamano y traslacion locales tal
+    // como llegan del archivo, que son la base de la deformacion.
+    this.rest = {
+      local: new Map(),
+      world: new Map(),
+      position: new Map(),
+      scale: new Map(),
+      offset: new Map(),
+    };
+    /**
+     * Deformacion del usuario: clave de hueso -> factor de escala local. Es una
+     * capa aparte del reposo y del estirado del IK; las tres se escriben juntas
+     * en `applyDeform()` (y en `IKRig.applyStretch()`) para que ninguna pise a
+     * las otras. Viaja con la pose, asi que se guarda y se deshace con ella.
+     */
+    this.deform = new Map();
     this.basis = new THREE.Quaternion();
     this.helper = null;
     this.ghost = null;
@@ -275,6 +321,12 @@ export class Character {
       m.decompose(pos, quat, scl);
       this.rest.position.set(bone, pos.clone());
       this.rest.world.set(bone, quat.clone());
+      // El tamano y la traslacion locales se leen del hueso, no de la matriz de
+      // enlace: al capturar el reposo nadie ha tocado la pose todavia, asi que
+      // son los del archivo, y descomponer una matriz con escala no uniforme
+      // no siempre devuelve el mismo valor.
+      this.rest.scale.set(bone, bone.scale.clone());
+      this.rest.offset.set(bone, bone.position.clone());
 
       const pm = bindWorld.get(bone.parent);
       if (pm) pm.decompose(new THREE.Vector3(), parentQuat, new THREE.Vector3());
@@ -622,17 +674,28 @@ export class Character {
     }
     const bones = this.skeleton.bones;
     const pose = bones.map((b) => b.quaternion.clone());
-    const hips = this.bones.hips?.position.clone() ?? null;
+    const sitio = bones.map((b) => b.position.clone());
+    const tam = bones.map((b) => b.scale.clone());
 
     this.resetToRest();
+    // Sin la deformacion del usuario ni el estirado del IK: la altura del panel
+    // significa siempre «de pie mide tantos metros», no «tantos con esta
+    // escala», que si no cambiar de variante reescalaria la figura.
+    for (const b of bones) {
+      const r = this.rest.scale.get(b);
+      if (r) b.scale.copy(r);
+    }
     this.root.updateMatrixWorld(true);
     // Siempre con la anatomia: si se midiera la variante visible, cambiar de
     // malla reescalaria la figura al normalizar su altura.
     this.#unionBones(this.restBox, 'anatomia');
     this.restHeight = Math.max(0.01, this.restBox.max.y - this.restBox.min.y);
 
-    bones.forEach((b, i) => b.quaternion.copy(pose[i]));
-    if (hips && this.bones.hips) this.bones.hips.position.copy(hips);
+    bones.forEach((b, i) => {
+      b.quaternion.copy(pose[i]);
+      b.position.copy(sitio[i]);
+      b.scale.copy(tam[i]);
+    });
     this.root.updateMatrixWorld(true);
   }
 
@@ -815,6 +878,105 @@ export class Character {
     }));
   }
 
+  // ------------------------------------------------------------ deformacion ---
+
+  /** Factor de deformacion de un hueso: (1,1,1) si no esta deformado. */
+  boneDeform(key, out = new THREE.Vector3()) {
+    const f = this.deform.get(key);
+    return f ? out.copy(f) : out.set(1, 1, 1);
+  }
+
+  /** ¿Hay algun hueso con la escala cambiada? */
+  get deformed() {
+    return this.deform.size > 0;
+  }
+
+  /**
+   * Cambia la escala local de un hueso. Los factores neutros se borran del mapa
+   * para que la pose guardada no se llene de unos. Devuelve `true` si algo
+   * cambio, para que quien llame sepa si tiene que registrar el paso.
+   */
+  setBoneScale(key, scale) {
+    if (!this.bones[key]) return false;
+    const x = factorDeform(scale?.x ?? 1);
+    const y = factorDeform(scale?.y ?? 1);
+    const z = factorDeform(scale?.z ?? 1);
+    if (sinDeformar(x, y, z)) {
+      if (!this.deform.delete(key)) return false;
+    } else {
+      const f = this.deform.get(key);
+      if (f && Math.abs(f.x - x) < 1e-9 && Math.abs(f.y - y) < 1e-9 && Math.abs(f.z - z) < 1e-9) {
+        return false;
+      }
+      this.deform.set(key, new THREE.Vector3(x, y, z));
+    }
+    this.applyDeform();
+    return true;
+  }
+
+  /**
+   * Reescribe `bone.scale` de todo el esqueleto: reposo por la deformacion del
+   * usuario. Los hijos de un hueso deformado se contra-escalan para que la
+   * deformacion se quede en ese hueso (el «segment scale compensate» de Maya,
+   * o el «inherit scale: none» de Blender) en vez de heredarse a la cadena
+   * entera: engordar la rodilla no engorda tambien el pie.
+   *
+   * Multiplicar y dividir componente a componente conmuta, asi que el orden del
+   * mapa no importa. Devuelve `false` si aun no hay esqueleto, para que el rig
+   * de IK sepa que tiene que apanarse con sus propias medidas de reposo.
+   *
+   * La compensacion depende del giro de cada hijo, asi que hay que volver a pasar
+   * por aqui cuando cambie la pose de un hijo de un hueso deformado: el posado
+   * manual lo hace en cada arrastre, y cargar una pose al escribir sus escalas.
+   */
+  applyDeform() {
+    if (!this.skeleton) return false;
+    for (const bone of this.skeleton.bones) {
+      const r = this.rest.scale.get(bone);
+      if (r) bone.scale.copy(r);
+      else bone.scale.set(1, 1, 1);
+    }
+    for (const [key, f] of this.deform) {
+      const bone = this.bones[key];
+      if (!bone) continue;
+      bone.scale.multiply(f);
+      for (const hijo of bone.children) {
+        if (hijo.isBone) hijo.scale.divide(compensacion(f, hijo.quaternion));
+      }
+    }
+    return true;
+  }
+
+  /** Copia serializable de la deformacion. */
+  deformState() {
+    const out = {};
+    for (const [key, f] of this.deform) out[key] = [f.x, f.y, f.z];
+    return out;
+  }
+
+  /** Restaura una deformacion guardada (lo que devuelve `deformState()`). */
+  setDeformState(state) {
+    this.deform.clear();
+    for (const [key, arr] of Object.entries(state ?? {})) {
+      if (!Array.isArray(arr) || !this.bones[key]) continue;
+      const x = factorDeform(arr[0] ?? 1);
+      const y = factorDeform(arr[1] ?? 1);
+      const z = factorDeform(arr[2] ?? 1);
+      if (sinDeformar(x, y, z)) continue;
+      this.deform.set(key, new THREE.Vector3(x, y, z));
+    }
+    this.applyDeform();
+    return this;
+  }
+
+  /** Quita la deformacion de un hueso, o de todos si no se pasa clave. */
+  clearDeform(key = null) {
+    const habia = key ? this.deform.delete(key) : this.deform.size > 0;
+    if (!key) this.deform.clear();
+    if (habia) this.applyDeform();
+    return habia;
+  }
+
   /** Devuelve la pose actual como rotaciones locales serializables. */
   getPose() {
     const rotations = {};
@@ -826,6 +988,7 @@ export class Character {
     return {
       rotations,
       hipsOffset: hips ? [hips.position.x, hips.position.y, hips.position.z] : null,
+      scales: this.deformState(),
       created: Date.now(),
     };
   }
@@ -842,11 +1005,17 @@ export class Character {
       else bone.quaternion.slerp(tmp, blend);
     }
     if (pose.hipsOffset && this.bones.hips) this.bones.hips.position.fromArray(pose.hipsOffset);
+    // Las escalas solo se tocan si la pose las trae: las poses guardadas antes
+    // de que existiera la deformacion no borran la que haya puesta ahora.
+    if (pose.scales) this.setDeformState(pose.scales);
   }
 
   /** Vuelve a la pose de enlace del archivo (T de Mixamo). */
   resetToRest() {
     for (const [bone, quat] of this.rest.local) bone.quaternion.copy(quat);
+    // Tambien las traslaciones locales: asi deshace un estirado del IK que
+    // hubiera dejado los eslabones mas largos de lo que vienen en el archivo.
+    for (const [bone, pos] of this.rest.offset) bone.position.copy(pos);
     if (this.bones.hips && this.restHipsLocal) this.bones.hips.position.copy(this.restHipsLocal);
   }
 
@@ -866,7 +1035,14 @@ export class Character {
     this.holder.clear();
     this.meshes = { anatomia: [], maniqui: [], esqueleto: [] };
     this.baseMaterials = new Map();
-    this.rest = { local: new Map(), world: new Map(), position: new Map() };
+    this.rest = {
+      local: new Map(),
+      world: new Map(),
+      position: new Map(),
+      scale: new Map(),
+      offset: new Map(),
+    };
+    this.deform.clear();
     this.boneBounds = { anatomia: [], maniqui: [], esqueleto: [] };
     this.restHeight = 1;
     this.restBox.makeEmpty();

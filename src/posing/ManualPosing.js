@@ -194,6 +194,8 @@ export class ManualPosing {
     // El mismo paso que el gizmo de la escena: arrastrar un objetivo imantado se
     // mueve de 10 en 10 cm, comodo para plantar los pies en una linea.
     this.gizmo.translationSnap = n > 0 ? n : null;
+    // Deformar imantado va de decima en decima: 1.2 o 1.5 de grosor, no 1.4873.
+    this.gizmo.scaleSnap = n > 0 ? 0.1 : null;
   }
 
   /** Reconstruye los manejadores a partir de los huesos posables del modelo. */
@@ -316,7 +318,11 @@ export class ManualPosing {
    * de la pose que haya, que es lo unico que no mueve nada al activar el modo.
    */
   #onIKSetting(path = '') {
-    if (path === 'ik.enabled') this.rig.syncAll();
+    // Cambiar de directa a inversa no es cambiar de pose: el estirado que hubiera
+    // puesto el squash se queda, para que la silueta sea la misma a los dos lados
+    // del interruptor. En cinematica directa ese largo se maneja a mano, con la
+    // escala de los huesos, que es la otra cara del mismo aplastado.
+    if (path === 'ik.enabled') this.rig.syncAll({ stretch: false });
     else if (path.startsWith('ik.pins.')) this.rig.readPins();
     // La reserva de estirado cambia el resultado sin mover nada: hay que pedir
     // expresamente que las cadenas fijadas se rehagan.
@@ -390,6 +396,7 @@ export class ManualPosing {
     if (!entry) {
       this.gizmo.detach();
       this.helper.visible = false;
+      this.#reportDeform(null);
       this.onSelect?.(null);
       return;
     }
@@ -398,26 +405,40 @@ export class ManualPosing {
     this.#placeProxy(entry);
     this.gizmo.attach(this.proxy);
     this.helper.visible = true;
+    this.#reportDeform(entry);
     this.onSelect?.({ key: entry.key, label: entry.label, boneKey: entry.boneKey });
   }
 
   /**
-   * Que hace el giroscopio con este manejador. Las articulaciones solo giran y el
-   * polo solo se mueve; los objetivos y la cadera hacen lo que diga `scene.tool`,
-   * de modo que `W` coloca la mano y `E` gira la muñeca sin salir del modo.
+   * Que hace el giroscopio con este manejador. El polo solo se mueve y las
+   * articulaciones solo giran; los objetivos y la cadera hacen lo que diga
+   * `scene.tool`, de modo que `W` coloca la mano y `E` gira la muñeca sin salir
+   * del modo. `R` deforma, y esa vale en todos menos en el polo: es la escala del
+   * hueso, lo que convierte el maniqui en un rig de dibujo animado.
    */
   #applyMode(entry) {
+    const tool = this.settings.get('scene.tool');
     const libre = entry.kind === 'effector' || entry.kind === 'body';
-    const modo = entry.kind === 'joint' ? 'rotate'
-      : entry.kind === 'pole' ? 'translate'
-        : (libre && this.settings.get('scene.tool') === 'rotate') ? 'rotate' : 'translate';
+    const modo = entry.kind === 'pole' ? 'translate'
+      : (tool === 'scale' && this.#deformable(entry)) ? 'scale'
+        : entry.kind === 'joint' ? 'rotate'
+          : (libre && tool === 'rotate') ? 'rotate' : 'translate';
     if (this.gizmo.mode !== modo) this.gizmo.setMode(modo);
+  }
+
+  /** ¿Se puede deformar el hueso de este manejador? El polo no es un hueso. */
+  #deformable(entry) {
+    if (!entry || entry.kind === 'pole' || !entry.boneKey) return false;
+    return !!this.character?.bones?.[entry.boneKey];
   }
 
   /** Coloca el objeto que arrastra el giroscopio donde toca segun el manejador. */
   #placeProxy(entry) {
     const p = this.proxy;
-    p.scale.set(1, 1, 1);
+    // La escala arranca en la deformacion que ya lleva el hueso: asi el gizmo de
+    // escalar sigue desde donde se dejo en vez de saltar a 1.
+    if (this.#deformable(entry)) this.character.boneDeform(entry.boneKey, p.scale);
+    else p.scale.set(1, 1, 1);
     if (entry.kind === 'pole') {
       const polo = this.rig.poleWorld(entry.chain, _v);
       if (polo) p.position.copy(polo);
@@ -458,7 +479,12 @@ export class ManualPosing {
     const entry = this.selected;
     if (!entry) return;
     const girando = this.gizmo.mode === 'rotate';
-    if (entry.kind === 'pole') {
+    if (this.gizmo.mode === 'scale') {
+      // Deformar es lo mismo en directa que en inversa: se escribe la escala del
+      // hueso, no un objetivo, asi que vale para la rodilla de un rig de dibujo
+      // animado con la cadena resolviendose encima.
+      this.#deformBone(entry);
+    } else if (entry.kind === 'pole') {
       // El polo gira el plano del pliegue con la punta clavada: el tercer paso del
       // solucionador gira sobre el eje hombro-objetivo, que no puede mover la mano.
       this.rig.solve(entry.chain, this.proxy.position);
@@ -469,6 +495,10 @@ export class ManualPosing {
     } else {
       this.#rotateBone(entry.bone);
     }
+    // Con algun hueso deformado hay que rehacer las tres capas de escala en cada
+    // arrastre: la compensacion de los hijos depende de como esten girados, asi que
+    // girar un pie bajo una espinilla engordada cambia lo que hay que descontarle.
+    if (this.character?.deformed) this.rig.applyStretch();
     // Las cadenas sujetas (fijadas o retenidas por este arrastre) se rehacen en
     // orden de dependencia, asi que la que se arrastra se resuelve tambien aqui.
     this.rig.solveHeld();
@@ -494,6 +524,31 @@ export class ManualPosing {
   }
 
   /** Lleva un hueso a un punto de mundo (solo la cadera: es la raiz de la pose). */
+  /**
+   * Deforma el hueso del manejador con la escala del giroscopio. La escala vive en
+   * el personaje, asi que viaja con la pose y se deshace con ella; el estirado del
+   * IK se vuelve a poner encima, que es lo que compone las tres capas.
+   */
+  #deformBone(entry) {
+    if (!this.#deformable(entry)) return;
+    this.character.setBoneScale(entry.boneKey, this.proxy.scale);
+    // Y de vuelta al giroscopio con los topes ya puestos, para que arrastrar mas
+    // alla del limite no lo deje apuntando a un tamano que el hueso no tiene.
+    this.character.boneDeform(entry.boneKey, this.proxy.scale);
+    this.rig.applyStretch();
+    this.#reportDeform(entry);
+  }
+
+  /** Deja a la vista del panel cuanto se ha deformado el hueso elegido. */
+  #reportDeform(entry = this.selected) {
+    const f = this.#deformable(entry) ? this.character.boneDeform(entry.boneKey, _s) : null;
+    const txt = !f ? ''
+      : (Math.abs(f.x - 1) < 1e-4 && Math.abs(f.y - 1) < 1e-4 && Math.abs(f.z - 1) < 1e-4)
+        ? 'sin deformar'
+        : f.x.toFixed(2) + ' x ' + f.y.toFixed(2) + ' x ' + f.z.toFixed(2);
+    if (this.settings.get('ui.boneDeform') !== txt) this.settings.set('ui.boneDeform', txt);
+  }
+
   #moveBone(bone) {
     const parent = bone.parent;
     if (parent) {
@@ -700,6 +755,33 @@ export class ManualPosing {
     return this.selected?.chain ?? null;
   }
 
+  // ------------------------------------------------------------ deformacion ---
+
+  /** El hueso que deformaria el manejador seleccionado ('' si no hay ninguno). */
+  get selectedBoneKey() {
+    return this.#deformable(this.selected) ? this.selected.boneKey : '';
+  }
+
+  /**
+   * Quita la deformacion de un hueso, o de todos si no se pasa clave. Vuelve a
+   * poner el estirado del IK encima y anota el paso, para que se pueda deshacer
+   * igual que un arrastre. Devuelve `false` si no habia nada que quitar.
+   */
+  clearDeform(key = null) {
+    if (!this.character?.loaded) return false;
+    this.#pushHistory();
+    if (!this.character.clearDeform(key)) {
+      this.history.pop();
+      return false;
+    }
+    this.rig.applyStretch();
+    this.rig.syncLoose();
+    this.character.tick?.();
+    this.viewport.invalidateShadows?.();
+    this.#reportDeform();
+    return true;
+  }
+
   /** Cuantas cadenas hay fijadas ahora mismo. */
   get pinnedCount() {
     return this.rig.chains.reduce((n, c) => n + (c.pinned ? 1 : 0), 0);
@@ -738,8 +820,9 @@ export class ManualPosing {
 
   #pushHistory() {
     if (!this.character?.loaded) return;
-    // Una pose guarda solo giros, asi que el estirado de las cadenas viaja al lado:
-    // sin el, deshacer devolveria los giros y dejaria el brazo largo.
+    // La pose guarda giros y escalas de hueso, pero el estirado de las cadenas es
+    // del rig y viaja al lado: sin el, deshacer devolveria los giros y dejaria el
+    // brazo largo.
     this.history.push({ pose: this.character.getPose(), stretch: this.rig.stretchState() });
     if (this.history.length > 40) this.history.shift();
   }
@@ -763,6 +846,10 @@ export class ManualPosing {
     // el estirado, asi que el que hubiera se vuelve a poner justo despues.
     this.rig.syncAll();
     if (paso.stretch) this.rig.setStretchState(paso.stretch);
+    // Y los objetivos sueltos vuelven a la punta ya estirada, para que el
+    // manejador de la mano no se quede donde llegaba el brazo sin estirar.
+    this.rig.syncLoose();
+    this.#reportDeform();
     this.viewport.invalidateShadows?.();
     return true;
   }

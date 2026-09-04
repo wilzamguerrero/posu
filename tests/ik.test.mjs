@@ -662,6 +662,174 @@ let destino = null;
   settings.set('ik.stretchMax', DEFAULTS.ik.stretchMax);
 }
 
+// --- deformar los huesos: el rig de dibujo animado ------------------------
+{
+  /** Escala de mundo, que es donde se ve si un hueso engorda de mas. */
+  const escalaMundo = (o) => {
+    o.updateWorldMatrix(true, false);
+    return new THREE.Vector3().setFromMatrixScale(o.matrixWorld);
+  };
+  /** Largo de mundo de cada eslabon, de la raiz a la punta. */
+  const eslabones = (chain) => {
+    const p = [...chain.bones, chain.tip];
+    const out = [];
+    for (let i = 1; i < p.length; i++) {
+      out.push(worldOf(p[i - 1], new THREE.Vector3()).distanceTo(worldOf(p[i], new THREE.Vector3())));
+    }
+    return out;
+  };
+  const iguales = (a, b, tol) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < tol);
+  const razon = (a, b) => a.map((v, i) => (v / b[i]).toFixed(5)).join(' ');
+  const claveDe = (b) => Object.keys(character.bones).find((k) => character.bones[k] === b) || '';
+
+  const pierna = rig.get('leftLeg');
+  const espinilla = pierna.mid;   // la rodilla, el hueso de en medio de la cadena
+  const pie = pierna.tip;
+  const muslo = pierna.root;
+  const cEspinilla = claveDe(espinilla);
+  const cMuslo = claveDe(muslo);
+  const natural = eslabones(pierna);
+  const largoReposo = pierna.rest.links.map((l) => l.len);
+  const ePie = escalaMundo(pie).clone();
+  const eEspinilla = escalaMundo(espinilla).clone();
+  const rEspinilla = character.rest.scale.get(espinilla).clone();
+  const rMuslo = character.rest.scale.get(muslo).clone();
+
+  check('el modelo nace sin deformar',
+    character.deformed === false && cEspinilla !== '' && cMuslo !== '',
+    cMuslo + ' / ' + cEspinilla);
+
+  // Uniforme: la rodilla crece entera, el eslabon que cuelga de ella la sigue y el
+  // pie no se contagia. Es el "segment scale compensate" de los rigs de cine.
+  character.setBoneScale(cEspinilla, V(1.5, 1.5, 1.5));
+  check('escalar un hueso alarga su eslabon y deja quieto el de arriba',
+    iguales(eslabones(pierna), [natural[0], natural[1] * 1.5], 1e-6),
+    razon(eslabones(pierna), natural));
+  check('y el pie no crece con la rodilla',
+    escalaMundo(pie).distanceTo(ePie) < 1e-6,
+    razon(escalaMundo(pie).toArray(), ePie.toArray()));
+
+  // No uniforme: el factor se guarda tal cual y al hijo se le descuenta contando el
+  // giro que lleva, no componente a componente, que es lo que engordaba el pie.
+  const f = V(1, 1.4, 1);
+  character.setBoneScale(cEspinilla, f);
+  check('el factor del hueso es el que se pidio',
+    character.boneDeform(cEspinilla).distanceTo(f) < 1e-12);
+  check('la escala local del hueso es reposo por deformacion',
+    espinilla.scale.distanceTo(rEspinilla.clone().multiply(f)) < 1e-12,
+    espinilla.scale.toArray().join(' '));
+  const eDeform = escalaMundo(espinilla);
+  check('en el mundo el hueso crece solo en el eje que se pidio',
+    Math.abs(eDeform.x / eEspinilla.x - 1) < 1e-9
+    && Math.abs(eDeform.y / eEspinilla.y - 1.4) < 1e-9
+    && Math.abs(eDeform.z / eEspinilla.z - 1) < 1e-9,
+    razon(eDeform.toArray(), eEspinilla.toArray()));
+  check('y el pie no engorda aunque cuelgue girado de ella',
+    escalaMundo(pie).distanceTo(ePie) < 1e-6,
+    razon(escalaMundo(pie).toArray(), ePie.toArray()));
+
+  // Deformacion y squash a la vez sobre la misma cadena: cada capa en su sitio.
+  rig.setStretch(pierna, 1 + rig.stretchMax);
+  const k = pierna.stretch;
+  const u = 1 / Math.sqrt(k);
+  check('el squash no borra la deformacion del hueso de en medio',
+    k > 1 && espinilla.scale.distanceTo(rEspinilla.clone().multiply(f)) < 1e-12,
+    'k=' + k.toFixed(4));
+  check('la rodilla lleva su deformacion y el adelgazado de la cadena',
+    Math.abs(escalaMundo(espinilla).y / eEspinilla.y - 1.4 * u) < 1e-9
+    && Math.abs(escalaMundo(espinilla).x / eEspinilla.x - u) < 1e-9,
+    razon(escalaMundo(espinilla).toArray(), eEspinilla.toArray()) + ' u=' + u.toFixed(5));
+  check('y con el squash puesto el pie sigue midiendo lo suyo',
+    escalaMundo(pie).distanceTo(ePie) < 1e-6,
+    razon(escalaMundo(pie).toArray(), ePie.toArray()));
+
+  // Tres capas en el mismo hueso: reposo, deformacion del usuario y estirado del
+  // IK. La raiz de la cadena es la que lleva el factor que compensa el volumen.
+  const fMuslo = V(1.3, 1, 1.3);
+  character.setBoneScale(cMuslo, fMuslo);
+  rig.applyStretch();
+  check('reposo por deformacion por estirado, las tres capas en la raiz',
+    muslo.scale.distanceTo(rMuslo.clone().multiply(fMuslo).multiplyScalar(u)) < 1e-12,
+    muslo.scale.toArray().map((v) => v.toFixed(5)).join(' '));
+
+  // Rehacer el rig con huesos deformados no puede tomar la deformacion por largo
+  // natural: las medidas de reposo salen del mapa del personaje, no del hueso vivo.
+  rig.rebuild();
+  const pierna2 = rig.get('leftLeg');
+  check('rehacer el rig deformado no toma la deformacion por reposo',
+    iguales(pierna2.rest.links.map((l) => l.len), largoReposo, 1e-12)
+    && pierna2.stretch === 1 && character.deformed === true,
+    pierna2.rest.links.map((l) => l.len.toFixed(6)).join(' '));
+
+  // Continuidad al cambiar de modo: al pasar de IK a FK se mueven los objetivos,
+  // pero el squash sigue puesto y los huesos no vuelven a su tamano de golpe.
+  const sinEstirar = eslabones(pierna2);
+  rig.setStretch(pierna2, 1 + rig.stretchMax);
+  const k2 = pierna2.stretch;
+  const estirados = eslabones(pierna2);
+  rig.syncAll({ stretch: false });
+  check('salir de IK con el squash puesto no devuelve los huesos a su tamano',
+    pierna2.stretch === k2 && iguales(eslabones(pierna2), estirados, 1e-6),
+    'k=' + pierna2.stretch.toFixed(4) + ' ' + razon(eslabones(pierna2), estirados));
+  check('y los objetivos quedan sobre las puntas, listos para volver a IK',
+    rig.targetWorld(pierna2, new THREE.Vector3()).distanceTo(punta(pierna2)) < 1e-9);
+  rig.syncAll();
+  check('apagar el squash a mano si devuelve el largo, con la deformacion intacta',
+    pierna2.stretch === 1 && iguales(eslabones(pierna2), sinEstirar, 1e-9)
+    && character.deform.size === 2,
+    razon(eslabones(pierna2), sinEstirar));
+
+  // Con dos huesos seguidos deformados (el muslo y la rodilla) al pie ya no se le
+  // puede descontar todo: la escala girada del abuelo no es diagonal y ninguna
+  // escala local la deshace. Queda un resto pequeno, no el 1.3 de no compensar.
+  check('con padre e hijo deformados al pie solo le queda un resto',
+    escalaMundo(pie).toArray().every((v, i) => Math.abs(v / ePie.getComponent(i) - 1) < 0.1),
+    razon(escalaMundo(pie).toArray(), ePie.toArray()));
+
+  // La deformacion viaja con la pose, que es lo que hace que se guarde, se copie
+  // entre figuras y vuelva con deshacer sin escribir nada aparte.
+  const pose = character.getPose();
+  const ePieDeform = escalaMundo(pie).clone();
+  check('la pose se lleva las escalas de los huesos deformados',
+    !!pose.scales && Object.keys(pose.scales).length === 2
+    && pose.scales[cEspinilla]?.length === 3,
+    Object.keys(pose.scales || {}).join(' '));
+  character.clearDeform();
+  check('quitar todas devuelve el tamano de reposo, hueso y pie',
+    character.deformed === false
+    && escalaMundo(espinilla).distanceTo(eEspinilla) < 1e-9
+    && escalaMundo(pie).distanceTo(ePie) < 1e-9
+    && iguales(eslabones(pierna2), natural, 1e-9),
+    razon(eslabones(pierna2), natural));
+  character.setPose(pose);
+  check('cargar la pose las devuelve tal cual, huesos y piel',
+    character.boneDeform(cEspinilla).distanceTo(f) < 1e-9
+    && character.boneDeform(cMuslo).distanceTo(fMuslo) < 1e-9
+    && escalaMundo(pie).distanceTo(ePieDeform) < 1e-9,
+    razon(escalaMundo(pie).toArray(), ePieDeform.toArray()));
+  const vieja = character.getPose();
+  delete vieja.scales;
+  character.setPose(vieja);
+  check('y una pose vieja sin escalas no borra lo deformado',
+    character.deformed === true && character.deform.size === 2);
+
+  check('la deformacion tiene topes por arriba y por abajo',
+    character.setBoneScale(cEspinilla, V(9, 0.01, 1)) === true
+    && character.boneDeform(cEspinilla).distanceTo(V(3, 0.2, 1)) < 1e-12,
+    character.boneDeform(cEspinilla).toArray().join(' '));
+  check('pedir el mismo factor otra vez no cambia nada',
+    character.setBoneScale(cMuslo, fMuslo) === false);
+  check('volver a uno borra el apunte de ese hueso',
+    character.setBoneScale(cEspinilla, V(1, 1, 1)) === true
+    && character.deform.size === 1
+    && escalaMundo(espinilla).distanceTo(eEspinilla) < 1e-9);
+  character.clearDeform(cMuslo);
+  check('quitar el ultimo deja el modelo limpio',
+    character.deformed === false && character.deform.size === 0
+    && muslo.scale.distanceTo(rMuslo) < 1e-12);
+  rig.syncAll();
+}
+
 // --- rehacer el rig al cambiar de modelo ----------------------------------
 {
   rig.setCharacter(null);

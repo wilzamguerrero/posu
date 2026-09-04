@@ -144,15 +144,24 @@ function armarVarios(def, bones) {
  * Devuelve `null` si la cadena no es un camino padre-hijo seguido: entonces no hay
  * eslabones que alargar y esa cadena se queda sin estirado, sin mas.
  */
-function medirReposo(chain) {
+function medirReposo(chain, character = null) {
+  // Los largos y los tamanos se leen del reposo del personaje, no del hueso tal
+  // como esta ahora: si se remide con un brazo estirado o con una rodilla
+  // deformada, esa deformacion se quedaria dentro del «largo natural» y volveria
+  // a multiplicarse en la pasada siguiente.
+  const reposo = character?.rest ?? null;
+  const sitio = (b) => reposo?.offset?.get(b) ?? b.position;
+  const tam = (b) => reposo?.scale?.get(b) ?? b.scale;
+
   const path = [...chain.bones, chain.tip];
   const links = [];
   for (let i = 1; i < path.length; i++) {
     const hueso = path[i];
     if (hueso.parent !== path[i - 1]) return null;
-    const len = hueso.position.length();
+    const local = sitio(hueso);
+    const len = local.length();
     if (len < 1e-6) return null;
-    links.push({ bone: hueso, dir: hueso.position.clone().divideScalar(len), len });
+    links.push({ bone: hueso, dir: local.clone().divideScalar(len), len });
   }
   if (!links.length) return null;
   // Lo que cuelga de la cadena sin ser la cadena lleva la escala contraria: al
@@ -164,12 +173,12 @@ function medirReposo(chain) {
     const hueso = path[i];
     // La punta entera se compensa a si misma: asi se arregla de una vez su grosor
     // y el tamano de todo lo que lleve debajo.
-    if (i === path.length - 1) { comp.push({ bone: hueso, scale: hueso.scale.clone() }); continue; }
+    if (i === path.length - 1) { comp.push({ bone: hueso, scale: tam(hueso).clone() }); continue; }
     for (const hijo of hueso.children) {
-      if (!dentro.has(hijo)) comp.push({ bone: hijo, scale: hijo.scale.clone() });
+      if (!dentro.has(hijo)) comp.push({ bone: hijo, scale: tam(hijo).clone() });
     }
   }
-  return { path, links, comp, root: { bone: path[0], scale: path[0].scale.clone() } };
+  return { path, links, comp, root: { bone: path[0], scale: tam(path[0]).clone() } };
 }
 
 export class IKRig {
@@ -219,6 +228,9 @@ export class IKRig {
 
   /** Rehace las cadenas a partir de los huesos que traiga el modelo. */
   rebuild() {
+    // Se deshace el estirado de las cadenas viejas antes de tirarlas: si no, los
+    // eslabones se quedarian largos y la medida nueva los tomaria por naturales.
+    this.resetStretch();
     this.chains.length = 0;
     this.byId.clear();
     this.hold.clear();
@@ -234,7 +246,7 @@ export class IKRig {
       chain.pinned = this.settings?.get('ik.pins.' + def.id) === true;
       /** Factor de estirado aplicado ahora mismo; 1 es el largo natural. */
       chain.stretch = 1;
-      chain.rest = medirReposo(chain);
+      chain.rest = medirReposo(chain, this.character);
       this.chains.push(chain);
       this.byId.set(def.id, chain);
     }
@@ -359,14 +371,24 @@ export class IKRig {
    * escala **uniforme** en el hueso raiz: `u = 1/raiz(k)` adelgaza el miembro
    * justo lo que se ha estirado, y por ser uniforme no cizalla la piel cuando la
    * cadena esta doblada, que es lo que pasaria con una escala por ejes.
+   *
+   * La escala de cada hueso sale de tres capas: `reposo x usuario x estirado`.
+   * Las dos primeras las escribe el personaje (`applyDeform()`), y este metodo
+   * multiplica la tercera encima. Por eso todo pasa por aqui: es el unico sitio
+   * que escribe `bone.scale`, y asi ninguna capa borra a las otras.
    */
   applyStretch() {
+    // Capas 1 y 2. Si no hay personaje (o aun no hay esqueleto) se vuelve a las
+    // medidas de reposo propias de cada cadena, que es como corren las pruebas.
+    const base = this.character?.applyDeform?.() === true;
     for (const chain of this.chains) {
       const rest = chain.rest;
       if (!rest) continue;
-      rest.root.bone.scale.copy(rest.root.scale);
+      if (!base) {
+        rest.root.bone.scale.copy(rest.root.scale);
+        for (const c of rest.comp) c.bone.scale.copy(c.scale);
+      }
       for (const l of rest.links) l.bone.position.copy(l.dir).multiplyScalar(l.len);
-      for (const c of rest.comp) c.bone.scale.copy(c.scale);
     }
     for (const chain of this.chains) {
       const rest = chain.rest;
@@ -515,9 +537,14 @@ export class IKRig {
    * estirado se deshace primero: una pose de la biblioteca lleva solo giros, asi
    * que aplicarla con un brazo largo de otra pose dejaria la figura deforme sin
    * que se hubiera pedido.
+   *
+   * Con `{ stretch: false }` se respeta el estirado que haya puesto. Es lo que
+   * hace falta al cambiar entre cinematica directa e inversa: la figura no ha
+   * cambiado de pose, solo de modo de manejarla, y perder ahi el aplastado
+   * dejaria una silueta distinta a cada lado del interruptor.
    */
-  syncAll() {
-    this.resetStretch();
+  syncAll({ stretch = true } = {}) {
+    if (stretch) this.resetStretch();
     for (const chain of this.chains) this.sync(chain);
     return this;
   }

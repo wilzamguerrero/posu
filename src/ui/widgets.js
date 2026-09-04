@@ -156,7 +156,13 @@ export function segmented(o) {
   const paint = (v) => nodes.forEach((b) => b.classList.toggle('is-active', b.dataset.value === String(v)));
   nodes.forEach((b) =>
     b.addEventListener('click', () => {
-      const typed = typeof store.get(o.path) === 'number' ? Number(b.dataset.value) : b.dataset.value;
+      // El valor se escribe con el tipo que ya tenia el ajuste: un numero como
+      // numero y un interruptor como booleano, no como las cadenas "true"/"false".
+      const actual = store.get(o.path);
+      const crudo = b.dataset.value;
+      const typed = typeof actual === 'number' ? Number(crudo)
+        : typeof actual === 'boolean' ? crudo === 'true'
+          : crudo;
       store.set(o.path, typed);
       paint(typed);
       o.onPick?.(typed);

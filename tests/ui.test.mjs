@@ -489,6 +489,50 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   marca(prox, false);
 }
 
+// 8d · El panel de poses reune todo el rig: los dos modos con su nombre, la
+//      deformacion de los huesos y lo que antes vivia en el panel de Figura.
+{
+  const panel = document.querySelector('#sidebar-host [data-panel="poses"]');
+  const grupo = (titulo) => [...(panel?.querySelectorAll('.group-head') ?? [])]
+    .find((h) => h.textContent.includes(titulo))?.parentElement
+    ?.querySelector('.group-body') ?? null;
+  /** Pulsa una opcion de un `segmented`, que son botones con su valor al lado. */
+  const seg = (raiz, texto, valor) => {
+    const b = campo(raiz, texto)?.querySelector('.segmented button[data-value="' + valor + '"]');
+    b?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    return !!b;
+  };
+  const man = grupo('Pose manual');
+  const modos = [...(campo(man, 'Modo del rig')?.querySelectorAll('.segmented button') ?? [])]
+    .map((b) => b.textContent.trim());
+  revisa('el panel de poses manda sobre los dos modos y el giroscopio',
+    !!campo(man, 'Modo del rig') && !!campo(man, 'Que hace el giroscopio'));
+  revisa('los modos salen con su nombre completo',
+    modos.join(' | ') === 'Directa (FK) | Inversa (IK)', modos.join(' | '));
+  settings.set('ik.enabled', false);
+  revisa('elegir la inversa escribe un si, no el texto "true"',
+    seg(man, 'Modo del rig', 'true') && settings.get('ik.enabled') === true);
+  revisa('y volver a la directa lo apaga',
+    seg(man, 'Modo del rig', 'false') && settings.get('ik.enabled') === false);
+  revisa('el giroscopio puede pasar a deformar',
+    seg(man, 'Que hace el giroscopio', 'scale') && settings.get('scene.tool') === 'scale');
+  seg(man, 'Que hace el giroscopio', 'rotate');
+  revisa('cada cinematica tiene su grupo, con el nombre y las siglas',
+    !!grupo('Cinematica directa (FK)') && !!grupo('Cinematica inversa (IK)'));
+  revisa('la directa se queda con los ejes del giro y el imantado',
+    !!campo(grupo('Cinematica directa (FK)'), 'Ejes del giro')
+    && !!campo(grupo('Cinematica directa (FK)'), 'Imantado'));
+  const def = grupo('Deformar los huesos');
+  const botonesDef = [...(def?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim());
+  revisa('la deformacion trae su lectura y los dos botones para deshacerla',
+    !!campo(def, 'Deformacion del hueso')
+    && botonesDef.some((t) => t.includes('Devolver el tamano'))
+    && botonesDef.some((t) => t.includes('Quitar todas')),
+    botonesDef.join(' | '));
+  revisa('las manos y la colocacion se mudaron al panel de poses',
+    !!grupo('Manos y dedos') && !!grupo('Colocacion'));
+}
+
 // 9 · La firma del autor sale en Ayuda > Acerca de.
 const firma = document.querySelector('#sidebar-host .credit');
 console.log('firma:', firma ? firma.textContent.replace(/s+/g, ' ').trim() : 'NO APARECE',

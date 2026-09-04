@@ -119,33 +119,6 @@ function figurePanel(app) {
       ),
       notice('info', 'El <b>sombreado</b> de arriba (arcilla, rayos X…) manda sobre estos materiales mientras este activo.'),
     ]),
-    group({ id: 'fig-transform', title: 'Colocacion', icon: 'move' }, [
-      // La colocacion es propia de cada figura: se edita la activa y se
-      // reconstruye al cambiar de figura o al renombrarla.
-      reactive(['scene.figures', 'figure.active'],
-        () => figureControls(app, app.figures?.activeId ?? '')),
-    ]),
-    group({ id: 'fig-manos', title: 'Manos y dedos', icon: 'hand' }, [
-      segmented({
-        label: 'Mano que estas editando', path: 'hands.edit',
-        options: [
-          { value: 'left', label: 'Izquierda', icon: 'hand' },
-          { value: 'right', label: 'Derecha', icon: 'hand-grab' },
-        ],
-      }),
-      toggle({ path: 'hands.link', label: 'Mover las dos manos a la vez',
-        hint: 'Con esto activado, lo que ajustes en una mano se copia en la otra.' }),
-      reactive(['hands.edit'], () => handControls(app)),
-      buttons([
-        { label: 'Copiar a la otra', icon: 'copy', title: 'Iguala la otra mano a esta',
-          onClick: () => actions.mirrorHand?.() },
-        { label: 'Abrir del todo', icon: 'hand', title: 'Dedos rectos',
-          onClick: () => actions.handPreset?.('abierta') },
-      ], { cols: 2 }),
-      toggle({ path: 'hands.fingers', label: 'Manejadores de falange en el posado manual',
-        hint: 'Anade 30 esferas pequenas sobre las falanges para girarlas una a una con el giroscopio.' }),
-      notice('info', 'Los ejes de flexion se deducen de la geometria de la mano, no de los ejes locales del archivo: funcionan igual en cualquier personaje de Mixamo.'),
-    ]),
     group({ id: 'fig-file', title: 'Modelo', icon: 'folder-open' }, [
       modelLibraryGrid(app),
       buttons([
@@ -1005,10 +978,33 @@ function posesPanel(app) {
   settings.on('ui.selectedBone', paintBone);
   paintBone(settings.get('ui.selectedBone'));
 
+  // Y cuanto se ha deformado ese hueso, que lo escribe el propio posado.
+  const deformTag = el('span', { class: 'value', text: '—' });
+  const paintDeform = (v) => { deformTag.textContent = v ? String(v) : '—'; };
+  settings.on('ui.boneDeform', paintDeform);
+  paintDeform(settings.get('ui.boneDeform'));
+
   return [
     group({ id: 'ps-manual', title: 'Pose manual', icon: 'hand' }, [
       toggle({ path: 'ui.manualPosing', label: 'Editar huesos con el raton',
         hint: 'Pulsa un tirador sobre la figura y gira el hueso; la captura se congela al editar.' }),
+      segmented({
+        label: 'Modo del rig', path: 'ik.enabled',
+        options: [
+          { value: false, label: 'Directa (FK)', icon: 'rotate-3d' },
+          { value: true, label: 'Inversa (IK)', icon: 'target' },
+        ],
+        hint: 'Los dos modos de un rig de verdad, y se cambia con la tecla I. El hueso que no sea la punta de una cadena encendida se sigue girando a mano en los dos.',
+      }),
+      segmented({
+        label: 'Que hace el giroscopio', path: 'scene.tool',
+        options: [
+          { value: 'translate', label: 'Mover', icon: 'move' },
+          { value: 'rotate', label: 'Girar', icon: 'rotate-3d' },
+          { value: 'scale', label: 'Deformar', icon: 'scaling' },
+        ],
+        hint: 'Teclas W, E y R. Mover es para los controles de mano, pie y cadera; girar y deformar valen para cualquier hueso.',
+      }),
       toggle({ path: 'pose.proximity', label: 'Ensenar solo lo que hay junto al puntero',
         hint: 'En una figura entera hay mas de cuarenta manejadores y de espaldas se tapan entre si: asi solo aparecen los del entorno del raton (tecla N). Vale para las dos formas de posar, girar hueso a hueso y arrastrar la mano.' }),
       enableWhen(slider({ label: 'Radio del entorno', path: 'pose.proximityRadius',
@@ -1026,9 +1022,28 @@ function posesPanel(app) {
         { label: 'Pose A', icon: 'person-standing', onClick: () => actions.presetPose('a') },
       ], { cols: 2, compact: true }),
     ]),
-    group({ id: 'ps-ik', title: 'Cinematica inversa', icon: 'target' }, [
-      toggle({ path: 'ik.enabled', label: 'Posar arrastrando manos y pies',
-        hint: 'Aparecen rombos en manos, pies, pecho y cabeza (tecla I). Arrastra uno y la cadena entera le sigue: W mueve el control, E gira el hueso de la punta.' }),
+    group({ id: 'ps-fk', title: 'Cinematica directa (FK)', icon: 'rotate-3d' }, [
+      notice('info', 'Girar hueso a hueso, del hombro a la mano: cada giro arrastra lo que cuelga de el, como en un maniqui de madera. Es lo que manda en cualquier hueso que no sea la punta de una cadena de cinematica inversa, asi que sigue estando ahi tambien en modo inverso.'),
+      segmented({
+        label: 'Ejes del giro', path: 'scene.space',
+        options: [
+          { value: 'world', label: 'Mundo', icon: 'globe' },
+          { value: 'local', label: 'Hueso', icon: 'box' },
+        ],
+        hint: 'Alt+X. «Mundo» gira sobre los ejes de la escena; «Hueso» sobre los del propio hueso, que es lo comodo para doblar un codo o una rodilla.',
+      }),
+      select({
+        label: 'Imantado', path: 'scene.snap',
+        options: [
+          { value: 0, label: 'Libre' }, { value: 0.05, label: '5 cm' },
+          { value: 0.1, label: '10 cm' }, { value: 0.25, label: '25 cm' },
+          { value: 0.5, label: '50 cm' },
+        ],
+        hint: 'Con el imantado puesto los huesos giran de 15 en 15 grados, los controles se mueven a saltos de esa medida y la deformacion va de decima en decima.',
+      }).root,
+    ]),
+    group({ id: 'ps-ik', title: 'Cinematica inversa (IK)', icon: 'target' }, [
+      notice('info', 'Rombos en manos, pies, pecho y cabeza: arrastras uno y la cadena entera le sigue. W mueve el control, E gira el hueso de la punta y R lo deforma. Se enciende arriba, en <b>Modo del rig</b>.'),
       enableWhen(el('div', { class: 'stack' }, [
         field('Cadenas', buttons([
           { label: 'Brazos', icon: 'hand', path: 'ik.arms', title: 'Hombro, codo y mano' },
@@ -1058,6 +1073,44 @@ function posesPanel(app) {
         ], { cols: 2 }),
       ]), 'ik.enabled', (s) => s.get('ik.enabled') === true),
       notice('info', 'Los controles sin clavar vuelven solos a la mano o el pie, asi que la cinematica inversa no pelea con la captura ni con la biblioteca de poses.'),
+    ]),
+    group({ id: 'ps-deform', title: 'Deformar los huesos', icon: 'scaling' }, [
+      notice('info', 'Con <b>R</b> el giroscopio escala el hueso del control elegido, lo mismo en directa que en inversa: es el aplastado a mano de un rig de dibujo animado, y vale tambien para una rodilla o un codo en medio de una cadena. Lo que cuelga del hueso mantiene su tamano, asi que engordar la rodilla no engorda el pie.'),
+      field('Deformacion del hueso', deformTag),
+      buttons([
+        { label: 'Devolver el tamano', icon: 'refresh-cw', title: 'Quita la deformacion del control elegido',
+          onClick: () => actions.resetBoneDeform?.() },
+        { label: 'Quitar todas', icon: 'eraser', title: 'Devuelve su tamano a todos los huesos',
+          onClick: () => actions.clearDeform?.() },
+      ], { cols: 2 }),
+      notice('info', 'La deformacion viaja con la pose: se guarda en la biblioteca, se deshace con Ctrl+Z y no se pierde al cambiar de modo. El estirado del squash tampoco: la silueta es la misma a los dos lados del interruptor.'),
+    ]),
+    group({ id: 'ps-manos', title: 'Manos y dedos', icon: 'hand' }, [
+      segmented({
+        label: 'Mano que estas editando', path: 'hands.edit',
+        options: [
+          { value: 'left', label: 'Izquierda', icon: 'hand' },
+          { value: 'right', label: 'Derecha', icon: 'hand-grab' },
+        ],
+      }),
+      toggle({ path: 'hands.link', label: 'Mover las dos manos a la vez',
+        hint: 'Con esto activado, lo que ajustes en una mano se copia en la otra.' }),
+      reactive(['hands.edit'], () => handControls(app)),
+      buttons([
+        { label: 'Copiar a la otra', icon: 'copy', title: 'Iguala la otra mano a esta',
+          onClick: () => actions.mirrorHand?.() },
+        { label: 'Abrir del todo', icon: 'hand', title: 'Dedos rectos',
+          onClick: () => actions.handPreset?.('abierta') },
+      ], { cols: 2 }),
+      toggle({ path: 'hands.fingers', label: 'Manejadores de falange en el posado manual',
+        hint: 'Anade 30 esferas pequenas sobre las falanges para girarlas una a una con el giroscopio.' }),
+      notice('info', 'Los ejes de flexion se deducen de la geometria de la mano, no de los ejes locales del archivo: funcionan igual en cualquier personaje de Mixamo.'),
+    ]),
+    group({ id: 'ps-coloc', title: 'Colocacion', icon: 'move' }, [
+      // La colocacion es propia de cada figura: se edita la activa y se
+      // reconstruye al cambiar de figura o al renombrarla.
+      reactive(['scene.figures', 'figure.active'],
+        () => figureControls(app, app.figures?.activeId ?? '')),
     ]),
     group({ id: 'ps-lib', title: 'Biblioteca', icon: 'library' }, [
       field('Guardar la pose actual', el('div', { class: 'field-row' }, [
