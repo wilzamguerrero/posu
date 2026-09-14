@@ -127,6 +127,7 @@ import Undo2 from 'lucide/dist/esm/icons/undo-2.js';
 import Redo2 from 'lucide/dist/esm/icons/redo-2.js';
 import Waves from 'lucide/dist/esm/icons/waves.js';
 import Footprints from 'lucide/dist/esm/icons/footprints.js';
+import CircleQuestionMark from 'lucide/dist/esm/icons/circle-question-mark.js';
 
 /** Nombre kebab-case -> nodo de icono de Lucide. */
 export const ICONS = {
@@ -200,6 +201,9 @@ export const ICONS = {
   'redo-2': Redo2,
   'waves': Waves,
   'footprints': Footprints,
+
+  // Quinta tanda: la ayuda de los paneles.
+  'circle-question-mark': CircleQuestionMark,
 };
 
 /**

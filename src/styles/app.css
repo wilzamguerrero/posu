@@ -532,19 +532,34 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .group-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   width: 100%;
-  padding: 6px 10px 6px 6px;
+  padding: 0;
   background: none;
   border: 0;
-  cursor: pointer;
   color: var(--fg);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.group-head:hover { background: var(--bg-hover); }
+.group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 6px 6px 6px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.group-toggle:hover { background: var(--bg-hover); }
+.group-head > .help-btn { margin-right: 8px; }
 .group-head .chev { transition: transform 0.15s ease; color: var(--fg-dim); }
 .group.is-collapsed .chev { transform: rotate(-90deg); }
 .group-head .group-icon { color: var(--fg-dim); }
@@ -565,6 +580,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-size: 11.5px;
   color: var(--fg-muted);
 }
+.label-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
 .field-label .value {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -576,6 +597,68 @@ button, input, select, textarea { font: inherit; color: inherit; }
   text-align: right;
 }
 .field-hint { font-size: 10.5px; color: var(--fg-dim); }
+
+/* ── Botones de ayuda y globo emergente ──────────────────────────────── */
+.help-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: var(--fg-dim);
+  cursor: pointer;
+  flex: 0 0 auto;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.help-btn:hover,
+.help-btn.is-active {
+  opacity: 1;
+  color: var(--link);
+}
+.help-btn .svg-icon { width: 13px; height: 13px; }
+
+/* Globo flotante de ayuda (uno solo para toda la app) */
+.help-pop {
+  position: fixed;
+  z-index: 50;
+  width: min(300px, calc(100vw - 24px));
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  animation: help-pop-in 0.14s ease;
+}
+.help-pop.hidden { display: none; }
+@keyframes help-pop-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.help-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 6px 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-strong);
+  border-bottom: 1px solid var(--border);
+}
+.help-pop-body {
+  padding: 8px 10px 10px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+}
+.help-pop-body b { color: var(--fg); font-weight: 600; }
+.help-pop-body kbd {
+  font-family: var(--font-mono); font-size: 10px; background: var(--bg-input);
+  border: 1px solid var(--border-input); border-radius: 3px; padding: 0 3px;
+}
 .field.is-disabled { opacity: 0.4; pointer-events: none; }
 
 /* Deslizadores */

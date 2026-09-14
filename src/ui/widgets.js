@@ -14,7 +14,16 @@ export function el(tag, props = {}, children = []) {
   for (const [k, v] of Object.entries(props)) {
     if (v == null || v === false) continue;
     if (k === 'class') node.className = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+    // Las propiedades personalizadas (--cols, --fill) no entran por asignacion
+    // directa: `style['--cols'] = 2` lo ignora el navegador sin avisar, y la
+    // rejilla se quedaba siempre en las tres columnas de reserva, que es lo que
+    // desbordaba los botones largos fuera del panel.
+    else if (k === 'style' && typeof v === 'object') {
+      for (const [prop, val] of Object.entries(v)) {
+        if (prop.startsWith('--')) node.style.setProperty(prop, String(val));
+        else node.style[prop] = val;
+      }
+    }
     else if (k === 'dataset') Object.assign(node.dataset, v);
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'html') node.innerHTML = v;
@@ -35,6 +44,110 @@ export function useStore(settings) {
   store = settings;
 }
 
+/* -- Ayuda emergente --------------------------------------------------- */
+
+/**
+ * La explicacion larga de un control no vive en el panel: vive detras de un boton
+ * con un signo de pregunta que la abre en un globo. No se ha recortado nada de lo
+ * que se contaba antes —los paneles de este programa explican cosas de dibujo que
+ * no se adivinan del nombre del ajuste—, pero deja de ocupar sitio mientras no se
+ * pide, que era lo que volvia los paneles ilegibles.
+ *
+ * Hay un solo globo para toda la aplicacion: abrirlo en un sitio cierra el de
+ * antes, asi que nunca se solapan dos ni queda ninguno olvidado por ahi.
+ */
+let pop = null;
+let popOwner = null;
+
+/** El globo, que se monta la primera vez que alguien pide ayuda. */
+function popNode() {
+  if (pop) return pop;
+  pop = el('div', { class: 'help-pop hidden', role: 'dialog', 'aria-label': 'Ayuda' });
+  // Un clic dentro no cuenta como clic fuera: el texto se puede seleccionar.
+  pop.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  document.body.append(pop);
+  document.addEventListener('pointerdown', closeHelp);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeHelp(); });
+  window.addEventListener('resize', closeHelp);
+  // El panel lateral se desplaza y el globo se quedaria a la deriva, colgado de
+  // un control que ya no esta debajo: mas vale cerrarlo.
+  window.addEventListener('scroll', closeHelp, true);
+  return pop;
+}
+
+/** Cierra el globo, si hay alguno abierto. */
+export function closeHelp() {
+  if (!popOwner) return;
+  popNode().classList.add('hidden');
+  popOwner.setAttribute('aria-expanded', 'false');
+  popOwner.classList.remove('is-active');
+  popOwner = null;
+}
+
+/** Pega el globo a su boton, debajo si cabe y encima si no, sin salir de la ventana. */
+function placeHelp(node, btn) {
+  const r = btn.getBoundingClientRect();
+  const w = window.innerWidth || 1280;
+  const h = window.innerHeight || 800;
+  const caja = node.getBoundingClientRect();
+  const ancho = caja.width || 300;
+  const alto = caja.height || 140;
+  const left = Math.max(8, Math.min(w - ancho - 8, r.left + r.width / 2 - ancho / 2));
+  const abajo = r.bottom + 8;
+  const top = abajo + alto <= h - 8 ? abajo : Math.max(8, r.top - alto - 8);
+  node.style.left = Math.round(left) + 'px';
+  node.style.top = Math.round(top) + 'px';
+}
+
+/** Abre la ayuda de un boton. Volver a pulsarlo la cierra. */
+function openHelp(btn, titulo, contenido) {
+  const node = popNode();
+  const antes = popOwner;
+  closeHelp();
+  if (antes === btn) return;
+  node.replaceChildren(
+    el('div', { class: 'help-pop-head' }, [
+      el('span', { text: titulo || 'Que es esto' }),
+      el('button', {
+        class: 'icon-btn tiny', type: 'button', title: 'Cerrar (Esc)',
+        onClick: closeHelp,
+      }, icon('x', 13)),
+    ]),
+    typeof contenido === 'string'
+      ? el('div', { class: 'help-pop-body', html: contenido })
+      : el('div', { class: 'help-pop-body' }, contenido),
+  );
+  node.classList.remove('hidden');
+  popOwner = btn;
+  btn.setAttribute('aria-expanded', 'true');
+  btn.classList.add('is-active');
+  placeHelp(node, btn);
+}
+
+/**
+ * Boton de ayuda de un control o de un grupo. Devuelve `null` cuando no hay nada
+ * que contar, para poder colocarlo sin condicionales en cualquier fila.
+ * @param {string|Node} [contenido] texto (admite HTML) o nodo ya montado
+ * @param {string} [titulo] nombre del control, que encabeza el globo
+ */
+export function helpButton(contenido, titulo) {
+  if (!contenido) return null;
+  const btn = el('button', {
+    class: 'help-btn', type: 'button', title: 'Que es esto',
+    'aria-label': 'Ayuda de ' + (titulo || 'este control'),
+    'aria-expanded': 'false',
+  }, icon('circle-question-mark', 13));
+  // El pointerdown del documento cierra el globo: si el de aqui no se detiene,
+  // el click posterior lo volveria a abrir y el boton no cerraria nunca.
+  btn.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openHelp(btn, titulo, contenido);
+  });
+  return btn;
+}
+
 /* -- Contenedores ------------------------------------------------------ */
 
 const COLLAPSE_KEY = 'posu.groups.v1';
@@ -52,20 +165,26 @@ const persistCollapsed = () => {
 };
 
 /**
- * Grupo plegable con cabecera, al estilo de las secciones de VS Code.
- * @param {{id:string,title:string,icon?:string,open?:boolean}} opts
+ * Grupo plegable con cabecera, al estilo de las secciones de VS Code. `help` es la
+ * explicacion de para que sirve la seccion entera: sale en el signo de pregunta de
+ * la cabecera, no como un parrafo delante de los controles.
+ *
+ * La cabecera es una fila y no un boton, porque dentro de un boton no se puede
+ * meter otro boton: el que pliega es `group-toggle` y la ayuda va a su lado.
+ * @param {{id:string,title:string,icon?:string,open?:boolean,help?:string|Node}} opts
  */
 export function group(opts, children = []) {
   const isClosed = collapsed.has(opts.id) || (opts.open === false && !collapsed.has('!' + opts.id));
   const chev = el('span', { class: 'chev' }, icon('chevron-down', 14));
-  const head = el('button', { class: 'group-head', type: 'button', title: opts.title }, [
+  const toggler = el('button', { class: 'group-toggle', type: 'button', title: opts.title }, [
     chev,
     opts.icon ? el('span', { class: 'group-icon' }, icon(opts.icon, 14)) : null,
     el('span', { text: opts.title }),
   ]);
+  const head = el('div', { class: 'group-head' }, [toggler, helpButton(opts.help, opts.title)]);
   const body = el('div', { class: 'group-body' }, children);
   const root = el('section', { class: 'group' + (isClosed ? ' is-collapsed' : '') }, [head, body]);
-  head.addEventListener('click', () => {
+  toggler.addEventListener('click', () => {
     const nowClosed = root.classList.toggle('is-collapsed');
     if (nowClosed) collapsed.add(opts.id);
     else {
@@ -77,13 +196,21 @@ export function group(opts, children = []) {
   return root;
 }
 
-/** Envoltorio etiqueta + valor + control. */
+/**
+ * Envoltorio etiqueta + valor + control. El `hint` no se escribe debajo: se
+ * cuelga del signo de pregunta que va pegado a la etiqueta.
+ */
 export function field(labelText, control, { hint, value } = {}) {
   const valueTag = value ? el('span', { class: 'value', text: value }) : null;
+  const ayuda = helpButton(hint, labelText);
   return el('div', { class: 'field' }, [
-    labelText ? el('div', { class: 'field-label' }, [el('span', { text: labelText }), valueTag]) : null,
+    labelText || ayuda
+      ? el('div', { class: 'field-label' }, [
+        el('span', { class: 'label-text' }, [labelText ? el('span', { text: labelText }) : null, ayuda]),
+        valueTag,
+      ])
+      : null,
     control,
-    hint ? el('div', { class: 'field-hint', text: hint }) : null,
   ]);
 }
 
@@ -121,10 +248,13 @@ export function slider(o) {
   });
   store.on(o.path, paint);
   paint(store.get(o.path));
+  const ayuda = helpButton(o.hint, o.label);
   return el('div', { class: 'field' }, [
-    el('div', { class: 'field-label' }, [el('span', { text: o.label }), valueTag]),
+    el('div', { class: 'field-label' }, [
+      el('span', { class: 'label-text' }, [el('span', { text: o.label }), ayuda]),
+      valueTag,
+    ]),
     input,
-    o.hint ? el('div', { class: 'field-hint', text: o.hint }) : null,
   ]);
 }
 
@@ -135,13 +265,16 @@ export function toggle(o) {
   store.on(o.path, (v) => {
     input.checked = Boolean(v);
   });
+  const ayuda = helpButton(o.hint, o.label);
   const label = el('label', { class: 'switch' }, [
     input,
     el('span', { class: 'switch-track' }),
     el('span', { class: 'switch-text', text: o.label }),
   ]);
-  if (!o.hint) return label;
-  return el('div', { class: 'field' }, [label, el('div', { class: 'field-hint', text: o.hint })]);
+  if (!ayuda) return label;
+  return el('div', { class: 'field' }, [
+    el('div', { class: 'field-row' }, [label, ayuda]),
+  ]);
 }
 
 /** Grupo de botones exclusivos (radio con aspecto de pestanas). */
