@@ -659,6 +659,34 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-family: var(--font-mono); font-size: 10px; background: var(--bg-input);
   border: 1px solid var(--border-input); border-radius: 3px; padding: 0 3px;
 }
+/* ── Conversor FBX a GLB ─────────────────────────────────────────────── */
+.converter { display: grid; gap: 9px; }
+.dropbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-widget);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.dropbox:hover { border-color: var(--fg-dim); background: var(--bg-hover); }
+.dropbox .svg-icon { width: 18px; height: 18px; color: var(--fg-dim); flex: 0 0 auto; }
+.dropbox-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dropbox-text b { font-size: 12px; color: var(--fg); font-weight: 600; }
+.dropbox-text span { font-size: 11px; color: var(--fg-dim); }
+.dropbox.is-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-widget));
+}
+.dropbox.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .field.is-disabled { opacity: 0.4; pointer-events: none; }
 
 /* Deslizadores */
