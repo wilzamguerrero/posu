@@ -502,7 +502,10 @@ function outlineDetailControls(base, individual) {
     enableWhen(el('div', { class: 'stack' }, [
       slider({ label: 'Aristas y facetas', path: base + '.edges', min: 0, max: 8, step: 0.05,
         format: (v) => Math.round(v * 100) + ' %',
-        hint: 'Los cantos vivos y las facetas: donde la orientacion de la superficie cambia de golpe.' }),
+        hint: 'Intensidad de los cantos vivos y las facetas: donde la orientacion de la superficie cambia de golpe.' }),
+      slider({ label: 'Definicion de aristas', path: base + '.edgeFocus', min: 0, max: 1, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Enfoca el trazo en las aristas de verdad. Subelo para limpiar el ruido de las caras curvas y quedarte solo con los cantos marcados; bajalo para captar tambien las aristas suaves.' }),
       slider({ label: 'Pliegues y valles', path: base + '.valleys', min: 0, max: 4, step: 0.05,
         format: (v) => Math.round(v * 100) + ' %',
         hint: 'Los huecos concavos «hacia dentro» (axilas, ingles, entre los dedos), que la arista sola apenas marca.' }),

@@ -48,6 +48,7 @@ const FRAG = /* glsl */ `
   uniform float uThickness;     // grosor del trazo en pixeles
   uniform float uOpacity;
   uniform float uNormalWeight;  // aristas por giro de normal (0 en modo silueta)
+  uniform float uEdgeCutoff;    // umbral de arista: por debajo no cuenta (ruido de cara)
   uniform float uDepthWeight;   // saltos de profundidad / solape (0 en silueta)
   uniform float uValleyWeight;  // pliegues concavos (0 en modo silueta)
   uniform float uThreshold;     // umbral bajo del suavizado: mas bajo = mas tenue
@@ -114,14 +115,19 @@ const FRAG = /* glsl */ `
     float lap = ( dN + dS + dE + dW ) - 4.0 * dc;
     float valley = clamp( lap / max( 0.015, abs( dc ) * 0.05 ), 0.0, 1.0 );
 
-    // Aristas: la normal (RGB) gira de golpe. Vale para cantos vivos y facetas,
-    // y tambien para los pliegues cuando el giro es marcado.
+    // Aristas: la normal (RGB) gira de golpe. Se toma el MAYOR giro entre los
+    // cuatro vecinos (no la suma): asi una arista real, que cambia fuerte hacia un
+    // lado, destaca, mientras que el ligero temblor de normal repartido por una
+    // cara curva no se acumula. uEdgeCutoff es la puerta: por debajo de ese giro
+    // no hay arista (se va el ruido de las caras) y por encima se abre con nitidez,
+    // de modo que subir la intensidad realza las aristas y no el ruido.
     vec3 nc = c.rgb * 2.0 - 1.0;
-    float nd = ( 1.0 - dot( nc, n.rgb * 2.0 - 1.0 ) )
-             + ( 1.0 - dot( nc, s.rgb * 2.0 - 1.0 ) )
-             + ( 1.0 - dot( nc, e.rgb * 2.0 - 1.0 ) )
-             + ( 1.0 - dot( nc, w.rgb * 2.0 - 1.0 ) );
-    float normalEdge = clamp( nd * 0.9, 0.0, 1.0 );
+    float na = 1.0 - dot( nc, n.rgb * 2.0 - 1.0 );
+    float nb = 1.0 - dot( nc, s.rgb * 2.0 - 1.0 );
+    float ne2 = 1.0 - dot( nc, e.rgb * 2.0 - 1.0 );
+    float nw = 1.0 - dot( nc, w.rgb * 2.0 - 1.0 );
+    float ndMax = max( max( na, nb ), max( ne2, nw ) );
+    float normalEdge = smoothstep( uEdgeCutoff, uEdgeCutoff + 0.12, ndMax );
 
     // Todo lo interno solo cuenta dentro del objeto; la silueta manda siempre.
     // El umbral bajo del suavizado lo mueve «Sensibilidad»: mas bajo saca los
@@ -188,6 +194,7 @@ export class OutlineFX extends Pass {
         uThickness: { value: 1.4 },
         uOpacity: { value: 0.9 },
         uNormalWeight: { value: 1 },
+        uEdgeCutoff: { value: 0.037 },
         uDepthWeight: { value: 1 },
         uValleyWeight: { value: 0.7 },
         uThreshold: { value: 0.28 },
@@ -215,7 +222,7 @@ export class OutlineFX extends Pass {
    * cada fuente de borde (aristas, solape, valles) entra con el peso que le da
    * el panel, y `sensitivity` rebaja el umbral para sacar los bordes tenues.
    */
-  configure({ color, thickness, opacity, mode, edges, depth, valleys, sensitivity } = {}) {
+  configure({ color, thickness, opacity, mode, edges, edgeFocus, depth, valleys, sensitivity } = {}) {
     const u = this.material.uniforms;
     const clamp = THREE.MathUtils.clamp;
     if (color !== undefined) u.uColor.value.set(color);
@@ -227,6 +234,14 @@ export class OutlineFX extends Pass {
     if (edges !== undefined) u.uNormalWeight.value = full ? Math.max(0, edges) : 0;
     if (depth !== undefined) u.uDepthWeight.value = full ? Math.max(0, depth) : 0;
     if (valleys !== undefined) u.uValleyWeight.value = full ? Math.max(0, valleys) : 0;
+
+    // Enfoque de arista: la puerta que separa la arista real del ruido de la
+    // cara. Curva cuadratica para tener tacto fino en la zona baja (donde vive el
+    // ruido) y aun asi poder cerrar hasta dejar solo los cantos muy marcados.
+    if (edgeFocus !== undefined) {
+      const f = clamp(edgeFocus, 0, 1);
+      u.uEdgeCutoff.value = f * f * 0.3;
+    }
 
     // Sensibilidad -> umbral bajo del suavizado. De 0 a 100 % baja de 0.5 a
     // 0.06 (el tramo util normal); de 100 a 400 % sigue bajando hasta 0.008 para

@@ -704,9 +704,14 @@ async function main() {
   // solidos). Con «individual», cada figura con copia propia va en su grupo, con
   // su color y sus valores, y se dibujan a la vez; las que no tengan copia y los
   // solidos siguen la plantilla global.
-  const OUTLINE_KEYS = ['mode', 'color', 'thickness', 'opacity', 'edges', 'depth', 'valleys', 'sensitivity'];
-  const outlineParams = (src) => Object.fromEntries(OUTLINE_KEYS.map((k) => [k, src?.[k]]));
+  const OUTLINE_KEYS = ['mode', 'color', 'thickness', 'opacity', 'edges', 'edgeFocus', 'depth', 'valleys', 'sensitivity'];
   const globalOutline = () => Object.fromEntries(OUTLINE_KEYS.map((k) => [k, settings.get(`outline.${k}`)]));
+  // Una copia por figura puede venir de una sesion anterior sin alguna clave
+  // nueva: se rellena con la global para que ningun valor quede sin definir (y no
+  // herede por error el del grupo pintado justo antes).
+  const outlineParams = (src) => Object.fromEntries(
+    OUTLINE_KEYS.map((k) => [k, src?.[k] ?? settings.get(`outline.${k}`)]),
+  );
   const figureDefById = (id) => (settings.get('scene.figures') ?? []).find((d) => d.id === id) ?? null;
 
   viewport.postfx.setOutlineProvider(() => {

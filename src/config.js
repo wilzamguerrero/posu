@@ -209,7 +209,10 @@ export const DEFAULTS = {
    *
    * En modo 'individual' el trazo se compone de varias fuentes de borde, cada
    * una con su peso, para poder subir justo la que hace falta:
-   *   - `edges`       aristas donde gira la normal (los cantos vivos y facetas).
+   *   - `edges`       intensidad de las aristas (los cantos vivos y facetas).
+   *   - `edgeFocus`   umbral de que cuenta como arista: subelo para quedarte solo
+   *                   con las marcadas y limpiar el ruido de las caras; bajalo
+   *                   para captar tambien las aristas suaves.
    *   - `depth`       saltos de profundidad (un miembro que tapa a otro).
    *   - `valleys`     pliegues concavos, los huecos «hacia dentro» que la normal
    *                   apenas marca (axilas, ingles, entre los dedos...).
@@ -228,7 +231,8 @@ export const DEFAULTS = {
     color: '#12151a',
     thickness: 1.4,
     opacity: 0.9,
-    edges: 1,                   // peso de las aristas por normal (0..4)
+    edges: 1,                   // intensidad de las aristas por normal (0..8)
+    edgeFocus: 0.35,            // umbral de arista (0 = todo, 1 = solo lo muy marcado)
     depth: 1,                   // peso del solape por profundidad (0..4)
     valleys: 0.7,               // peso de los pliegues concavos (0..4)
     sensitivity: 0.5,           // 0 = solo bordes marcados, 1+ = tambien los tenues
