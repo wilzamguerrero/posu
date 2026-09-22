@@ -53,12 +53,12 @@ export class PostFX {
   }
 
   /**
-   * Registra quien sabe que mallas llevan contorno (figuras visibles y solidos).
-   * Se llama una vez desde main.js; el pase lo consulta en cada fotograma.
+   * Registra quien arma los grupos de contorno (figuras y solidos con sus
+   * valores). Se llama una vez desde main.js; el pase lo consulta cada fotograma.
    */
   setOutlineProvider(fn) {
     this.outlineCollect = fn;
-    if (this.passes.outline) this.passes.outline.collect = fn;
+    if (this.passes.outline) this.passes.outline.collectGroups = fn;
   }
 
   /** Fuerza el remontaje de la cadena (cambio de tamano, contexto recuperado). */
@@ -146,7 +146,7 @@ export class PostFX {
     // distorsion y el grano lo afecten como al resto de la imagen.
     if (want.outline) {
       const outline = new OutlineFX(this.scene, () => this.rig.active);
-      if (this.outlineCollect) outline.collect = this.outlineCollect;
+      if (this.outlineCollect) outline.collectGroups = this.outlineCollect;
       outline.setSize(this.size.x, this.size.y);
       composer.addPass(outline);
       this.passes.outline = outline;
@@ -200,18 +200,8 @@ export class PostFX {
       this.passes.bloom.radius = 0.7;
     }
 
-    if (this.passes.outline) {
-      this.passes.outline.configure({
-        color: s.get('outline.color'),
-        thickness: s.get('outline.thickness'),
-        opacity: s.get('outline.opacity'),
-        mode: s.get('outline.mode'),
-        edges: s.get('outline.edges'),
-        depth: s.get('outline.depth'),
-        valleys: s.get('outline.valleys'),
-        sensitivity: s.get('outline.sensitivity'),
-      });
-    }
+    // El contorno ya no se ajusta aqui: cada grupo (figura/solidos) lleva sus
+    // propios valores y el pase los aplica grupo a grupo en su render.
 
     if (this.passes.lens) {
       const u = this.passes.lens.uniforms;

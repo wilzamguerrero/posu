@@ -181,9 +181,16 @@ export const DEFAULTS = {
     jpeg: true,                 // color en JPEG cuando el material es opaco
   },
 
-  /** Un material independiente por variante de malla y por objeto insertado. */
+  /**
+   * Un material independiente por variante de malla y por objeto insertado.
+   * Estos son la plantilla **global**: con `scope: 'todas'` mandan sobre todas
+   * las figuras a la vez. Con `scope: 'individual'` cada figura puede llevar su
+   * propia copia (en `scene.figures.N.materials`, ver FigureSet) y solo esa
+   * cambia; las que no tengan copia siguen esta plantilla.
+   */
   materials: {
     slot: 'anatomia',           // pestana activa del panel
+    scope: 'todas',             // todas | individual (la figura activa)
     anatomia:  { preset: 'original', color: '#d9a189', roughness: 0.56, metalness: 0.04, opacity: 1, flat: false },
     maniqui:   { preset: 'madera',   color: '#c08a4a', roughness: 0.62, metalness: 0.05, opacity: 1, flat: false },
     esqueleto: { preset: 'hueso',    color: '#e9e4d8', roughness: 0.52, metalness: 0.02, opacity: 1, flat: false },
@@ -208,17 +215,23 @@ export const DEFAULTS = {
    *                   apenas marca (axilas, ingles, entre los dedos...).
    *   - `sensitivity` cuanto se rebaja el umbral: mas alto saca los bordes
    *                   tenues que si no no llegan a dibujarse.
+   *
+   * Como los materiales, tiene ambito: con `scope: 'todas'` estos valores valen
+   * para todas las figuras y los solidos; con `scope: 'individual'` cada figura
+   * puede llevar su propio contorno (color y valores) en `scene.figures.N.outline`,
+   * y se dibujan a la vez. Los solidos siguen siempre esta plantilla global.
    */
   outline: {
     enabled: false,
+    scope: 'todas',             // todas | individual (la figura activa)
     mode: 'individual',         // objeto (silueta) | individual (silueta + panos)
     color: '#12151a',
     thickness: 1.4,
     opacity: 0.9,
-    edges: 1,                   // peso de las aristas por normal (0..2)
-    depth: 1,                   // peso del solape por profundidad (0..2)
-    valleys: 0.7,               // peso de los pliegues concavos (0..2)
-    sensitivity: 0.5,           // 0 = solo bordes marcados, 1 = tambien los tenues
+    edges: 1,                   // peso de las aristas por normal (0..4)
+    depth: 1,                   // peso del solape por profundidad (0..4)
+    valleys: 0.7,               // peso de los pliegues concavos (0..4)
+    sensitivity: 0.5,           // 0 = solo bordes marcados, 1+ = tambien los tenues
   },
 
   /** Editor de escena: figuras, solidos y luces que el usuario coloca. */

@@ -101,59 +101,8 @@ function figurePanel(app) {
       slider({ label: 'Opacidad de la silueta', path: 'figure.ghostOpacity', min: 0.02, max: 0.6, step: 0.01 }),
       toggle({ path: 'figure.showSkeletonHelper', label: 'Mostrar huesos (helper)' }),
     ]),
-    group({ id: 'fig-material', title: 'Materiales', icon: 'palette' }, [
-      segmented({
-        label: 'Malla a la que se aplica', path: 'materials.slot',
-        options: [
-          { value: 'anatomia', label: 'Anatomia', icon: 'person-standing' },
-          { value: 'maniqui', label: 'Maniqui', icon: 'box' },
-          { value: 'esqueleto', label: 'Esqueleto', icon: 'bone' },
-          { value: 'objeto', label: 'Solidos', icon: 'shapes' },
-        ],
-        hint: 'Cada malla guarda su propio material, tambien la anatomia.',
-      }),
-      reactive(
-        ['materials.slot', 'materials.anatomia.preset', 'materials.maniqui.preset',
-          'materials.esqueleto.preset', 'materials.objeto.preset'],
-        () => materialSlotControls(app),
-      ),
-      notice('info', 'El <b>sombreado</b> de arriba (arcilla, rayos X…) manda sobre estos materiales mientras este activo.'),
-    ]),
-    group({ id: 'fig-outline', title: 'Contorno (outline)', icon: 'pen-line' }, [
-      toggle({ path: 'outline.enabled', label: 'Dibujar contorno',
-        hint: 'Traza un borde sobre las figuras y los solidos. Es un efecto encima de la imagen: no cambia los materiales.' }),
-      enableWhen(el('div', { class: 'stack' }, [
-        segmented({
-          label: 'Se dibuja', path: 'outline.mode',
-          options: [
-            { value: 'objeto', label: 'Todo un objeto', icon: 'square', title: 'Solo la silueta exterior de cada forma' },
-            { value: 'individual', label: 'Por piezas', icon: 'shapes', title: 'Silueta mas los bordes internos y las facetas' },
-          ],
-          hint: '«Todo un objeto» deja solo el contorno exterior. «Por piezas» anade los bordes de cada pieza y las aristas de las facetas, para leer los planos.',
-        }),
-        color({ path: 'outline.color', label: 'Color del trazo' }),
-        slider({ label: 'Grosor', path: 'outline.thickness', min: 0.5, max: 4, step: 0.1,
-          format: (v) => v.toFixed(1) + ' px' }),
-        slider({ label: 'Opacidad', path: 'outline.opacity', min: 0.1, max: 1, step: 0.01 }),
-        // Afinado del modo «por piezas»: cada fuente de borde por separado, para
-        // subir justo la que falta (los pliegues «hacia dentro», por ejemplo).
-        enableWhen(el('div', { class: 'stack' }, [
-          slider({ label: 'Aristas y facetas', path: 'outline.edges', min: 0, max: 2, step: 0.05,
-            format: (v) => Math.round(v * 100) + ' %',
-            hint: 'Los cantos vivos y las facetas: donde la orientacion de la superficie cambia de golpe.' }),
-          slider({ label: 'Pliegues y valles', path: 'outline.valleys', min: 0, max: 2, step: 0.05,
-            format: (v) => Math.round(v * 100) + ' %',
-            hint: 'Los huecos concavos «hacia dentro» (axilas, ingles, entre los dedos), que la arista sola apenas marca.' }),
-          slider({ label: 'Solape', path: 'outline.depth', min: 0, max: 2, step: 0.05,
-            format: (v) => Math.round(v * 100) + ' %',
-            hint: 'Donde una forma tapa a otra: un miembro por delante del torso, dos figuras que se cruzan.' }),
-          slider({ label: 'Sensibilidad', path: 'outline.sensitivity', min: 0, max: 1, step: 0.01,
-            format: (v) => Math.round(v * 100) + ' %',
-            hint: 'Rebaja el umbral: mas alto saca los bordes tenues que si no no llegan a dibujarse (a costa de algo de ruido).' }),
-        ]), 'outline.mode', (s) => s.get('outline.mode') !== 'objeto'),
-      ]), 'outline.enabled', (s) => s.get('outline.enabled') === true),
-      notice('info', 'El contorno «por piezas» resalta los planos igual que el material <b>Facetas</b>, pero como lineas por encima de cualquier material. Sube <b>Pliegues y valles</b> y la <b>Sensibilidad</b> si los huecos hacia dentro no se marcan.'),
-    ]),
+    group({ id: 'fig-material', title: 'Materiales', icon: 'palette' }, materialGroup(app)),
+    group({ id: 'fig-outline', title: 'Contorno (outline)', icon: 'pen-line' }, outlineGroup(app)),
     group({ id: 'fig-file', title: 'Modelo', icon: 'folder-open' }, [
       modelLibraryGrid(app),
       buttons([
@@ -375,6 +324,13 @@ const SLOT_LABEL = {
   esqueleto: 'el esqueleto', objeto: 'los solidos insertados',
 };
 
+/** Ambito compartido por materiales y contorno: todas o solo la figura activa. */
+const SCOPE_OPTS = [
+  { value: 'todas', label: 'Todas', icon: 'globe', title: 'Un mismo ajuste para todas las figuras' },
+  { value: 'individual', label: 'Solo esta figura', icon: 'user',
+    title: 'Cada figura lleva lo suyo; se edita la figura activa (la que posa)' },
+];
+
 /** Prefija valores planos con la ruta base: {color:x} -> {"materials.piel.color":x}. */
 function conPrefijo(base, values) {
   const out = {};
@@ -388,7 +344,7 @@ function conPrefijo(base, values) {
  * (scene.objects.N.material), porque ambos guardan el mismo juego de claves.
  * Solo se dibujan las propiedades que el preajuste elegido admite.
  */
-function materialControls(store, base, { cols = 3 } = {}) {
+function materialControls(store, base, { cols = 3, onAfterPreset } = {}) {
   const presetId = store.get(base + '.preset') ?? 'yeso';
   const def = MATERIAL_BY_ID[presetId];
   const out = [
@@ -399,7 +355,9 @@ function materialControls(store, base, { cols = 3 } = {}) {
         value: m.id, label: m.label, icon: m.icon, title: m.note ?? m.label,
       })),
       // Al elegir preajuste se siembran sus valores de partida de una sola vez.
-      onPick: (id) => store.batch(conPrefijo(base, materialDefaults(id))),
+      // `onAfterPreset` refresca el panel cuando la ruta no la vigila el reactivo
+      // (el material por figura, cuya ruta cambia con la figura activa).
+      onPick: (id) => { store.batch(conPrefijo(base, materialDefaults(id))); onAfterPreset?.(); },
     }),
   ];
   if (def?.note) out.push(el('div', { class: 'field-hint', text: def.note }));
@@ -415,14 +373,148 @@ function materialControls(store, base, { cols = 3 } = {}) {
   return out;
 }
 
-/** Cuerpo reactivo del grupo "Materiales": depende de la ranura seleccionada. */
-function materialSlotControls(app) {
+/**
+ * Cuerpo reactivo del grupo "Materiales": depende de la ranura y del ambito.
+ * Con ambito «todas» edita la plantilla global; con «individual» edita la copia
+ * propia de la figura activa (los solidos se quedan siempre en comun). `refresh`
+ * es la funcion del propio nodo reactivo, para repintar al cambiar de preajuste
+ * en la ruta por figura, que el reactivo no vigila.
+ */
+function materialSlotControls(app, refresh) {
   const store = app.settings;
   const slot = store.get('materials.slot') ?? 'anatomia';
+  // Los solidos no son «una figura»: su material va siempre en comun.
+  const individual = store.get('materials.scope') === 'individual' && slot !== 'objeto';
+
+  if (individual) {
+    const id = app.figures?.activeId;
+    const path = app.figures?.pathOf?.(id);
+    if (!path) return [notice('warn', 'No hay ninguna figura activa a la que dar material propio.')];
+    app.actions.ensureMaterialOverride?.(id);
+    const nombre = app.figures?.activeDef?.name || 'la figura activa';
+    return [
+      el('div', { class: 'field-hint', html: `Material propio de <b>${nombre}</b> · ${SLOT_LABEL[slot] ?? slot}.` }),
+      ...materialControls(store, `${path}.materials.${slot}`, { onAfterPreset: refresh }),
+      buttons([
+        { label: 'Volver a comun', icon: 'link-2', title: 'Descarta el material propio y vuelve al de todas',
+          onClick: () => app.actions.linkMaterials?.(id) },
+      ], { cols: 1, compact: true }),
+    ];
+  }
+
+  const nota = store.get('materials.scope') === 'individual'
+    ? `Editando ${SLOT_LABEL[slot] ?? slot} · los solidos van siempre en comun.`
+    : `Editando el material de ${SLOT_LABEL[slot] ?? slot} · comun a todas las figuras.`;
   return [
-    el('div', { class: 'field-hint', text: 'Editando el material de ' + (SLOT_LABEL[slot] ?? slot) + '.' }),
+    el('div', { class: 'field-hint', text: nota }),
     ...materialControls(store, 'materials.' + slot),
   ];
+}
+
+/** Contenido del grupo "Materiales": ambito, ranura y el cuerpo reactivo. */
+function materialGroup(app) {
+  let matReactive;
+  matReactive = reactive(
+    ['materials.slot', 'materials.scope', 'figure.active',
+      'materials.anatomia.preset', 'materials.maniqui.preset',
+      'materials.esqueleto.preset', 'materials.objeto.preset'],
+    () => materialSlotControls(app, () => matReactive.refresh()),
+  );
+  return [
+    segmented({ label: 'Ambito', path: 'materials.scope', options: SCOPE_OPTS,
+      hint: 'Todas comparten un material por malla. Individual da a la figura activa el suyo propio, sin tocar a las demas.' }),
+    segmented({
+      label: 'Malla a la que se aplica', path: 'materials.slot',
+      options: [
+        { value: 'anatomia', label: 'Anatomia', icon: 'person-standing' },
+        { value: 'maniqui', label: 'Maniqui', icon: 'box' },
+        { value: 'esqueleto', label: 'Esqueleto', icon: 'bone' },
+        { value: 'objeto', label: 'Solidos', icon: 'shapes' },
+      ],
+      hint: 'Cada malla guarda su propio material, tambien la anatomia.',
+    }),
+    matReactive,
+    notice('info', 'El <b>sombreado</b> de arriba (arcilla, rayos X…) manda sobre estos materiales mientras este activo.'),
+  ];
+}
+
+/** Contenido del grupo "Contorno": interruptor maestro, ambito y cuerpo reactivo. */
+function outlineGroup(app) {
+  const outlineReactive = reactive(['outline.scope', 'figure.active'], () => outlineScopeControls(app));
+  return [
+    toggle({ path: 'outline.enabled', label: 'Dibujar contorno',
+      hint: 'Traza un borde sobre las figuras y los solidos. Es un efecto encima de la imagen: no cambia los materiales.' }),
+    enableWhen(el('div', { class: 'stack' }, [
+      segmented({ label: 'Ambito', path: 'outline.scope', options: SCOPE_OPTS,
+        hint: 'Todas llevan el mismo trazo. Individual da a cada figura su color y sus valores (se editan sobre la activa) y se dibujan a la vez; los solidos siguen el comun.' }),
+      outlineReactive,
+      notice('info', 'El contorno «por piezas» resalta los planos igual que el material <b>Facetas</b>, pero como lineas por encima de cualquier material. Sube <b>Pliegues y valles</b> y la <b>Sensibilidad</b> si los huecos hacia dentro no se marcan.'),
+    ]), 'outline.enabled', (s) => s.get('outline.enabled') === true),
+  ];
+}
+
+/** Cuerpo reactivo del contorno: plantilla global o el propio de la figura activa. */
+function outlineScopeControls(app) {
+  const store = app.settings;
+  if (store.get('outline.scope') !== 'individual') {
+    return [
+      el('div', { class: 'field-hint', text: 'Un mismo contorno para todas las figuras y los solidos.' }),
+      ...outlineDetailControls('outline', false),
+    ];
+  }
+  const id = app.figures?.activeId;
+  const path = app.figures?.pathOf?.(id);
+  if (!path) return [notice('warn', 'No hay ninguna figura activa a la que dar contorno propio.')];
+  app.actions.ensureOutlineOverride?.(id);
+  const nombre = app.figures?.activeDef?.name || 'la figura activa';
+  return [
+    el('div', { class: 'field-hint', html: `Contorno propio de <b>${nombre}</b>. Los solidos siguen el comun.` }),
+    ...outlineDetailControls(`${path}.outline`, true),
+    buttons([
+      { label: 'Volver a comun', icon: 'link-2', title: 'Descarta el contorno propio y vuelve al de todas',
+        onClick: () => app.actions.linkOutline?.(id) },
+    ], { cols: 1, compact: true }),
+  ];
+}
+
+/** Los controles del trazo, sobre `base` ('outline' global o el de una figura). */
+function outlineDetailControls(base, individual) {
+  const out = [];
+  if (individual) {
+    out.push(toggle({ path: base + '.enabled', label: 'Contorno en esta figura',
+      hint: 'Apagalo para que esta figura no lleve trazo aunque el resto si.' }));
+  }
+  out.push(
+    segmented({
+      label: 'Se dibuja', path: base + '.mode',
+      options: [
+        { value: 'objeto', label: 'Todo un objeto', icon: 'square', title: 'Solo la silueta exterior de cada forma' },
+        { value: 'individual', label: 'Por piezas', icon: 'shapes', title: 'Silueta mas los bordes internos y las facetas' },
+      ],
+      hint: '«Todo un objeto» deja solo el contorno exterior. «Por piezas» anade los bordes de cada pieza y las aristas de las facetas, para leer los planos.',
+    }),
+    color({ path: base + '.color', label: 'Color del trazo' }),
+    slider({ label: 'Grosor', path: base + '.thickness', min: 0.5, max: 4, step: 0.1,
+      format: (v) => v.toFixed(1) + ' px' }),
+    slider({ label: 'Opacidad', path: base + '.opacity', min: 0.1, max: 1, step: 0.01 }),
+    // Afinado del modo «por piezas»: cada fuente de borde por separado, hasta el
+    // 400 % para los casos en que un borde tenue apenas se marca.
+    enableWhen(el('div', { class: 'stack' }, [
+      slider({ label: 'Aristas y facetas', path: base + '.edges', min: 0, max: 8, step: 0.05,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Los cantos vivos y las facetas: donde la orientacion de la superficie cambia de golpe.' }),
+      slider({ label: 'Pliegues y valles', path: base + '.valleys', min: 0, max: 4, step: 0.05,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Los huecos concavos «hacia dentro» (axilas, ingles, entre los dedos), que la arista sola apenas marca.' }),
+      slider({ label: 'Solape', path: base + '.depth', min: 0, max: 4, step: 0.05,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Donde una forma tapa a otra: un miembro por delante del torso, dos figuras que se cruzan.' }),
+      slider({ label: 'Sensibilidad', path: base + '.sensitivity', min: 0, max: 4, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Rebaja el umbral: mas alto saca los bordes tenues que si no no llegan a dibujarse (a costa de algo de ruido).' }),
+    ]), base + '.mode', (s) => s.get(base + '.mode') !== 'objeto'),
+  );
+  return out;
 }
 
 /* ── 1c · Escena: figuras, solidos y luces ─────────────────────────────── */

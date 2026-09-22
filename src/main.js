@@ -699,17 +699,84 @@ async function main() {
   });
   app.scene = sceneEditor;
 
-  // Contorno de post-proceso: el pase pregunta en cada fotograma que mallas
-  // llevan trazo. Son las de las figuras visibles y las de los solidos; el suelo,
-  // el fondo y los ayudantes se quedan fuera por no estar en su capa.
+  // Contorno de post-proceso: el pase pregunta en cada fotograma que grupos
+  // pintar. Con ambito «todas», un solo grupo global (todas las figuras + los
+  // solidos). Con «individual», cada figura con copia propia va en su grupo, con
+  // su color y sus valores, y se dibujan a la vez; las que no tengan copia y los
+  // solidos siguen la plantilla global.
+  const OUTLINE_KEYS = ['mode', 'color', 'thickness', 'opacity', 'edges', 'depth', 'valleys', 'sensitivity'];
+  const outlineParams = (src) => Object.fromEntries(OUTLINE_KEYS.map((k) => [k, src?.[k]]));
+  const globalOutline = () => Object.fromEntries(OUTLINE_KEYS.map((k) => [k, settings.get(`outline.${k}`)]));
+  const figureDefById = (id) => (settings.get('scene.figures') ?? []).find((d) => d.id === id) ?? null;
+
   viewport.postfx.setOutlineProvider(() => {
-    const meshes = [];
+    if (settings.get('outline.enabled') !== true) return [];
+    const individual = settings.get('outline.scope') === 'individual';
+    const groups = [];
+    const globalMeshes = [];
     for (const ch of figures.all()) {
       if (ch?.root?.visible === false) continue;
-      for (const mesh of ch.visibleMeshes) if (mesh.visible) meshes.push(mesh);
+      const meshes = ch.visibleMeshes.filter((m) => m.visible);
+      if (!meshes.length) continue;
+      const def = individual ? figureDefById(ch.root.userData.figureId) : null;
+      if (def?.outlineOverride && def.outline) {
+        if (def.outline.enabled === false) continue;   // figura sin contorno a proposito
+        groups.push({ meshes, params: outlineParams(def.outline) });
+      } else {
+        globalMeshes.push(...meshes);
+      }
     }
-    meshes.push(...sceneEditor.outlineMeshes());
-    return meshes;
+    globalMeshes.push(...sceneEditor.outlineMeshes());
+    if (globalMeshes.length) groups.unshift({ meshes: globalMeshes, params: globalOutline() });
+    return groups;
+  });
+
+  /* ── Material y contorno por figura (ambito individual) ─────────────────── */
+
+  // Al pasar a «individual» (o al cambiar de figura activa estando en individual)
+  // la figura activa se «independiza»: se le engancha una copia del ajuste comun,
+  // identica de partida, que a partir de ahi cambia solo ella. Es idempotente: si
+  // ya tiene copia propia no se toca.
+  const ensureMaterialOverride = (id) => {
+    const at = figures.locate(id);
+    if (!at || (at.def.materialsOverride && at.def.materials)) return;
+    const base = `scene.figures.${at.index}`;
+    settings.batch({
+      [`${base}.materials`]: {
+        anatomia: { ...settings.get('materials.anatomia') },
+        maniqui: { ...settings.get('materials.maniqui') },
+        esqueleto: { ...settings.get('materials.esqueleto') },
+      },
+      [`${base}.materialsOverride`]: true,
+    });
+  };
+  const ensureOutlineOverride = (id) => {
+    const at = figures.locate(id);
+    if (!at || (at.def.outlineOverride && at.def.outline)) return;
+    const base = `scene.figures.${at.index}`;
+    settings.batch({
+      [`${base}.outline`]: { enabled: true, ...globalOutline() },
+      [`${base}.outlineOverride`]: true,
+    });
+  };
+  actions.ensureMaterialOverride = ensureMaterialOverride;
+  actions.ensureOutlineOverride = ensureOutlineOverride;
+  // «Volver a comun»: la figura suelta su copia y vuelve a seguir la plantilla.
+  actions.linkMaterials = (id) => {
+    const at = figures.locate(id || figures.activeId);
+    if (at) settings.set(`scene.figures.${at.index}.materialsOverride`, false);
+  };
+  actions.linkOutline = (id) => {
+    const at = figures.locate(id || figures.activeId);
+    if (at) settings.set(`scene.figures.${at.index}.outlineOverride`, false);
+  };
+
+  // Sembrado de la copia al entrar en individual o al cambiar de figura activa.
+  settings.on('materials.scope', (v) => { if (v === 'individual') ensureMaterialOverride(figures.activeId); });
+  settings.on('outline.scope', (v) => { if (v === 'individual') ensureOutlineOverride(figures.activeId); });
+  settings.on('figure.active', () => {
+    if (settings.get('materials.scope') === 'individual') ensureMaterialOverride(figures.activeId);
+    if (settings.get('outline.scope') === 'individual') ensureOutlineOverride(figures.activeId);
   });
 
   actions.addObject = (type) => {

@@ -138,6 +138,14 @@ const FRAG = /* glsl */ `
   }
 `;
 
+// Copia directa: cuando no hay ningun grupo con contorno hay que volcar la
+// imagen de entrada en la salida para no perderla.
+const COPY_FRAG = /* glsl */ `
+  uniform sampler2D tDiffuse;
+  varying vec2 vUv;
+  void main() { gl_FragColor = texture2D( tDiffuse, vUv ); }
+`;
+
 export class OutlineFX extends Pass {
   /**
    * @param {THREE.Scene} scene
@@ -148,9 +156,13 @@ export class OutlineFX extends Pass {
     super();
     this.scene = scene;
     this.getCamera = getCamera;
-    /** Devuelve las mallas que llevan contorno; lo rellena quien monta el pase. */
-    this.collect = () => [];
-    this._marked = new Set();
+    /**
+     * Devuelve los grupos de contorno del fotograma; lo rellena quien monta el
+     * pase (main.js). Cada grupo es un juego de mallas con sus propios valores,
+     * de modo que cada figura puede llevar su color y sus pesos y se dibujan a la
+     * vez: `[{ meshes: Mesh[], params: {color, thickness, ...} }]`.
+     */
+    this.collectGroups = () => [];
 
     this.normalMat = new THREE.MeshNormalMaterial();
     this.rtNormal = new THREE.WebGLRenderTarget(1, 1, {
@@ -159,6 +171,12 @@ export class OutlineFX extends Pass {
       depthBuffer: true,
     });
     this.rtNormal.depthTexture = new THREE.DepthTexture(1, 1);
+
+    // Dos buffers de ida y vuelta para encadenar un grupo tras otro sobre la
+    // misma imagen (el color de cada figura se compone encima del anterior).
+    const rtOpts = { type: THREE.HalfFloatType, depthBuffer: false };
+    this.scratchA = new THREE.WebGLRenderTarget(1, 1, rtOpts);
+    this.scratchB = new THREE.WebGLRenderTarget(1, 1, rtOpts);
 
     this.material = new THREE.ShaderMaterial({
       uniforms: {
@@ -179,6 +197,13 @@ export class OutlineFX extends Pass {
       },
       vertexShader: VERT,
       fragmentShader: FRAG,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.copyMat = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: VERT,
+      fragmentShader: COPY_FRAG,
       depthTest: false,
       depthWrite: false,
     });
@@ -203,35 +228,30 @@ export class OutlineFX extends Pass {
     if (depth !== undefined) u.uDepthWeight.value = full ? Math.max(0, depth) : 0;
     if (valleys !== undefined) u.uValleyWeight.value = full ? Math.max(0, valleys) : 0;
 
-    // Sensibilidad 0..1 -> umbral 0.5..0.06 (mas alto = mas bordes tenues).
+    // Sensibilidad -> umbral bajo del suavizado. De 0 a 100 % baja de 0.5 a
+    // 0.06 (el tramo util normal); de 100 a 400 % sigue bajando hasta 0.008 para
+    // sacar hasta los bordes mas tenues, a costa de algo de ruido.
     if (sensitivity !== undefined) {
-      u.uThreshold.value = THREE.MathUtils.lerp(0.5, 0.06, clamp(sensitivity, 0, 1));
+      const s = Math.max(0, sensitivity);
+      u.uThreshold.value = s <= 1
+        ? THREE.MathUtils.lerp(0.5, 0.06, s)
+        : THREE.MathUtils.lerp(0.06, 0.008, clamp((s - 1) / 3, 0, 1));
     }
   }
 
   setSize(width, height) {
     this.rtNormal.setSize(width, height);
+    this.scratchA.setSize(width, height);
+    this.scratchB.setSize(width, height);
     this.material.uniforms.uResolution.value.set(width, height);
   }
 
-  /** Marca en la capa del contorno las mallas actuales (idempotente). */
-  #markTargets() {
-    const targets = this.collect() ?? [];
-    for (const mesh of targets) {
-      if (!mesh) continue;
-      mesh.layers.enable(OUTLINE_LAYER);
-      this._marked.add(mesh);
-    }
-    return targets;
-  }
-
-  render(renderer, writeBuffer, readBuffer /* , deltaTime, maskActive */) {
-    const camera = this.getCamera();
-    if (!camera) return;
-    this.#markTargets();
-
-    // --- Prepaso: normales + profundidad de solo los objetos marcados --------
-    const prevTarget = renderer.getRenderTarget();
+  /**
+   * Prepaso de un grupo: pinta SOLO sus mallas en el buffer de normales +
+   * profundidad. La capa se enciende y se apaga aqui mismo, asi que cada grupo
+   * queda aislado de los demas del fotograma.
+   */
+  #renderNormals(renderer, camera, meshes) {
     const prevMask = camera.layers.mask;
     const prevOverride = this.scene.overrideMaterial;
     const prevColor = renderer.getClearColor(new THREE.Color());
@@ -239,6 +259,7 @@ export class OutlineFX extends Pass {
     const prevAuto = renderer.autoClear;
 
     camera.layers.set(OUTLINE_LAYER);
+    for (const m of meshes) m.layers.enable(OUTLINE_LAYER);
     this.scene.overrideMaterial = this.normalMat;
     renderer.autoClear = false;
     renderer.setRenderTarget(this.rtNormal);
@@ -246,23 +267,50 @@ export class OutlineFX extends Pass {
     renderer.clear(true, true, false);
     renderer.render(this.scene, camera);
 
-    // Se deshace todo lo tocado del renderer y la escena.
     this.scene.overrideMaterial = prevOverride;
+    for (const m of meshes) m.layers.disable(OUTLINE_LAYER);
     camera.layers.mask = prevMask;
     renderer.setClearColor(prevColor, prevAlpha);
     renderer.autoClear = prevAuto;
+  }
 
-    // --- Profundidad lineal: hace falta la camara para el umbral -------------
+  render(renderer, writeBuffer, readBuffer /* , deltaTime, maskActive */) {
+    const camera = this.getCamera();
+    if (!camera) return;
+    const groups = (this.collectGroups() ?? []).filter((g) => g?.meshes?.length);
+    const out = this.renderToScreen ? null : writeBuffer;
+    const prevTarget = renderer.getRenderTarget();
+
+    // Sin ningun grupo (todo oculto): se copia la imagen tal cual a la salida.
+    if (!groups.length) {
+      this.copyMat.uniforms.tDiffuse.value = readBuffer.texture;
+      this.fsQuad.material = this.copyMat;
+      renderer.setRenderTarget(out);
+      this.fsQuad.render(renderer);
+      this.fsQuad.material = this.material;
+      renderer.setRenderTarget(prevTarget);
+      return;
+    }
+
     const u = this.material.uniforms;
     u.uNear.value = camera.near;
     u.uFar.value = camera.far;
     u.uPerspective.value = camera.isPerspectiveCamera === true;
 
-    // --- Composicion sobre la imagen ya revelada -----------------------------
-    u.tDiffuse.value = readBuffer.texture;
-    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
-    if (this.clear) renderer.clear();
-    this.fsQuad.render(renderer);
+    // Cada grupo compone su trazo encima del resultado del anterior; se va y se
+    // vuelve entre los dos buffers de trabajo hasta el ultimo, que sale a pantalla.
+    this.fsQuad.material = this.material;
+    let srcTex = readBuffer.texture;
+    for (let i = 0; i < groups.length; i++) {
+      const last = i === groups.length - 1;
+      const dst = last ? out : (i % 2 === 0 ? this.scratchA : this.scratchB);
+      this.#renderNormals(renderer, camera, groups[i].meshes);
+      this.configure(groups[i].params ?? {});
+      u.tDiffuse.value = srcTex;
+      renderer.setRenderTarget(dst);
+      this.fsQuad.render(renderer);
+      srcTex = dst ? dst.texture : srcTex;
+    }
 
     renderer.setRenderTarget(prevTarget);
   }
@@ -270,11 +318,11 @@ export class OutlineFX extends Pass {
   dispose() {
     this.rtNormal.dispose();
     this.rtNormal.depthTexture?.dispose();
+    this.scratchA.dispose();
+    this.scratchB.dispose();
     this.normalMat.dispose();
     this.material.dispose();
+    this.copyMat.dispose();
     this.fsQuad.dispose();
-    // Devuelve a su estado las mallas que se marcaron.
-    for (const mesh of this._marked) mesh.layers?.disable(OUTLINE_LAYER);
-    this._marked.clear();
   }
 }

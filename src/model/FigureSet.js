@@ -413,6 +413,13 @@ export class FigureSet {
       height: base?.height ?? s.get('figure.height') ?? 1.75,
       anchor: base?.anchor ?? s.get('figure.anchor') ?? 'suelo',
       pose: null,
+      // Material y contorno propios de la figura (ambito individual). Nacen
+      // desenganchados: hasta que el usuario los toca, la figura sigue la
+      // plantilla global. Una copia (`base`) hereda los del original.
+      materialsOverride: base?.materialsOverride ?? false,
+      materials: base?.materials ? structuredClone(base.materials) : null,
+      outlineOverride: base?.outlineOverride ?? false,
+      outline: base?.outline ? structuredClone(base.outline) : null,
     };
   }
 

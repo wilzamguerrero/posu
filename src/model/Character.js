@@ -235,14 +235,47 @@ export class Character {
     this.offs = [
       s.on('figure.variant', (v) => this.cambiarGeometria(v)),
       s.on(['figure.shading', 'figure.clayColor'], () => this.applyShading()),
-      // Cada variante tiene su propia ranura de material: anatomia incluida.
+      // Cada variante tiene su propia ranura de material: anatomia incluida. El
+      // ambito (`materials.scope`) decide si se lee la plantilla global o la
+      // copia propia de esta figura.
       s.on('materials.*', () => this.applyShading()),
+      // Copia de material propia de ESTA figura: solo reacciona a lo suyo.
+      s.on('scene.figures.*', (_v, _p, path) => {
+        if (/\.(materials|materialsOverride)\b/.test(path) && this.#pathIsMine(path)) this.applyShading();
+      }),
       s.on('figure.opacity', () => this.applyOpacity()),
       s.on(['figure.showGhost', 'figure.ghostOpacity'], () => this.applyGhost()),
       s.on('figure.showSkeletonHelper', () => this.applyHelper()),
     ];
     // La altura y el anclaje no se leen del almacen: son propios de cada figura
     // y llegan por `setPlacement` (ver FigureSet).
+  }
+
+  /** La definicion de ESTA figura en el almacen (o null si aun no esta). */
+  #figureDef() {
+    const id = this.root.userData.figureId;
+    if (!id) return null;
+    return (this.settings.get('scene.figures') ?? []).find((d) => d.id === id) ?? null;
+  }
+
+  /** ¿La ruta `scene.figures.N.…` apunta a esta figura? */
+  #pathIsMine(path) {
+    const m = /^scene\.figures\.(\d+)\./.exec(path);
+    if (!m) return false;
+    return (this.settings.get('scene.figures') ?? [])[Number(m[1])]?.id === this.root.userData.figureId;
+  }
+
+  /**
+   * Valores del material de una variante segun el ambito: con `individual` y una
+   * copia propia enganchada devuelve la de esta figura; si no, la plantilla
+   * global. Es el unico sitio donde se decide global vs individual.
+   */
+  #materialSlot(variant) {
+    if (this.settings.get('materials.scope') === 'individual') {
+      const def = this.#figureDef();
+      if (def?.materialsOverride && def.materials?.[variant]) return def.materials[variant];
+    }
+    return this.settings.get(`materials.${variant}`) ?? {};
   }
 
   /**
@@ -783,7 +816,7 @@ export class Character {
    * para no recompilar el shader en cada movimiento de un deslizador.
    */
   #slotMaterial(mesh, variant) {
-    const slot = this.settings.get(`materials.${variant}`) ?? {};
+    const slot = this.#materialSlot(variant);
     const preset = slot.preset ?? 'original';
     this.materialCache ??= new Map();
     const key = `${mesh.uuid}:slot:${preset}`;
@@ -861,7 +894,7 @@ export class Character {
 
         // Deslizador general del plan multiplicado por el de la ranura, para
         // poder ver el esqueleto interno bajo una musculatura semitransparente.
-        const slotOpacity = this.settings.get(`materials.${key}.opacity`) ?? 1;
+        const slotOpacity = this.#materialSlot(key).opacity ?? 1;
         aplicarOpacidad(mat, opacity * slotOpacity);
       }
     }
