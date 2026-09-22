@@ -21,6 +21,7 @@ import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
 import { LensShader } from './shaders/LensShader.js';
+import { OutlineFX } from './OutlineFX.js';
 
 export class PostFX {
   constructor(renderer, scene, cameraRig, settings, profile = null) {
@@ -40,12 +41,24 @@ export class PostFX {
     this.dirty = true;
     this.signature = '';
     this.passes = {};
+    /** Provee las mallas con contorno; lo fija quien conoce figuras y solidos. */
+    this.outlineCollect = null;
 
     settings.on(
       ['camera.dof', 'camera.bloom', 'camera.distortion', 'camera.distortion2', 'camera.chromatic',
-        'camera.vignette', 'camera.grain', 'camera.projection', 'quality.ssao', 'quality.antialias'],
+        'camera.vignette', 'camera.grain', 'camera.projection', 'quality.ssao', 'quality.antialias',
+        'outline.enabled'],
       () => { this.dirty = true; },
     );
+  }
+
+  /**
+   * Registra quien sabe que mallas llevan contorno (figuras visibles y solidos).
+   * Se llama una vez desde main.js; el pase lo consulta en cada fotograma.
+   */
+  setOutlineProvider(fn) {
+    this.outlineCollect = fn;
+    if (this.passes.outline) this.passes.outline.collect = fn;
   }
 
   /** Fuerza el remontaje de la cadena (cambio de tamano, contexto recuperado). */
@@ -77,6 +90,7 @@ export class PostFX {
       dof: s.get('camera.dof') && s.get('camera.projection') === 'perspectiva',
       bloom: s.get('camera.bloom') > 0.001,
       ssao: s.get('quality.ssao'),
+      outline: s.get('outline.enabled') === true,
       lens,
     };
   }
@@ -84,10 +98,13 @@ export class PostFX {
   #build(want = this.#wanted()) {
     this.signature = JSON.stringify(want);
     this.dirty = false;
+    // EffectComposer.dispose no recorre los pases: el del contorno tiene buffers
+    // propios y marca mallas por capa, asi que se cierra a mano al remontar.
+    this.passes.outline?.dispose();
     this.composer?.dispose();
     this.passes = {};
 
-    if (!want.dof && !want.bloom && !want.ssao && !want.lens) {
+    if (!want.dof && !want.bloom && !want.ssao && !want.outline && !want.lens) {
       this.composer = null;
       return;
     }
@@ -124,6 +141,17 @@ export class PostFX {
 
     composer.addPass(new OutputPass());
 
+    // El contorno va tras el mapeo de tonos: pinta sobre la imagen final para
+    // que el color del trazo salga tal cual, y antes de la lente para que la
+    // distorsion y el grano lo afecten como al resto de la imagen.
+    if (want.outline) {
+      const outline = new OutlineFX(this.scene, () => this.rig.active);
+      if (this.outlineCollect) outline.collect = this.outlineCollect;
+      outline.setSize(this.size.x, this.size.y);
+      composer.addPass(outline);
+      this.passes.outline = outline;
+    }
+
     if (want.lens) {
       const lens = new ShaderPass(LensShader);
       composer.addPass(lens);
@@ -138,6 +166,7 @@ export class PostFX {
     this.size.set(width, height);
     this.composer?.setSize(width, height);
     this.passes.bloom?.setSize(width, height);
+    this.passes.outline?.setSize(width, height);
   }
 
   /** Traduce los ajustes fotograficos a los uniformes de cada pase. */
@@ -169,6 +198,19 @@ export class PostFX {
       this.passes.bloom.strength = s.get('camera.bloom');
       this.passes.bloom.threshold = 0.9;
       this.passes.bloom.radius = 0.7;
+    }
+
+    if (this.passes.outline) {
+      this.passes.outline.configure({
+        color: s.get('outline.color'),
+        thickness: s.get('outline.thickness'),
+        opacity: s.get('outline.opacity'),
+        mode: s.get('outline.mode'),
+        edges: s.get('outline.edges'),
+        depth: s.get('outline.depth'),
+        valleys: s.get('outline.valleys'),
+        sensitivity: s.get('outline.sensitivity'),
+      });
     }
 
     if (this.passes.lens) {

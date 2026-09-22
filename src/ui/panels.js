@@ -119,6 +119,41 @@ function figurePanel(app) {
       ),
       notice('info', 'El <b>sombreado</b> de arriba (arcilla, rayos X…) manda sobre estos materiales mientras este activo.'),
     ]),
+    group({ id: 'fig-outline', title: 'Contorno (outline)', icon: 'pen-line' }, [
+      toggle({ path: 'outline.enabled', label: 'Dibujar contorno',
+        hint: 'Traza un borde sobre las figuras y los solidos. Es un efecto encima de la imagen: no cambia los materiales.' }),
+      enableWhen(el('div', { class: 'stack' }, [
+        segmented({
+          label: 'Se dibuja', path: 'outline.mode',
+          options: [
+            { value: 'objeto', label: 'Todo un objeto', icon: 'square', title: 'Solo la silueta exterior de cada forma' },
+            { value: 'individual', label: 'Por piezas', icon: 'shapes', title: 'Silueta mas los bordes internos y las facetas' },
+          ],
+          hint: '«Todo un objeto» deja solo el contorno exterior. «Por piezas» anade los bordes de cada pieza y las aristas de las facetas, para leer los planos.',
+        }),
+        color({ path: 'outline.color', label: 'Color del trazo' }),
+        slider({ label: 'Grosor', path: 'outline.thickness', min: 0.5, max: 4, step: 0.1,
+          format: (v) => v.toFixed(1) + ' px' }),
+        slider({ label: 'Opacidad', path: 'outline.opacity', min: 0.1, max: 1, step: 0.01 }),
+        // Afinado del modo «por piezas»: cada fuente de borde por separado, para
+        // subir justo la que falta (los pliegues «hacia dentro», por ejemplo).
+        enableWhen(el('div', { class: 'stack' }, [
+          slider({ label: 'Aristas y facetas', path: 'outline.edges', min: 0, max: 2, step: 0.05,
+            format: (v) => Math.round(v * 100) + ' %',
+            hint: 'Los cantos vivos y las facetas: donde la orientacion de la superficie cambia de golpe.' }),
+          slider({ label: 'Pliegues y valles', path: 'outline.valleys', min: 0, max: 2, step: 0.05,
+            format: (v) => Math.round(v * 100) + ' %',
+            hint: 'Los huecos concavos «hacia dentro» (axilas, ingles, entre los dedos), que la arista sola apenas marca.' }),
+          slider({ label: 'Solape', path: 'outline.depth', min: 0, max: 2, step: 0.05,
+            format: (v) => Math.round(v * 100) + ' %',
+            hint: 'Donde una forma tapa a otra: un miembro por delante del torso, dos figuras que se cruzan.' }),
+          slider({ label: 'Sensibilidad', path: 'outline.sensitivity', min: 0, max: 1, step: 0.01,
+            format: (v) => Math.round(v * 100) + ' %',
+            hint: 'Rebaja el umbral: mas alto saca los bordes tenues que si no no llegan a dibujarse (a costa de algo de ruido).' }),
+        ]), 'outline.mode', (s) => s.get('outline.mode') !== 'objeto'),
+      ]), 'outline.enabled', (s) => s.get('outline.enabled') === true),
+      notice('info', 'El contorno «por piezas» resalta los planos igual que el material <b>Facetas</b>, pero como lineas por encima de cualquier material. Sube <b>Pliegues y valles</b> y la <b>Sensibilidad</b> si los huecos hacia dentro no se marcan.'),
+    ]),
     group({ id: 'fig-file', title: 'Modelo', icon: 'folder-open' }, [
       modelLibraryGrid(app),
       buttons([

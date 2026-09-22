@@ -190,6 +190,37 @@ export const DEFAULTS = {
     objeto:    { preset: 'yeso',     color: '#d8d4cc', roughness: 0.70, metalness: 0.00, opacity: 1, flat: false },
   },
 
+  /**
+   * Contorno (outline) sobre las figuras y los solidos. Es un efecto de
+   * post-proceso, asi que se dibuja encima de cualquier material sin tocarlo.
+   *
+   *   mode 'objeto'     -> solo la silueta exterior de cada forma.
+   *   mode 'individual' -> silueta mas los bordes internos de cada pieza y las
+   *                        aristas de las facetas, para leer los planos.
+   *
+   * `thickness` es el grosor del trazo en pixeles y `opacity` cuanto se nota.
+   *
+   * En modo 'individual' el trazo se compone de varias fuentes de borde, cada
+   * una con su peso, para poder subir justo la que hace falta:
+   *   - `edges`       aristas donde gira la normal (los cantos vivos y facetas).
+   *   - `depth`       saltos de profundidad (un miembro que tapa a otro).
+   *   - `valleys`     pliegues concavos, los huecos «hacia dentro» que la normal
+   *                   apenas marca (axilas, ingles, entre los dedos...).
+   *   - `sensitivity` cuanto se rebaja el umbral: mas alto saca los bordes
+   *                   tenues que si no no llegan a dibujarse.
+   */
+  outline: {
+    enabled: false,
+    mode: 'individual',         // objeto (silueta) | individual (silueta + panos)
+    color: '#12151a',
+    thickness: 1.4,
+    opacity: 0.9,
+    edges: 1,                   // peso de las aristas por normal (0..2)
+    depth: 1,                   // peso del solape por profundidad (0..2)
+    valleys: 0.7,               // peso de los pliegues concavos (0..2)
+    sensitivity: 0.5,           // 0 = solo bordes marcados, 1 = tambien los tenues
+  },
+
   /** Editor de escena: figuras, solidos y luces que el usuario coloca. */
   scene: {
     /**

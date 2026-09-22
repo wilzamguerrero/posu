@@ -699,6 +699,19 @@ async function main() {
   });
   app.scene = sceneEditor;
 
+  // Contorno de post-proceso: el pase pregunta en cada fotograma que mallas
+  // llevan trazo. Son las de las figuras visibles y las de los solidos; el suelo,
+  // el fondo y los ayudantes se quedan fuera por no estar en su capa.
+  viewport.postfx.setOutlineProvider(() => {
+    const meshes = [];
+    for (const ch of figures.all()) {
+      if (ch?.root?.visible === false) continue;
+      for (const mesh of ch.visibleMeshes) if (mesh.visible) meshes.push(mesh);
+    }
+    meshes.push(...sceneEditor.outlineMeshes());
+    return meshes;
+  });
+
   actions.addObject = (type) => {
     sceneEditor.addObject(type);
     toast('Solido insertado. W mover · E girar · R escalar');

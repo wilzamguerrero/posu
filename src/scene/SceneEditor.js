@@ -641,6 +641,17 @@ export class SceneEditor {
     });
   }
 
+  /** Mallas de los solidos visibles, para el contorno de post-proceso. */
+  outlineMeshes() {
+    const out = [];
+    for (const item of this.items.values()) {
+      const o = item.object;
+      if (item.kind === 'figura' || !o?.isMesh || o.isLight || !o.visible) continue;
+      out.push(o);
+    }
+    return out;
+  }
+
   /** Medidas del elemento indicado, en metros. Las lee el panel. */
   sizeOf(id) {
     const item = id ? this.items.get(id) : null;

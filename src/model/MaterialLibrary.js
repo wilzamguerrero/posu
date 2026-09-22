@@ -75,6 +75,10 @@ export const MATERIAL_PRESETS = [
   { id: 'toon',      label: 'Comic',      icon: 'palette',      kind: 'toon',
     p: { color: '#c9c2b8', opacity: 1 } },
 
+  { id: 'cell',      label: 'Cell shading', icon: 'pen-tool',   kind: 'toon',
+    p: { color: '#b9c4d4', opacity: 1 }, gradient: 'cell',
+    note: 'Dos tonos planos y marcados, estilo comic' },
+
   { id: 'plano',     label: 'Plano',      icon: 'square',       kind: 'basic',
     p: { color: '#8fa6c4', opacity: 1 },
     note: 'Sin iluminacion, util para siluetas' },
@@ -82,6 +86,10 @@ export const MATERIAL_PRESETS = [
   { id: 'normales',  label: 'Normales',   icon: 'compass',      kind: 'normal',
     p: { flat: false },
     note: 'Colorea la orientacion de la superficie' },
+
+  { id: 'facetas',   label: 'Facetas',    icon: 'triangle',     kind: 'normal',
+    p: { flat: true },
+    note: 'Normales facetadas: resalta los planos de la malla' },
 
   { id: 'wireframe', label: 'Malla',      icon: 'grid-3x3',     kind: 'wire',
     p: { color: '#7fb2ff', opacity: 1 } },
@@ -111,9 +119,9 @@ export function materialSupports(id, prop) {
   return (CAMPOS[preset.kind] ?? []).includes(prop);
 }
 
-/** Las mallas de rayos X, malla y normales no deben oscurecer la escena. */
+/** Las mallas de rayos X, malla y las de normales no deben oscurecer la escena. */
 export function proyectaSombra(id) {
-  return id !== 'rayosx' && id !== 'wireframe' && id !== 'normales';
+  return !['rayosx', 'wireframe', 'normales', 'facetas'].includes(id);
 }
 
 /** Descarta claves vacias para que `Object.assign` no borre valores validos. */
@@ -181,17 +189,30 @@ export function xrayMaterial(color = '#8fd8ff') {
   return mat;
 }
 
-/** Rampa de 3 tonos compartida por todos los materiales tipo comic. */
+/** Construye una rampa de bandas nitidas para los materiales tipo comic. */
+function rampaToon(niveles) {
+  const data = new Uint8Array(niveles);
+  const tex = new THREE.DataTexture(data, data.length, 1, THREE.RedFormat);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Rampa de 3 tonos del comic clasico (sombra, medio, luz). */
 let gradient = null;
 export function toonGradient() {
-  if (gradient) return gradient;
-  const data = new Uint8Array([48, 148, 236]);
-  gradient = new THREE.DataTexture(data, data.length, 1, THREE.RedFormat);
-  gradient.minFilter = THREE.NearestFilter;
-  gradient.magFilter = THREE.NearestFilter;
-  gradient.generateMipmaps = false;
-  gradient.needsUpdate = true;
-  return gradient;
+  return (gradient ??= rampaToon([48, 148, 236]));
+}
+
+/**
+ * Rampa de 2 tonos para el cell shading: un corte duro entre sombra y luz, sin
+ * medio tono, que es lo que le da el aspecto grafico marcado frente al comic.
+ */
+let gradientCell = null;
+export function cellGradient() {
+  return (gradientCell ??= rampaToon([54, 236]));
 }
 
 // ------------------------------------------------------------- fabricacion ---
@@ -223,7 +244,7 @@ export function crearMaterial(id, params = {}) {
     case 'toon':
       mat = new THREE.MeshToonMaterial({
         color: new THREE.Color(p.color ?? '#ffffff'),
-        gradientMap: toonGradient(),
+        gradientMap: preset.gradient === 'cell' ? cellGradient() : toonGradient(),
       });
       break;
     case 'basic':
