@@ -27,6 +27,9 @@ const CAMPOS = {
   basic:    ['color', 'opacity'],
   wire:     ['color', 'opacity'],
   normal:   ['flat'],
+  // Las facetas tienen controles propios (tres colores, intensidad y enfoque),
+  // que el panel dibuja aparte; aqui se declaran los genericos que si comparten.
+  facet:    ['flat', 'opacity'],
   xray:     ['color', 'opacity'],
 };
 
@@ -87,9 +90,10 @@ export const MATERIAL_PRESETS = [
     p: { flat: false },
     note: 'Colorea la orientacion de la superficie' },
 
-  { id: 'facetas',   label: 'Facetas',    icon: 'triangle',     kind: 'normal',
-    p: { flat: true },
-    note: 'Normales facetadas: resalta los planos de la malla' },
+  { id: 'facetas',   label: 'Facetas',    icon: 'triangle',     kind: 'facet',
+    p: { colorX: '#e05a5a', colorY: '#9be870', colorZ: '#5aa0ff',
+      intensity: 1, contrast: 1.6, flat: true, opacity: 1 },
+    note: 'Colorea los planos de la malla; colores, intensidad y enfoque a gusto' },
 
   { id: 'wireframe', label: 'Malla',      icon: 'grid-3x3',     kind: 'wire',
     p: { color: '#7fb2ff', opacity: 1 } },
@@ -215,6 +219,56 @@ export function cellGradient() {
   return (gradientCell ??= rampaToon([54, 236]));
 }
 
+// ---------------------------------------------------------------- facetas ---
+
+/** Cabecera que se inyecta en el shader de normales para colorear las caras. */
+const FACET_HEADER = /* glsl */ `
+  uniform vec3 uColorX;
+  uniform vec3 uColorY;
+  uniform vec3 uColorZ;
+  uniform float uIntensity;
+  uniform float uContrast;
+  // Mezcla los tres colores segun a que eje mira la cara. uContrast es el
+  // enfoque: en 1 la mezcla es suave (degradado entre planos); al subir, cada
+  // cara salta a su color dominante y la separacion se vuelve dura.
+  vec3 facetColor( vec3 nrm ) {
+    vec3 n = normalize( nrm );
+    vec3 w = pow( abs( n ), vec3( uContrast ) );
+    w /= max( 1e-4, w.x + w.y + w.z );
+    return ( uColorX * w.x + uColorY * w.y + uColorZ * w.z ) * uIntensity;
+  }
+`;
+
+/**
+ * Material de facetas: parte de `MeshNormalMaterial` (que ya trae el sombreado
+ * plano y el skinning) y le cambia el color final por una mezcla de tres colores
+ * elegibles, con intensidad y enfoque. Las uniformes viven en `userData` para
+ * poder tocarlas en caliente sin recompilar.
+ */
+export function facetMaterial(p = {}) {
+  const mat = new THREE.MeshNormalMaterial({ flatShading: p.flat === true });
+  const uni = {
+    uColorX: { value: new THREE.Color(p.colorX ?? '#e05a5a') },
+    uColorY: { value: new THREE.Color(p.colorY ?? '#9be870') },
+    uColorZ: { value: new THREE.Color(p.colorZ ?? '#5aa0ff') },
+    uIntensity: { value: p.intensity ?? 1 },
+    uContrast: { value: Math.max(0.05, p.contrast ?? 1.6) },
+  };
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uni);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', `${FACET_HEADER}\nvoid main() {`)
+      .replace(
+        'gl_FragColor = vec4( packNormalToRGB( normal ), diffuseColor.a );',
+        'gl_FragColor = vec4( facetColor( normal ), diffuseColor.a );',
+      );
+  };
+  // Sin esto, three reutilizaria el programa del MeshNormalMaterial normal.
+  mat.customProgramCacheKey = () => 'posu:facet';
+  mat.userData.facetUniforms = uni;
+  return mat;
+}
+
 // ------------------------------------------------------------- fabricacion ---
 
 /**
@@ -255,6 +309,9 @@ export function crearMaterial(id, params = {}) {
       break;
     case 'normal':
       mat = new THREE.MeshNormalMaterial({ flatShading: flat });
+      break;
+    case 'facet':
+      mat = facetMaterial(p);
       break;
     case 'xray':
       mat = xrayMaterial(p.color ?? '#8fd8ff');
@@ -297,6 +354,15 @@ export function aplicarParametros(mat, params = {}) {
   if (p.flat !== undefined && 'flatShading' in mat && mat.flatShading !== !!p.flat) {
     mat.flatShading = !!p.flat;
     mat.needsUpdate = true;   // el sombreado plano si obliga a recompilar
+  }
+  // Facetas: sus tres colores, la intensidad y el enfoque son uniformes propios.
+  const uni = mat.userData?.facetUniforms;
+  if (uni) {
+    if (p.colorX !== undefined) uni.uColorX.value.set(p.colorX);
+    if (p.colorY !== undefined) uni.uColorY.value.set(p.colorY);
+    if (p.colorZ !== undefined) uni.uColorZ.value.set(p.colorZ);
+    if (p.intensity !== undefined) uni.uIntensity.value = Math.max(0, p.intensity);
+    if (p.contrast !== undefined) uni.uContrast.value = Math.max(0.05, p.contrast);
   }
   if (p.opacity !== undefined) aplicarOpacidad(mat, p.opacity);
   return mat;

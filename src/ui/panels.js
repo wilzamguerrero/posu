@@ -361,6 +361,28 @@ function materialControls(store, base, { cols = 3, onAfterPreset } = {}) {
     }),
   ];
   if (def?.note) out.push(el('div', { class: 'field-hint', text: def.note }));
+
+  // Las facetas tienen su propio juego de controles: tres colores por eje,
+  // intensidad, enfoque (duro/suave) y el facetado.
+  if (presetId === 'facetas') {
+    out.push(
+      el('div', { class: 'field-label' }, [el('span', { text: 'Colores por eje' })]),
+      color({ path: base + '.colorX', label: 'Eje X (lados)' }),
+      color({ path: base + '.colorY', label: 'Eje Y (arriba/abajo)' }),
+      color({ path: base + '.colorZ', label: 'Eje Z (frente/espalda)' }),
+      slider({ label: 'Intensidad', path: base + '.intensity', min: 0, max: 3, step: 0.01,
+        format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Brillo de los colores. Por encima del 100 % los satura.' }),
+      slider({ label: 'Enfoque de caras', path: base + '.contrast', min: 0.3, max: 6, step: 0.05,
+        format: (v) => v.toFixed(2),
+        hint: 'Bajo = mezcla suave entre planos (degradado); alto = cada cara salta a su color, la separacion se vuelve dura.' }),
+      slider({ label: 'Opacidad', path: base + '.opacity', min: 0.05, max: 1, step: 0.01 }),
+      toggle({ path: base + '.flat', label: 'Facetado (caras planas)',
+        hint: 'Encendido, cada triangulo es una cara plana. Apagado, la normal se suaviza y los colores fluyen.' }),
+    );
+    return out;
+  }
+
   if (materialSupports(presetId, 'color')) out.push(color({ path: base + '.color', label: 'Color' }));
   for (const prop of ['roughness', 'metalness', 'opacity']) {
     if (!materialSupports(presetId, prop)) continue;
