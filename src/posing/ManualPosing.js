@@ -1161,6 +1161,17 @@ export class ManualPosing {
     return this.#pick(event) !== null;
   }
 
+  /**
+   * ¿Manda el giroscopio del posado sobre este puntero? Es cierto mientras se
+   * arrastra y tambien cuando el puntero esta sobre uno de sus ejes (three deja
+   * `axis` puesto al pasar por encima). Lo consulta el editor de escena para no
+   * robarle el clic: con un control seleccionado, tirar de su eje no debe
+   * seleccionar la caja de otra figura que quede detras.
+   */
+  gizmoBusy() {
+    return this.enabled && (this.dragging || (!!this.gizmo.object && !!this.gizmo.axis));
+  }
+
   #onPointerDown(event) {
     if (!this.enabled || this.dragging || event.button !== 0) return;
     const key = this.#pick(event);

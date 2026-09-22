@@ -691,7 +691,8 @@ async function main() {
     // figuras, solidos y luces con el raton. Con el lapiz encendido no se
     // selecciona nada: el visor es papel.
     blocked: (event) => settings.get('draw.enabled') === true
-      || (settings.get('ui.manualPosing') === true && !!event && posing.picks(event)),
+      || (settings.get('ui.manualPosing') === true
+        && (posing.gizmoBusy() || (!!event && posing.picks(event)))),
     onSelect: () => app.hooks.refreshScene?.(),
     // Al elegir un elemento pinchandolo en el visor se abre su panel: si no, la
     // seleccion se hacia a ciegas y habia que ir a la lista de escena.
