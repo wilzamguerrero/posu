@@ -474,6 +474,8 @@ export const DEFAULTS = {
     inShot: true,               // incluir el dibujo en la captura PNG
   },
 
+  snapshots: [],            // Vistas guardadas: [{id,name,created,state,camera}]
+
   ui: {
     section: 'figure',
     /**

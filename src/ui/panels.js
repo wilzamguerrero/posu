@@ -808,6 +808,35 @@ function cameraPanel(app) {
     slider({ label: 'Desenfoque maximo', path: 'camera.maxBlur', min: 0, max: 0.05, step: 0.001 }),
   ]);
 
+  // --- Vistas guardadas (snapshots): estado completo que incluye angulo, lente, luces, materiales, poses y guias ---
+  const snapInput = el('input', { type: 'text', class: 'text-input', placeholder: 'Nombre (ej. Picado 85mm - luz dura)' });
+  snapInput.spellcheck = false;
+  let selectedSnap = '';
+  const snapList = listView({
+    empty: 'Sin vistas guardadas. Ajusta angulo, lente, luz o materiales y guarda la primera.',
+    onSelect: (item) => { selectedSnap = item.id; actions.applyView?.(item.id); },
+    onDelete: (item) => actions.deleteView?.(item.id),
+  });
+  const refreshSnaps = () => {
+    const list = settings.get('snapshots') ?? [];
+    const fmt = new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    snapList.render(list.map((s) => ({
+      id: s.id, label: s.name, icon: 'bookmark',
+      meta: s.created ? fmt.format(new Date(s.created)) : '',
+    })), selectedSnap);
+  };
+  app.hooks ??= {};
+  app.hooks.refreshSnapshots = refreshSnaps;
+  settings.on('snapshots', refreshSnaps);
+  // primera pintura (despues de que el store este listo)
+  setTimeout(refreshSnaps, 0);
+  const guardarVista = () => {
+    const name = snapInput.value.trim();
+    const snap = actions.captureView?.(name);
+    if (snap) { snapInput.value = ''; selectedSnap = snap.id; refreshSnaps(); }
+  };
+  snapInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') guardarVista(); });
+
   return [
     group({ id: 'cam-lens', title: 'Optica', icon: 'aperture' }, [
       segmented({
@@ -839,6 +868,24 @@ function cameraPanel(app) {
         { label: 'Encuadrar figura', icon: 'maximize', onClick: () => actions.frameFigure() },
         { label: 'Restablecer camara', icon: 'rotate-ccw', onClick: () => actions.resetCamera() },
       ], { cols: 2 }),
+    ]),
+    group({ id: 'cam-snapshots', title: 'Vistas guardadas', icon: 'bookmark' }, [
+      field('Guardar estado actual', el('div', { class: 'field-row' }, [
+        snapInput,
+        el('button', { class: 'btn primary', type: 'button', title: 'Guarda angulo, lente, luces, materiales, poses y guias',
+          onClick: guardarVista }, [icon('save', 14), el('span', { text: 'Guardar' })]),
+      ]), { hint: 'Captura todo lo que ves ahora: angulo y orbita, focal, tilt-shift, roll, profundidad de campo, defectos de lente, exposicion, luces, escenario, materiales, poses de las figuras, guias y encuadre. Luego pulsa una vista para saltar entre ellas al instante.' }),
+      snapList,
+      buttons([
+        { label: 'Actualizar', icon: 'refresh-cw', title: 'Sobrescribe la vista seleccionada con el estado actual',
+          onClick: () => {
+            if (!selectedSnap) { const list = settings.get('snapshots') ?? []; if (!list.length) return; selectedSnap = list[list.length - 1].id; }
+            actions.updateView?.(selectedSnap);
+          } },
+        { label: 'Renombrar', icon: 'pencil', title: 'Cambia el nombre de la vista seleccionada',
+          onClick: () => { if (!selectedSnap) return; actions.renameView?.(selectedSnap); } },
+      ], { cols: 2 }),
+      notice('info', 'Las vistas se guardan en este navegador y <b>viajan dentro del .atom</b>: al exportar escena se llevan todas. Pulsa una fila para aplicarla; usa la papelera para borrarla.'),
     ]),
     group({ id: 'cam-dof', title: 'Profundidad de campo', icon: 'focus', open: false }, [
       toggle({ path: 'camera.dof', label: 'Activar desenfoque' }),

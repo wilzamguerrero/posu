@@ -95,6 +95,14 @@ export async function importSceneAtom(app, text) {
 
   const { settings, figures, viewport, library, sketch } = app;
 
+  // Import compatible: data.state puede ser el antiguo `state` sin `snapshots`
+  // o un archivo cogido directamente de localStorage posu.settings.v1. Si
+  // snapshots venían dentro del atom, los `state.snapshots` ya los restaura;
+  // si no, se conservan los locales (mergeKnown no borra claves ausentes).
+  // Si el atom trae `snapshots` en raíz (futuro), también se aplican.
+  if (Array.isArray(data.snapshots) && !Array.isArray(data.state?.snapshots)) {
+    data.state.snapshots = deepClone(data.snapshots);
+  }
   // Aplicar estado completo. `replace` solo toca claves conocidas (mergeKnown),
   // así que un .atom antiguo no rompe claves nuevas.
   settings.replace(deepClone(data.state));
@@ -103,6 +111,30 @@ export async function importSceneAtom(app, text) {
 
   // Sincronizar figuras (carga modelos/poses). Es asíncrono: hay que esperar.
   try { await figures?.sync?.(); } catch { /* carga fallida: sigue */ }
+  // Llevar modelo+pose del .atom al personaje vivo: `replace` escribe
+  // `scene.figures[N].{model,pose}` pero `model` necesita `ch.load` y `pose`
+  // necesita `ch.setPose` porque FigureSet ignora `pose` en #onPath.
+  // Los modelos externos (`model === ''`) no se rehidratan (eran File), se
+  // mantienen como están. Los de biblioteca se recargan por id con Cache.
+  try {
+    const defs = settings.get('scene.figures') ?? [];
+    const { libraryUrl } = await import('../model/FigureSet.js');
+    for (const def of defs) {
+      const ch = figures?.get?.(def.id);
+      if (!ch) continue;
+      const want = String(def.model ?? '');
+      if (want === '') continue;
+      try { await ch.load(libraryUrl(want)); figures?.applyDef?.(def.id); } catch { /* modelo no disponible */ }
+    }
+    try { await figures?.sync?.(); } catch { /* sin figuras */ }
+    for (const def of (settings.get('scene.figures') ?? [])) {
+      const ch = figures?.get?.(def.id);
+      if (!ch?.loaded) continue;
+      if (def.pose?.rotations) { ch.setPose(def.pose, 1); ch.refreshBounds(); }
+      else { ch.resetToRest(); ch.clearDeform(); ch.refreshBounds(); }
+    }
+    try { for (const ch of figures?.all?.() ?? []) ch.tick?.(); } catch { /* sin figuras */ }
+  } catch { /* modelo/pose no crítico */ }
 
   // Restaurar ángulo de cámara si venía en el archivo.
   try {
@@ -141,6 +173,7 @@ export async function importSceneAtom(app, text) {
     try { app.actions?.frameFigure?.(); } catch { /* sin figura */ }
   }
 
+  app.hooks?.refreshSnapshots?.();
   viewport?.invalidateShadows?.();
   return true;
 }

@@ -693,6 +693,51 @@ async function main() {
       toast('No se pudo cargar la escena', 'err');
     }
   };
+  // --- Vistas guardadas (snapshots) ---
+  let _snapMod = null;
+  import('./scene/Snapshots.js').then((m) => { _snapMod = m; }).catch(() => {});
+  actions.captureView = (name) => {
+    if (_snapMod) {
+      const snap = _snapMod.captureSnapshot(app, name);
+      if (snap) { app.hooks?.refreshSnapshots?.(); toast(`Vista guardada: ${snap.name}`, 'ok'); }
+      return snap;
+    }
+    import('./scene/Snapshots.js').then(({ captureSnapshot }) => {
+      const snap = captureSnapshot(app, name);
+      if (snap) { _snapMod = { captureSnapshot }; app.hooks?.refreshSnapshots?.(); toast(`Vista guardada: ${snap.name}`, 'ok'); }
+    });
+    return null;
+  };
+  actions.applyView = async (id) => {
+    const mod = _snapMod ?? await import('./scene/Snapshots.js');
+    _snapMod = mod;
+    const ok = await mod.applySnapshot(app, id);
+    if (ok) { app.hooks?.refreshSnapshots?.(); toast('Vista aplicada', 'ok'); }
+    else toast('No se pudo aplicar esa vista', 'warn');
+    return ok;
+  };
+  actions.deleteView = async (id) => {
+    const mod = _snapMod ?? await import('./scene/Snapshots.js');
+    _snapMod = mod;
+    if (mod.deleteSnapshot(app, id)) { app.hooks?.refreshSnapshots?.(); toast('Vista eliminada'); }
+  };
+  actions.renameView = async (id) => {
+    const list = settings.get('snapshots') ?? [];
+    const cur = list.find((s) => s.id === id);
+    if (!cur) return;
+    const name = prompt('Nuevo nombre de la vista:', cur.name);
+    if (name == null) return;
+    const mod = _snapMod ?? await import('./scene/Snapshots.js');
+    _snapMod = mod;
+    if (mod.renameSnapshot(app, id, name)) { app.hooks?.refreshSnapshots?.(); toast('Vista renombrada', 'ok'); }
+  };
+  actions.updateView = async (id) => {
+    const mod = _snapMod ?? await import('./scene/Snapshots.js');
+    _snapMod = mod;
+    const snap = mod.updateSnapshot(app, id);
+    if (snap) { app.hooks?.refreshSnapshots?.(); toast(`Vista actualizada: ${snap.name}`, 'ok'); }
+  };
+
   // Arrastrar un .atom al visor también lo carga
   actions.handleAtomDrop = async (file) => {
     if (!/\.atom$/i.test(file.name)) return false;
