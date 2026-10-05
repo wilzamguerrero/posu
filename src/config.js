@@ -382,7 +382,7 @@ export const DEFAULTS = {
     horizon: false,
     diagonals: false,
     grid: 0,                    // 0 = sin rejilla; n = n x n
-    safeFrame: 'ninguno',       // ninguno | 1:1 | 4:5 | 3:2 | 16:9
+    safeFrame: 'ninguno',       // ninguno | 1:1 | 5:4 | 4:5 | 4:3 | 3:4 | 3:2 | 2:3 | 16:10 | 10:16 | 16:9 | 9:16 | 2:1 | 1:2 | 21:9 | 9:21 | 2.39:1 | 1.85:1 | 1.91:1 | A4 | A4h
 
     /** Sistema de perspectiva: 1, 2 y 3 puntos mas curvilineas de 4, 5 y 6. */
     perspective: {

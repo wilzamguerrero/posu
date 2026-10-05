@@ -21,12 +21,53 @@ const _v = new THREE.Vector3();
 const _box = new THREE.Box3();
 
 /** Relaciones de aspecto del encuadre seguro. */
-const ASPECTS = {
+export const ASPECTS = {
   '1:1': 1,
+  '5:4': 5 / 4,
   '4:5': 4 / 5,
+  '4:3': 4 / 3,
+  '3:4': 3 / 4,
   '3:2': 3 / 2,
+  '2:3': 2 / 3,
+  '16:10': 16 / 10,
+  '10:16': 10 / 16,
   '16:9': 16 / 9,
+  '9:16': 9 / 16,
+  '2:1': 2,
+  '1:2': 1 / 2,
+  '21:9': 21 / 9,
+  '9:21': 9 / 21,
+  '2.39:1': 2.39,
+  '1.85:1': 1.85,
+  '1.91:1': 1.91,
+  'A4': 1 / Math.SQRT2,
+  'A4h': Math.SQRT2,
 };
+
+/** Opciones del selector de encuadre seguro (usado por el panel de Guías). */
+export const SAFE_FRAME_OPTIONS = [
+  { value: 'ninguno', label: 'Sin recorte' },
+  { value: '1:1', label: 'Cuadrado 1:1' },
+  { value: '5:4', label: 'Foto 5:4 — medio formato' },
+  { value: '4:5', label: 'Retrato 4:5 — Instagram' },
+  { value: '4:3', label: 'Foto 4:3 — clásica / TV' },
+  { value: '3:4', label: 'Vertical 3:4' },
+  { value: '3:2', label: 'Clásico 3:2 — 35 mm' },
+  { value: '2:3', label: 'Vertical 2:3' },
+  { value: '16:10', label: 'Pantalla 16:10' },
+  { value: '10:16', label: 'Vertical 16:10' },
+  { value: '16:9', label: 'Panorámico 16:9 — YouTube' },
+  { value: '9:16', label: 'Vertical 9:16 — Reels / Stories' },
+  { value: '2:1', label: 'Cine 2:1 — Univisium' },
+  { value: '1:2', label: 'Vertical 1:2' },
+  { value: '21:9', label: 'Ultrapanorámico 21:9' },
+  { value: '9:21', label: 'Vertical 9:21' },
+  { value: '2.39:1', label: 'Cinemascope 2.39:1' },
+  { value: '1.85:1', label: 'Cine 1.85:1 — Flat' },
+  { value: '1.91:1', label: 'Portada 1.91:1 — Open Graph' },
+  { value: 'A4', label: 'Papel A4 vertical (1:1.414)' },
+  { value: 'A4h', label: 'Papel A4 horizontal (1.414:1)' },
+];
 
 export class Guides {
   /**

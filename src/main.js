@@ -421,6 +421,10 @@ async function main() {
   };
 
   actions.handleDroppedFile = async (file) => {
+    if (/\.atom$/i.test(file.name)) {
+      const handled = await actions.handleAtomDrop?.(file);
+      if (handled) return true;
+    }
     if (isModelFile(file.name)) return loadCharacter(file);
     const ok = await source.useFile(file);
     if (!ok) return;
@@ -667,6 +671,41 @@ async function main() {
       toast('Ajustes copiados al portapapeles', 'ok');
     } catch {
       toast('El navegador no permite copiar al portapapeles', 'warn');
+    }
+  };
+  actions.exportScene = () => {
+    import('./scene/SceneIO.js').then(({ exportSceneAtom }) => {
+      try { exportSceneAtom(app); toast('Escena guardada (.atom)', 'ok'); }
+      catch (err) { console.error('[Escena .atom]', err); toast('No se pudo guardar la escena', 'err'); }
+    }).catch((err) => { console.error('[Escena .atom]', err); toast('No se pudo guardar la escena', 'err'); });
+  };
+  actions.importScene = async () => {
+    try {
+      const { pickAtomFile, importSceneAtom } = await import('./scene/SceneIO.js');
+      const file = await pickAtomFile();
+      if (!file) return;
+      const text = await file.text();
+      const ok = await importSceneAtom(app, text);
+      if (!ok) { toast('El archivo no es una escena .atom válida', 'err'); return; }
+      toast('Escena cargada (.atom)', 'ok');
+    } catch (err) {
+      console.error('[Escena .atom]', err);
+      toast('No se pudo cargar la escena', 'err');
+    }
+  };
+  // Arrastrar un .atom al visor también lo carga
+  actions.handleAtomDrop = async (file) => {
+    if (!/\.atom$/i.test(file.name)) return false;
+    try {
+      const { importSceneAtom } = await import('./scene/SceneIO.js');
+      const ok = await importSceneAtom(app, await file.text());
+      if (ok) toast('Escena cargada (.atom)', 'ok');
+      else toast('El archivo .atom no es válido', 'err');
+      return ok;
+    } catch (err) {
+      console.error('[Escena .atom drop]', err);
+      toast('No se pudo cargar el .atom', 'err');
+      return false;
     }
   };
   actions.resetAll = async () => {

@@ -27,6 +27,7 @@ import { HAND_PRESETS } from '../model/HandRig.js';
 import { MAX_FIGURAS } from '../model/FigureSet.js';
 import { FINGERS, FINGER_LABELS } from '../model/boneMap.js';
 import { IK_CHAINS } from '../posing/IKRig.js';
+import { SAFE_FRAME_OPTIONS } from '../guides/Guides.js';
 
 /** Abre el selector de archivos del sistema y resuelve con el archivo elegido. */
 export function pickFile(accept) {
@@ -1408,13 +1409,7 @@ function guidesPanel(app) {
       slider({ label: 'Rejilla', path: 'guides.grid', min: 0, max: 12, step: 1,
         format: (v) => (v < 1 ? 'sin rejilla' : `${Math.round(v)} × ${Math.round(v)}`) }),
       select({ label: 'Encuadre seguro', path: 'guides.safeFrame',
-        options: [
-          { value: 'ninguno', label: 'Sin recorte' },
-          { value: '1:1', label: 'Cuadrado 1:1' },
-          { value: '4:5', label: 'Retrato 4:5' },
-          { value: '3:2', label: 'Clasico 3:2' },
-          { value: '16:9', label: 'Panoramico 16:9' },
-        ] }).root,
+        options: SAFE_FRAME_OPTIONS }).root,
     ]),
     group({ id: 'gu-style', title: 'Aspecto', icon: 'palette', open: false }, [
       color({ path: 'guides.color', label: 'Color de las guias' }),
@@ -1542,6 +1537,17 @@ function settingsPanel(app) {
         { label: 'Restablecer todo', icon: 'trash-2', variant: 'danger',
           title: 'Vuelve a los valores por defecto', onClick: () => actions.resetAll() },
       ], { cols: 2 }),
+    ]),
+    group({ id: 'st-scene', title: 'Escena completa (.atom)', icon: 'save' }, [
+      buttons([
+        { label: 'Guardar escena .atom', icon: 'save', variant: 'primary',
+          title: 'Guarda modelos, poses, cámaras, luces, materiales y guías en un .atom',
+          onClick: () => actions.exportScene?.() },
+        { label: 'Cargar escena .atom', icon: 'folder-open',
+          title: 'Restaura una escena .atom exactamente como se guardó',
+          onClick: () => actions.importScene?.() },
+      ], { cols: 2 }),
+      notice('info', 'El <b>.atom</b> guarda todo: figuras y sus poses, ángulo de cámara, luces, escenario, materiales y guías. Es el mismo contenido del guardado automático del navegador, pero en un archivo para llevarlo a otro equipo o continuar después.'),
     ]),
     group({ id: 'st-keys', title: 'Atajos de teclado', icon: 'keyboard', open: false }, [
       el('div', { class: 'shortcuts' }, [
