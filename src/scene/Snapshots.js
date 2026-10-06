@@ -59,7 +59,7 @@ export function captureSnapshot(app, name = '') {
 
 /** Aplica una vista por id. Devuelve true si se aplicó. */
 export async function applySnapshot(app, id) {
-  const { settings, figures, viewport } = app;
+  const { settings, figures, viewport, posing } = app;
   const list = settings.get('snapshots') ?? [];
   const snap = list.find((s) => s.id === id);
   if (!snap?.state) return false;
@@ -93,6 +93,21 @@ export async function applySnapshot(app, id) {
       else { ch.resetToRest(); ch.clearDeform(); ch.refreshBounds(); }
     }
     try { for (const ch of figures?.all?.() ?? []) ch.tick?.(); } catch { /* sin figuras */ }
+    // El posado manual (giroscopio + controles de cinematica inversa) vive en un
+    // grupo aparte y no se entera de que la pose ha cambiado por debajo: sin esto
+    // sus manejadores se quedan donde estaban en la pose anterior, flotando lejos
+    // del cuerpo. Se vuelve a apuntar a la figura activa, se rehacen los
+    // manejadores (el esqueleto puede ser otro tras recargar el modelo) y se
+    // retoman los objetivos de la pose recien aplicada.
+    try {
+      if (posing) {
+        posing.setCharacter?.(figures?.active ?? null);
+        posing.rebuild?.();
+        posing.clearHistory?.();
+        posing.syncRig?.();
+        posing.setEnabled?.(settings.get('ui.manualPosing') === true);
+      }
+    } catch { /* posado no crítico */ }
   } catch { /* pose no crítica */ }
   // Dibujo/trazo del snapshot: es el estado por vista, no global.
   try {

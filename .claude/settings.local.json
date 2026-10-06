@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:daromeon.itch.io)"
+      "WebFetch(domain:daromeon.itch.io)",
+      "Bash(npx eslint *)"
     ]
   }
 }
