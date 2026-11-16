@@ -837,8 +837,9 @@ function cameraPanel(app) {
   };
   snapInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') guardarVista(); });
 
+  const guides = perspectiveAndGuideGroups(app);
   return [
-    group({ id: 'cam-lens', title: 'Optica', icon: 'aperture' }, [
+    group({ id: 'cam-lens', title: 'Lente', icon: 'aperture' }, [
       segmented({
         path: 'camera.projection',
         options: [
@@ -860,6 +861,7 @@ function cameraPanel(app) {
         hint: 'Lente tilt-shift: desplaza el encuadre sin girar la camara.' }),
       slider({ label: 'Descentrado V', path: 'camera.shiftV', min: -1, max: 1, step: 0.01 }),
     ]),
+    ...guides.slice(0, 3),
     group({ id: 'cam-views', title: 'Encuadres', icon: 'frame' }, [
       viewRow,
       slider({ label: 'Plato giratorio', path: 'camera.turntable', min: -30, max: 30, step: 0.5, unit: ' °/s' }),
@@ -911,6 +913,7 @@ function cameraPanel(app) {
           { value: 'linear', label: 'Lineal' },
         ] }).root,
     ]),
+    ...guides.slice(3),
   ];
 }
 
@@ -1470,7 +1473,7 @@ function perspectiveControls(app) {
   return out;
 }
 
-function guidesPanel(app) {
+function perspectiveAndGuideGroups(app) {
   return [
     group({ id: 'gu-persp', title: 'Perspectiva', icon: 'vector-square' }, [
       presetGrid({ path: 'guides.perspective.mode', cols: 4,
@@ -1506,7 +1509,12 @@ function guidesPanel(app) {
       toggle({ path: 'guides.perspective.fade', label: 'Degradar los radios',
         hint: 'Baja la opacidad de los radios extremos para no ensuciar el encuadre.' }),
     ]),
-    group({ id: 'gu-accion', title: 'Linea de accion', icon: 'spline' }, [
+    group({
+      id: 'gu-accion',
+      title: 'Linea de accion',
+      icon: 'spline',
+      help: 'Los trazos se calculan sobre la figura que <b>posa</b> y se rehacen con la pose. Cada uno se prolonga un poco mas alla de las articulaciones y se <b>desvanece</b> afilandose en las dos puntas, como un gesto de lapiz. Las dos rectas de hombros y cadera son lineas de <b>construccion</b>: van rectas, mas finas y en su propio color.',
+    }, [
       toggle({ path: 'guides.action.line', label: 'Linea de accion',
         hint: 'El recorrido del movimiento: de la coronilla a la pierna que aguanta el peso, pasando por la columna.' }),
       toggle({ path: 'guides.action.arms', label: 'Ritmo de brazo a brazo',
@@ -1536,7 +1544,6 @@ function guidesPanel(app) {
       color({ path: 'guides.action.color', label: 'Color del trazo' }),
       color({ path: 'guides.action.color2', label: 'Color de hombros y cadera' }),
       slider({ label: 'Opacidad', path: 'guides.action.opacity', min: 0.1, max: 1, step: 0.01 }),
-      notice('info', 'Los trazos se calculan sobre la figura que <b>posa</b> y se rehacen con la pose. Cada uno se prolonga un poco mas alla de las articulaciones y se <b>desvanece</b> afilandose en las dos puntas, como un gesto de lapiz. Las dos rectas de hombros y cadera son lineas de <b>construccion</b>: van rectas, mas finas y en su propio color.', 'spline'),
     ]),
     group({ id: 'gu-prop', title: 'Proporcion', icon: 'ruler' }, [
       toggle({ path: 'guides.heads', label: 'Canon de cabezas' }),
@@ -1741,11 +1748,10 @@ export function buildPanels(app) {
   const sections = [
     { id: 'figure', title: 'Figura', icon: 'person-standing', build: figurePanel },
     { id: 'scene', title: 'Escena', icon: 'shapes', build: scenePanel },
-    { id: 'camera', title: 'Camara', icon: 'camera', build: cameraPanel },
+    { id: 'camera', title: 'Optica', icon: 'camera', build: cameraPanel },
     { id: 'light', title: 'Luz', icon: 'lightbulb', build: lightPanel },
     { id: 'mocap', title: 'Captura', icon: 'video', build: mocapPanel },
     { id: 'poses', title: 'Poses', icon: 'library', build: posesPanel },
-    { id: 'guides', title: 'Guias', icon: 'pencil-ruler', build: guidesPanel },
     { id: 'draw', title: 'Dibujo', icon: 'pencil', build: drawPanel },
     { id: 'settings', title: 'Ajustes', icon: 'settings', build: settingsPanel },
   ];

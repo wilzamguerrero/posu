@@ -42,6 +42,19 @@ export function el(tag, props = {}, children = []) {
 let store = null;
 export function useStore(settings) {
   store = settings;
+  if (!store) return;
+  const col = store.get('ui.collapsedGroups');
+  const exp = store.get('ui.expandedGroups');
+  if (Array.isArray(col) && Array.isArray(exp) && col.length === 0 && exp.length === 0 && collapsed.size > 0) {
+    const nextCol = [];
+    const nextExp = [];
+    for (const id of collapsed) {
+      if (id.startsWith('!')) nextExp.push(id.slice(1));
+      else nextCol.push(id);
+    }
+    store.set('ui.collapsedGroups', nextCol, { silent: true });
+    store.set('ui.expandedGroups', nextExp, { silent: true });
+  }
 }
 
 /* -- Ayuda emergente --------------------------------------------------- */
@@ -164,6 +177,45 @@ const persistCollapsed = () => {
   } catch { /* sin persistencia */ }
 };
 
+function isGroupClosed(opts) {
+  const id = opts.id;
+  if (!id) return opts.open === false;
+  if (store) {
+    const col = store.get('ui.collapsedGroups');
+    const exp = store.get('ui.expandedGroups');
+    if (Array.isArray(col) && col.includes(id)) return true;
+    if (Array.isArray(exp) && exp.includes(id)) return false;
+  }
+  return collapsed.has(id) || (opts.open === false && !collapsed.has('!' + id));
+}
+
+function setGroupClosed(id, nowClosed) {
+  if (!id) return;
+  if (nowClosed) {
+    collapsed.add(id);
+    collapsed.delete('!' + id);
+  } else {
+    collapsed.delete(id);
+    collapsed.add('!' + id);
+  }
+  persistCollapsed();
+  if (!store) return;
+  const col = new Set(store.get('ui.collapsedGroups') ?? []);
+  const exp = new Set(store.get('ui.expandedGroups') ?? []);
+  if (nowClosed) {
+    col.add(id);
+    exp.delete(id);
+  } else {
+    col.delete(id);
+    exp.add(id);
+  }
+  store.batch({
+    'ui.collapsedGroups': [...col],
+    'ui.expandedGroups': [...exp],
+  });
+  store.save?.();
+}
+
 /**
  * Grupo plegable con cabecera, al estilo de las secciones de VS Code. `help` es la
  * explicacion de para que sirve la seccion entera: sale en el signo de pregunta de
@@ -174,7 +226,7 @@ const persistCollapsed = () => {
  * @param {{id:string,title:string,icon?:string,open?:boolean,help?:string|Node}} opts
  */
 export function group(opts, children = []) {
-  const isClosed = collapsed.has(opts.id) || (opts.open === false && !collapsed.has('!' + opts.id));
+  const isClosed = isGroupClosed(opts);
   const chev = el('span', { class: 'chev' }, icon('chevron-down', 14));
   const toggler = el('button', { class: 'group-toggle', type: 'button', title: opts.title }, [
     chev,
@@ -186,13 +238,13 @@ export function group(opts, children = []) {
   const root = el('section', { class: 'group' + (isClosed ? ' is-collapsed' : '') }, [head, body]);
   toggler.addEventListener('click', () => {
     const nowClosed = root.classList.toggle('is-collapsed');
-    if (nowClosed) collapsed.add(opts.id);
-    else {
-      collapsed.delete(opts.id);
-      collapsed.add('!' + opts.id);
-    }
-    persistCollapsed();
+    setGroupClosed(opts.id, nowClosed);
   });
+  if (store && opts.id) {
+    store.on(['ui.collapsedGroups', 'ui.expandedGroups'], () => {
+      root.classList.toggle('is-collapsed', isGroupClosed(opts));
+    });
+  }
   return root;
 }
 

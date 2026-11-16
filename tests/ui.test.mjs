@@ -682,11 +682,22 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   });
 }
 
-// 8h · Perspectiva: interruptor de deformacion 3D, distancia de fugas y curvatura
-//      en modos rectilineos y curvilineos (4, 5 y 6 puntos).
+// 8h · Perspectiva y guias unificadas en Optica, ayuda de Linea de accion en
+//      boton (?) y persistencia de paneles colapsados/expandidos.
 {
+  const opticaPanel = document.querySelector('#sidebar-host .panel[data-panel="camera"]');
+  const sinGuiasTab = !document.querySelector('#sidebar-tabs [data-section="guides"]');
   const perspGroup = grupoPorTitulo('Perspectiva');
-  revisa('el panel de guias trae el grupo de Perspectiva', !!perspGroup);
+  const accionGroup = grupoPorTitulo('Linea de accion');
+  const enOptica = ['Perspectiva', 'Reticulas y volumen', 'Camara y trazo',
+    'Linea de accion', 'Proporcion', 'Composicion', 'Aspecto']
+    .every((t) => opticaPanel?.contains(grupoPorTitulo(t)));
+  revisa('las guias y perspectiva viven unificadas en Optica',
+    sinGuiasTab && !!opticaPanel && enOptica);
+  revisa('Linea de accion lleva la explicacion en el boton de ayuda, no como aviso suelto',
+    !!accionGroup?.parentElement?.querySelector('.group-head .help-btn')
+    && !accionGroup?.querySelector('.notice'));
+
   settings.set('guides.perspective.mode', '6puntos');
   const warpToggle = campo(perspGroup, 'Deformar la escena 3D');
   const fov6Field = campo(perspGroup, 'Distancia de fugas (campo)');
@@ -700,6 +711,25 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   revisa('en 2 puntos aparecen Distancia de fugas y Curvatura de lente',
     !!spreadField && !!curv2Field);
   settings.set('guides.perspective.mode', 'ninguno');
+
+  // Persistencia de colapsado/expandido en Settings y restauracion al recargar.
+  const mallaSection = grupoPorTitulo('Reticulas y volumen')?.parentElement;
+  const perspSection = perspGroup?.parentElement;
+  const estabaCerrado = mallaSection?.classList.contains('is-collapsed');
+  perspSection?.querySelector('.group-toggle')?.click(); // cierra Perspectiva
+  mallaSection?.querySelector('.group-toggle')?.click(); // abre Reticulas y volumen
+  revisa('colapsar/expandir guarda en ui.collapsedGroups y ui.expandedGroups',
+    settings.get('ui.collapsedGroups').includes('gu-persp')
+    && settings.get('ui.expandedGroups').includes('gu-persp-malla'));
+  const reloadedSettings = new Settings(DEFAULTS, STORAGE_KEY);
+  const reloadedUI = new UI({ ...app, settings: reloadedSettings });
+  const opticaRecargada = document.querySelector('#sidebar-host .panel[data-panel="camera"]');
+  const gPersp2 = [...opticaRecargada.querySelectorAll('.group')].find((g) => g.querySelector('.group-toggle')?.textContent?.trim() === 'Perspectiva');
+  const gMalla2 = [...opticaRecargada.querySelectorAll('.group')].find((g) => g.querySelector('.group-toggle')?.textContent?.trim() === 'Reticulas y volumen');
+  revisa('al recargar recuerda que grupos estaban colapsados y expandidos',
+    gPersp2?.classList.contains('is-collapsed') === true
+    && gMalla2?.classList.contains('is-collapsed') === false
+    && estabaCerrado === true && !!reloadedUI);
 }
 
 // 9 · La firma del autor sale en Ayuda > Acerca de.

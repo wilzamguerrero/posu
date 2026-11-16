@@ -492,6 +492,8 @@ export const DEFAULTS = {
      */
     tool: 'select',             // select | pose | draw | figure | camera | capture | guides | settings
     sidebar: true,
+    collapsedGroups: [],
+    expandedGroups: [],
     theme: 'oscuro',            // oscuro | claro
     manualPosing: false,
     selectedBone: '',

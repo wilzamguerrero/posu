@@ -84,9 +84,15 @@ export class UI {
     this.dom.host.replaceChildren(...this.panels.map((p) => p.node));
     this.#buildTabs();
     this.dom.sidebarCollapse.addEventListener('click', () => this.settings.set('ui.sidebar', false));
-    this.settings.on('ui.sidebar', (v) => this.dom.app.classList.toggle('sidebar-hidden', v === false));
+    this.settings.on('ui.sidebar', (v) => {
+      this.dom.app.classList.toggle('sidebar-hidden', v === false);
+      this.settings.save?.();
+    });
     this.dom.app.classList.toggle('sidebar-hidden', this.settings.get('ui.sidebar') === false);
-    this.settings.on('ui.section', (id) => this.#paintSection(id));
+    this.settings.on('ui.section', (id) => {
+      this.#paintSection(id);
+      this.settings.save?.();
+    });
     this.#paintSection(this.settings.get('ui.section'));
   }
 
@@ -114,7 +120,8 @@ export class UI {
   }
 
   #paintSection(id) {
-    const active = this.panels.find((p) => p.id === id) ?? this.panels[0];
+    const target = id === 'guides' ? 'camera' : id;
+    const active = this.panels.find((p) => p.id === target) ?? this.panels[0];
     for (const p of this.panels) p.node.classList.toggle('hidden', p !== active);
     this.dom.sidebarTitle.textContent = active.title;
     for (const t of this.tabs ?? []) {
@@ -127,13 +134,14 @@ export class UI {
 
   /** Muestra una seccion; si ya estaba visible, repliega el panel. */
   showSection(id) {
+    const target = id === 'guides' ? 'camera' : id;
     const hidden = this.settings.get('ui.sidebar') === false;
-    if (!hidden && this.settings.get('ui.section') === id) {
+    if (!hidden && this.settings.get('ui.section') === target) {
       this.settings.set('ui.sidebar', false);
       return;
     }
     this.settings.batch(() => {
-      this.settings.set('ui.section', id);
+      this.settings.set('ui.section', target);
       this.settings.set('ui.sidebar', true);
     });
   }
@@ -143,9 +151,10 @@ export class UI {
    * debe acabar siempre con el panel del elemento a la vista.
    */
   revealSection(id) {
-    if (!this.panels.some((p) => p.id === id)) return;
+    const target = id === 'guides' ? 'camera' : id;
+    if (!this.panels.some((p) => p.id === target)) return;
     this.settings.batch(() => {
-      this.settings.set('ui.section', id);
+      this.settings.set('ui.section', target);
       this.settings.set('ui.sidebar', true);
     });
   }
@@ -368,7 +377,7 @@ export class UI {
           { icon: 'maximize', title: 'Encuadrar la figura (F)', onClick: () => actions.frameFigure?.() },
           { icon: 'rotate-ccw', title: 'Restablecer la camara', onClick: () => actions.resetCamera?.() },
           { icon: 'focus', title: 'Profundidad de campo', path: 'camera.dof' },
-          panel('camera', 'Panel de camara'),
+          panel('camera', 'Panel de optica'),
         ],
       },
       {
@@ -397,7 +406,7 @@ export class UI {
           { icon: 'columns-3', title: 'Regla de tercios', path: 'guides.thirds' },
           { icon: 'grid-3x3', title: 'Rejilla del suelo', path: 'stage.grid' },
           { make: () => this.#perspectiveButton() },
-          panel('guides', 'Panel de guias'),
+          panel('camera', 'Panel de optica y guias'),
         ],
       },
       {
