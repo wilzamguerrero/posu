@@ -189,7 +189,7 @@ function isGroupClosed(opts) {
   return collapsed.has(id) || (opts.open === false && !collapsed.has('!' + id));
 }
 
-function setGroupClosed(id, nowClosed) {
+export function setGroupClosed(id, nowClosed) {
   if (!id) return;
   if (nowClosed) {
     collapsed.add(id);

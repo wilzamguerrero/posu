@@ -129,6 +129,14 @@ import Waves from 'lucide/dist/esm/icons/waves.js';
 import Footprints from 'lucide/dist/esm/icons/footprints.js';
 import CircleQuestionMark from 'lucide/dist/esm/icons/circle-question-mark.js';
 import PenLine from 'lucide/dist/esm/icons/pen-line.js';
+import Bot from 'lucide/dist/esm/icons/bot.js';
+import Check from 'lucide/dist/esm/icons/check.js';
+import ExternalLink from 'lucide/dist/esm/icons/external-link.js';
+import KeyRound from 'lucide/dist/esm/icons/key-round.js';
+import Mic from 'lucide/dist/esm/icons/mic.js';
+import MicOff from 'lucide/dist/esm/icons/mic-off.js';
+import Paperclip from 'lucide/dist/esm/icons/paperclip.js';
+import Send from 'lucide/dist/esm/icons/send.js';
 
 /** Nombre kebab-case -> nodo de icono de Lucide. */
 export const ICONS = {
@@ -208,6 +216,16 @@ export const ICONS = {
 
   // Sexta tanda: el contorno (outline).
   'pen-line': PenLine,
+
+  // Septima tanda: asistente IA y proveedores.
+  bot: Bot,
+  check: Check,
+  'external-link': ExternalLink,
+  'key-round': KeyRound,
+  mic: Mic,
+  'mic-off': MicOff,
+  paperclip: Paperclip,
+  send: Send,
 };
 
 /**

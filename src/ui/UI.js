@@ -8,11 +8,12 @@
  * escuchan cambios.
  */
 
-import { el, useStore } from './widgets.js';
+import { el, useStore, setGroupClosed } from './widgets.js';
 import { icon, hydrateIcons } from './icons.js';
 import { buildPanels } from './panels.js';
 import { SearchBar } from './SearchBar.js';
 import { toast } from './Toast.js';
+import { FloatingAI } from './FloatingAI.js';
 import { PERSPECTIVE_MODES, PERSPECTIVE_BY_ID } from '../guides/Perspective.js';
 
 /** Botón de icono cuyo estado activo sigue una ruta booleana del almacen. */
@@ -75,6 +76,17 @@ export class UI {
     this.#bindKeys();
     // El editor de escena avisa cuando se elige un elemento en el visor.
     app.hooks.revealScene = () => this.revealSection('scene');
+    app.hooks.openAiSettings = () => {
+      setGroupClosed('st-ai', false);
+      this.revealSection('settings');
+      const aiBox = this.dom.host?.querySelector('.ai-settings');
+      aiBox?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    };
+    this.floatingAI = new FloatingAI(app, {
+      mount: document.body,
+      onOpenSettings: () => app.hooks.openAiSettings?.(),
+    });
+    app.floatingAI = this.floatingAI;
     hydrateIcons(document);
   }
 

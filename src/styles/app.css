@@ -961,3 +961,220 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+
+/* ── Asistente IA (Ajustes › Asistente IA + Orbe y panel flotante) ──── */
+
+.ai-settings { display: flex; flex-direction: column; gap: 8px; }
+.ai-provider-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.ai-prov-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-widget); color: var(--fg-muted); font-size: 11px; cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.ai-prov-btn:hover { background: var(--bg-hover); color: var(--fg); }
+.ai-prov-btn.is-active { background: var(--bg-active); border-color: var(--accent); color: var(--fg-strong); }
+
+.ai-hint { margin: 0; font-size: 11px; line-height: 1.45; color: var(--fg-muted); }
+.ai-cred-box, .ai-model-box, .ai-custom-box {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-widget);
+}
+.ai-box-head { font-size: 11.5px; font-weight: 600; color: var(--fg-strong); }
+.ai-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-muted); }
+.ai-field input, .ai-key-row input, .ai-model-filter {
+  width: 100%; height: 26px; padding: 0 7px; font-size: 11.5px; font-family: var(--font-ui);
+  color: var(--fg); background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: var(--radius); outline: none;
+}
+.ai-field input:focus, .ai-key-row input:focus, .ai-model-filter:focus { border-color: var(--focus); }
+.ai-key-row { display: flex; align-items: center; gap: 5px; }
+.ai-key-row .svg-icon { flex: 0 0 auto; color: var(--fg-muted); }
+.ai-btn-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ai-remove-custom { align-self: flex-start; font-size: 11px; }
+
+.ai-device-code { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11.5px; color: var(--fg); }
+.ai-code-copy {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  background: var(--bg-active); color: var(--fg-strong); cursor: pointer; font-family: var(--font-mono);
+}
+.ai-code-copy.is-copied { border-color: var(--ok); }
+.ai-code-copy-tag { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-family: var(--font-ui); opacity: 0.85; }
+.ai-connected-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ai-ok-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
+  border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); font-size: 11px;
+}
+
+.ai-model-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; color: var(--fg-strong); }
+.ai-status-msg { margin: 0; font-size: 11px; line-height: 1.4; color: var(--link); }
+.ai-status-msg.is-bad { color: var(--err); }
+
+/* Boton flotante con orbe op-art */
+.atom-ai-handle {
+  position: fixed; z-index: 65; width: 50px; height: 50px; padding: 0; margin: 0;
+  border: 0; outline: none; background: transparent; cursor: grab; touch-action: none;
+  display: grid; place-items: center; will-change: transform;
+}
+.atom-ai-handle canvas { transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1); pointer-events: none; }
+.atom-ai-handle:hover canvas { transform: scale(1.07); }
+.atom-ai-handle:active canvas, .atom-ai-handle.is-dragging canvas { transform: scale(0.95); }
+.atom-ai-handle.is-dragging { cursor: grabbing; }
+.atom-ai-handle:focus-visible { outline: 1px solid var(--focus); border-radius: 50%; }
+
+/* Ventana flotante movible y redimensionable */
+.atom-ai-pop {
+  position: fixed; z-index: 66; display: flex; flex-direction: column;
+  max-width: calc(100vw - 20px); max-height: calc(100vh - 20px);
+  background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  color: var(--fg); font-family: var(--font-ui);
+  animation: atom-ai-pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.atom-ai-pop.is-dragging { animation: none !important; transition: none !important; }
+.atom-ai-pop.is-file-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow); }
+@keyframes atom-ai-pop-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.atom-ai-grip {
+  display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 5px 8px;
+  border-bottom: 1px solid var(--border); background: var(--bg-editor);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0; cursor: grab; touch-action: none;
+}
+.atom-ai-grip:active { cursor: grabbing; }
+.atom-ai-orb-slot { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+
+.atom-ai-convs {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.atom-ai-convs::-webkit-scrollbar { display: none; }
+.atom-ai-conv-item {
+  flex: 0 0 auto; display: inline-flex; align-items: center; max-width: 128px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-widget);
+}
+.atom-ai-conv-item.is-active { border-color: var(--accent); background: var(--bg-active); }
+.atom-ai-conv-btn {
+  border: 0; background: transparent; color: var(--fg-muted); padding: 3px 6px;
+  font: 10.5px var(--font-mono); cursor: pointer; max-width: 104px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.atom-ai-conv-item.is-active .atom-ai-conv-btn { color: var(--fg-strong); }
+.atom-ai-conv-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--fg-dim); padding: 3px 4px 3px 0; cursor: pointer;
+}
+.atom-ai-conv-del:hover { color: var(--err); }
+
+.atom-ai-head-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
+.atom-ai-new-btn {
+  display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 6px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-widget); color: var(--fg); font: 10.5px var(--font-ui); cursor: pointer;
+}
+.atom-ai-new-btn:hover { border-color: var(--accent); background: var(--bg-hover); }
+.atom-ai-prov-pill {
+  max-width: 112px; height: 22px; padding: 0 6px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius); background: var(--bg-widget); color: var(--link);
+  font: 10px var(--font-mono); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.atom-ai-prov-pill:hover { border-color: var(--accent); }
+
+.atom-ai-log {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 10px;
+  display: flex; flex-direction: column; gap: 10px; background: var(--bg-panel);
+}
+.atom-ai-empty p { margin: 0 0 10px; font-size: 12px; line-height: 1.45; color: var(--fg-muted); }
+.atom-ai-seeds { display: flex; flex-direction: column; gap: 6px; }
+.atom-ai-seed {
+  display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 9px; text-align: left;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-widget); color: var(--fg); font-size: 11.5px; line-height: 1.35; cursor: pointer;
+}
+.atom-ai-seed .svg-icon { flex: 0 0 auto; color: var(--link); }
+.atom-ai-seed:hover { border-color: var(--accent); background: var(--bg-hover); }
+
+.atom-ai-turn { display: flex; flex-direction: column; gap: 5px; }
+.atom-ai-turn.is-user { align-items: flex-end; }
+.atom-ai-turn-imgs { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+.atom-ai-turn-imgs img {
+  width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius);
+  border: 1px solid var(--border-strong); background: var(--bg-app);
+}
+.atom-ai-img-note { font: 10.5px var(--font-mono); color: var(--fg-muted); }
+.atom-ai-bubble {
+  max-width: 92%; padding: 7px 10px; font-size: 12px; line-height: 1.45;
+  white-space: pre-wrap; border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-widget); color: var(--fg); user-select: text;
+}
+.atom-ai-turn.is-user .atom-ai-bubble {
+  background: var(--bg-active); border-color: color-mix(in srgb, var(--accent) 65%, transparent); color: var(--fg-strong);
+}
+
+.atom-ai-actions-applied { display: flex; flex-wrap: wrap; gap: 4px; }
+.atom-ai-action-chip {
+  padding: 2px 6px; font: 10px var(--font-mono); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok);
+}
+
+.atom-ai-foot-warn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 10px; font-size: 11px; color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg-editor)); border-top: 1px solid var(--border);
+}
+.atom-ai-foot-warn.is-bad { color: var(--err); background: color-mix(in srgb, var(--err) 12%, var(--bg-editor)); }
+.atom-ai-foot-warn button {
+  flex: 0 0 auto; padding: 2px 8px; border: 1px solid var(--accent); border-radius: var(--radius);
+  background: transparent; color: var(--link); font-size: 10.5px; cursor: pointer;
+}
+
+.atom-ai-attach-strip {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px;
+  border-top: 1px solid var(--border); background: var(--bg-editor);
+}
+.atom-ai-attach-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-widget);
+  font-size: 10.5px; color: var(--fg-muted); max-width: 160px;
+}
+.atom-ai-attach-chip img { width: 22px; height: 22px; object-fit: cover; border-radius: 2px; }
+.atom-ai-attach-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atom-ai-attach-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--fg-muted); padding: 2px; cursor: pointer;
+}
+.atom-ai-attach-del:hover { color: var(--err); }
+
+.atom-ai-form {
+  display: flex; align-items: flex-end; gap: 5px; padding: 8px;
+  border-top: 1px solid var(--border); background: var(--bg-editor);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.atom-ai-form-tools { display: flex; flex-direction: row; gap: 3px; flex: 0 0 auto; }
+.atom-ai-tool-btn { width: 28px; height: 32px; padding: 0; justify-content: center; }
+.atom-ai-mic.is-listening { border-color: var(--err); color: var(--err); background: color-mix(in srgb, var(--err) 18%, transparent); }
+.atom-ai-form textarea {
+  flex: 1; min-width: 0; min-height: 36px; max-height: 96px; padding: 6px 8px;
+  border: 1px solid var(--border-input); border-radius: var(--radius);
+  background: var(--bg-input); color: var(--fg); font: 12px/1.35 var(--font-ui); resize: none; outline: none;
+}
+.atom-ai-form textarea:focus, .atom-ai-form textarea.is-listening { border-color: var(--accent); }
+.atom-ai-send { height: 34px; padding: 0 11px; flex: 0 0 auto; }
+.atom-ai-send.is-stop { background: var(--err); border-color: var(--err); color: var(--fg-inverse); }
+
+.atom-ai-resize-b {
+  position: absolute; left: 0; right: 14px; bottom: -3px; height: 7px; cursor: ns-resize; touch-action: none;
+}
+.atom-ai-resize-br {
+  position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 52%, var(--border-strong) 53%, var(--border-strong) 63%, transparent 64%, transparent 76%, var(--accent) 77%, var(--accent) 88%, transparent 89%);
+  opacity: 0.78;
+}
+.atom-ai-resize-br:hover { opacity: 1; }

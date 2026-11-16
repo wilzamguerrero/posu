@@ -28,6 +28,7 @@ import { MAX_FIGURAS } from '../model/FigureSet.js';
 import { FINGERS, FINGER_LABELS } from '../model/boneMap.js';
 import { IK_CHAINS } from '../posing/IKRig.js';
 import { SAFE_FRAME_OPTIONS } from '../guides/Guides.js';
+import { buildAiSettingsControl } from './AiSettings.js';
 
 /** Abre el selector de archivos del sistema y resuelve con el archivo elegido. */
 export function pickFile(accept) {
@@ -1666,6 +1667,15 @@ function settingsPanel(app) {
     ]);
 
   return [
+    group({
+      id: 'st-ai',
+      title: 'Asistente IA',
+      icon: 'sparkles',
+      open: true,
+      help: 'Conecta free-pi gratis en 1 paso o usa tu clave de OpenAI, Anthropic, OpenRouter, GitHub Copilot, NVIDIA u Ollama local para componer escenas e interpretar bocetos.',
+    }, [
+      buildAiSettingsControl(),
+    ]),
     group({ id: 'st-quality', title: 'Rendimiento', icon: 'gauge' }, [
       select({ label: 'Resolucion de render', path: 'quality.pixelRatio',
         options: [

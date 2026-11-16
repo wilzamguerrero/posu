@@ -2,6 +2,15 @@ import { defineConfig } from 'vite';
 import { resolve, join, basename } from 'node:path';
 import fs from 'node:fs';
 import { searchImages, fetchImage, mismoOrigen } from './server/imageSearch.mjs';
+import {
+  handleAiChat,
+  handleAiModels,
+  handleAiRegistry,
+  handleFreePiDevice,
+  handleGithubDevice,
+  handleHealth,
+  runNodeHandler,
+} from './server/ai/handlers.mjs';
 
 /** Extensiones de figura que el cargador de `Character` sabe abrir. */
 const MODEL_EXT = /\.(glb|gltf|fbx)$/i;
@@ -139,11 +148,47 @@ function imageSearchApi() {
   return { name: 'atom-image-search', configureServer: attach, configurePreviewServer: attach };
 }
 
+/** Proxy multi-proveedor para el asistente de IA en dev y preview. */
+function aiProxyApi() {
+  const routes = {
+    '/api/health': (req, env) => handleHealth(req, env),
+    '/api/ai-chat': (req, env) => handleAiChat(req, env),
+    '/api/ai-models': (req, env) => handleAiModels(req, env),
+    '/api/ai-registry': (req, env) => handleAiRegistry(req, env),
+    '/api/freepi-device': (req) => handleFreePiDevice(req),
+    '/api/github-device': (req, env) => handleGithubDevice(req, env),
+  };
+
+  const attach = (isDev) => (server) => {
+    const env = { ...process.env, ...(isDev ? { ATOM_DEV: '1' } : {}) };
+    for (const [route, handler] of Object.entries(routes)) {
+      server.middlewares.use(route, (req, res, next) => {
+        const clean = (req.url || '/').split('?')[0];
+        if (clean !== '/' && clean !== '') return next();
+        void runNodeHandler(handler, req, res, env).catch((err) => {
+          console.error('[ai-proxy]', route, err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          }
+          res.end(JSON.stringify({ error: 'internal_error', message: 'Fallo interno en el proxy de IA.' }));
+        });
+      });
+    }
+  };
+
+  return {
+    name: 'atom-ai-proxy',
+    configureServer: attach(true),
+    configurePreviewServer: attach(false),
+  };
+}
+
 export default defineConfig({
   // Rutas relativas: la build funciona igual en Cloudflare Pages, en un
   // subdirectorio o abierta desde un servidor estatico cualquiera.
   base: './',
-  plugins: [modelList(), imageSearchApi()],
+  plugins: [modelList(), imageSearchApi(), aiProxyApi()],
   resolve: {
     alias: {
       // El entry point por defecto de kalidokit usa imports sin extension.
