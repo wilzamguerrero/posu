@@ -274,16 +274,16 @@ export class Perspective {
   /* -- Proyecciones ------------------------------------------------------ */
 
   /**
-   * Devuelve la camara con la separacion de fugas (`pointSpread`) aplicada en
-   * modos rectilineos, sin tocar la configuracion real de `CameraRig`.
+   * Devuelve la camara con la separacion de fugas (`pointSpread`) o el FOV de
+   * render aplicado en modos rectilineos, sin tocar `CameraRig`.
    */
-  #effectiveCamera(cam, p) {
-    if (p.kind !== 'lineal' || !cam.isPerspectiveCamera || Math.abs(p.targetFov - cam.fov) < 1e-4) {
+  #effectiveCamera(cam, p, fov = p.targetFov) {
+    if (p.kind !== 'lineal' || !cam.isPerspectiveCamera || Math.abs(fov - cam.fov) < 1e-4) {
       return cam;
     }
     this.#effCam ??= new THREE.PerspectiveCamera();
     this.#effCam.copy(cam);
-    this.#effCam.fov = p.targetFov;
+    this.#effCam.fov = fov;
     this.#effCam.updateProjectionMatrix();
     this.#effCam.matrixWorld.copy(cam.matrixWorld);
     this.#effCam.matrixWorldInverse.copy(cam.matrixWorldInverse);
@@ -294,8 +294,7 @@ export class Perspective {
    * Prepara las constantes del fotograma: centro, radio de imagen y factores de
    * escala de cada proyeccion.
    */
-  #geometry(ctx, W, H, dpr) {
-    const rawCam = this.camera;
+  #geometry(ctx, W, H, dpr, rawCam = this.camera) {
     rawCam.updateMatrixWorld();
     rawCam.updateProjectionMatrix?.();
     const p = computePerspectiveParams(this.conf, rawCam, W, H);
@@ -441,6 +440,127 @@ export class Perspective {
   screenPoint(p, W, H, dpr = 1) {
     const geo = this.#geometry(null, W, H, dpr);
     return geo.kind === 'off' ? null : this.#point(geo, p);
+  }
+
+  /**
+   * Proyecta un punto del mundo a pixeles del lienzo siguiendo exactamente el
+   * render 3D vivo (con deformacion activa o sin ella, sin usar la camara congelada).
+   * @param {THREE.Vector3} point
+   * @param {number} W
+   * @param {number} H
+   * @param {{x:number,y:number,dist:number,z:number}} [out]
+   * @returns {{x:number,y:number,dist:number,z:number}|null}
+   */
+  projectWorld(point, W, H, out = null) {
+    const cam = this.viewport.cameras?.active;
+    if (!cam || !point || !(W > 0) || !(H > 0)) return null;
+    cam.updateMatrixWorld();
+    cam.updateProjectionMatrix?.();
+    let x, y, z = 0;
+    if (this.warped) {
+      const geo = this.#geometry(null, W, H, 1, cam);
+      const s = this.#point(geo, point);
+      if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return null;
+      x = s.x;
+      y = s.y;
+    } else {
+      _v3.copy(point).project(cam);
+      if (!Number.isFinite(_v3.x) || !Number.isFinite(_v3.y) || _v3.z < -1 || _v3.z > 1) return null;
+      x = (_v3.x * 0.5 + 0.5) * W;
+      y = (-_v3.y * 0.5 + 0.5) * H;
+      z = _v3.z;
+    }
+    const dist = cam.position.distanceTo(point);
+    if (out) {
+      out.x = x; out.y = y; out.dist = dist; out.z = z;
+      return out;
+    }
+    return { x, y, dist, z };
+  }
+
+  /**
+   * Rayo 3D correspondiente a unas coordenadas de puntero sobre el visor,
+   * invirtiendo con exactitud los shaders curvilineos y de curvatura lineal.
+   * @param {number} clientX
+   * @param {number} clientY
+   * @param {{left:number,top:number,width:number,height:number}} rect
+   * @param {THREE.Ray} [ray]
+   * @returns {boolean} false si el puntero cae fuera del circulo/panoramica util
+   */
+  rayFromClient(clientX, clientY, rect, ray = new THREE.Ray()) {
+    const cam = this.viewport.cameras?.active;
+    if (!cam || !rect || !(rect.width > 0) || !(rect.height > 0)) return false;
+    const W = rect.width;
+    const H = rect.height;
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    cam.updateMatrixWorld();
+    cam.updateProjectionMatrix?.();
+
+    if (!this.warped) {
+      const ndcX = (sx / W) * 2 - 1;
+      const ndcY = -(sy / H) * 2 + 1;
+      if (cam.isOrthographicCamera) {
+        ray.origin.set(ndcX, ndcY, -1).unproject(cam);
+        ray.direction.set(0, 0, -1).transformDirection(cam.matrixWorld).normalize();
+      } else {
+        ray.origin.setFromMatrixPosition(cam.matrixWorld);
+        ray.direction.set(ndcX, ndcY, 0.5).unproject(cam).sub(ray.origin).normalize();
+      }
+      return true;
+    }
+
+    const p = computePerspectiveParams(this.conf, cam, W, H);
+    if (p.kind === 'lineal') {
+      const dx = sx - p.cx;
+      const dy = p.cy - sy;
+      const r2 = (dx * dx + dy * dy) / Math.max(1, p.diag * p.diag);
+      const f = 1 + p.bendK * r2;
+      const centeredX = sx / W - 0.5;
+      const centeredY = 0.5 - sy / H;
+      const pad = Math.max(0.05, p.actualPad);
+      const srcUvX = 0.5 + (centeredX * f) / pad;
+      const srcUvY = 0.5 + (centeredY * f) / pad;
+      if (srcUvX < 0 || srcUvX > 1 || srcUvY < 0 || srcUvY > 1) return false;
+      const renderCam = this.#effectiveCamera(cam, p, p.renderFov);
+      ray.origin.setFromMatrixPosition(renderCam.matrixWorld);
+      ray.direction.set(srcUvX * 2 - 1, srcUvY * 2 - 1, 0.5)
+        .unproject(renderCam).sub(ray.origin).normalize();
+      return true;
+    }
+
+    const dx = sx - p.cx;
+    const dy = p.cy - sy;
+    if (p.kind === 'cilindrica') {
+      const u = dx / Math.max(1, p.fu);
+      const v = dy / Math.max(1, p.fu);
+      if (Math.abs(u) > p.uMax + 1e-3) return false;
+      const phi = Math.abs(p.vScale - 1) < 1e-4
+        ? Math.atan(v)
+        : Math.atan(v * p.vScale) / p.vScale;
+      if (Math.abs(phi) >= Math.PI * 0.5 - 1e-3) return false;
+      const cphi = Math.cos(phi);
+      _v3.set(Math.sin(u) * cphi, Math.sin(phi), -Math.cos(u) * cphi);
+    } else {
+      const r = Math.hypot(dx, dy);
+      if (r > p.rMax + 2) return false;
+      const u = r / Math.max(1, p.fr);
+      let theta = u;
+      if (p.k > 1e-4) theta = (2 / p.k) * Math.atan(p.k * u * 0.5);
+      else if (p.k < -1e-4) {
+        const ak = -p.k;
+        theta = (2 / ak) * Math.asin(clamp(ak * u * 0.5, -1, 1));
+      }
+      if (theta > p.thetaMax + 1e-3) return false;
+      const st = Math.sin(theta);
+      const ct = Math.cos(theta);
+      const dir2x = r > 1e-5 ? dx / r : 0;
+      const dir2y = r > 1e-5 ? dy / r : 0;
+      _v3.set(dir2x * st, dir2y * st, -ct);
+    }
+    ray.origin.setFromMatrixPosition(cam.matrixWorld);
+    ray.direction.copy(_v3.transformDirection(cam.matrixWorld)).normalize();
+    return true;
   }
 
   /* -- Trazos basicos ---------------------------------------------------- */

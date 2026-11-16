@@ -241,7 +241,7 @@ async function main() {
   app.search = new ImageSearch(settings);
 
   const posing = new ManualPosing({
-    settings, viewport, character: null,
+    settings, viewport, character: null, perspective: guides.perspective,
     // Se guardan etiqueta y clave: la primera se lee en la interfaz, la segunda
     // la usa el monitor de captura para marcar el punto correspondiente.
     // Los controles de cinematica inversa no son huesos, pero llevan apuntado el
@@ -252,6 +252,7 @@ async function main() {
     }),
   });
   app.posing = posing;
+  guides.setPosing(posing);
   settings.on('ui.manualPosing', (v) => posing.setEnabled(v === true));
   // Rig de manos: deduce los ejes de flexion del propio esqueleto y aplica los
   // valores de `hands.*`. El guardia evita que copiar una mano en la otra
@@ -770,6 +771,7 @@ async function main() {
     settings,
     viewport,
     figures,
+    perspective: guides.perspective,
     // El posado manual solo se queda el clic si hay un manejador de
     // articulacion debajo; en el resto del visor se puede seguir eligiendo
     // figuras, solidos y luces con el raton. Con el lapiz encendido no se

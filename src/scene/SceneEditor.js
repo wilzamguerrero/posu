@@ -41,11 +41,13 @@ export class SceneEditor {
    * @param {(id: string) => void} [deps.onSelect]
    * @param {(id: string) => void} [deps.onPick] Seleccion hecha en el visor, no
    *   en la lista: la interfaz aprovecha para mostrar la seccion de escena.
+   * @param {import('../guides/Perspective.js').Perspective} [deps.perspective]
    */
-  constructor({ settings, viewport, figures, blocked, onSelect, onPick } = {}) {
+  constructor({ settings, viewport, figures, perspective = null, blocked, onSelect, onPick } = {}) {
     this.settings = settings;
     this.viewport = viewport;
     this.figures = figures ?? null;
+    this.perspective = perspective;
     this.blocked = blocked ?? (() => false);
     this.onSelect = onSelect ?? null;
     this.onPick = onPick ?? null;
@@ -569,7 +571,15 @@ export class SceneEditor {
    */
   #pickAt(event) {
     const cam = this.viewport.cameras.active;
-    this.raycaster.setFromCamera(this.#pointerTo(event), cam);
+    if (this.perspective?.warped) {
+      const rect = this.viewport.renderer.domElement.getBoundingClientRect();
+      if (!this.perspective.rayFromClient(event.clientX, event.clientY, rect, this.raycaster.ray)) {
+        return '';
+      }
+      this.raycaster.camera = cam;
+    } else {
+      this.raycaster.setFromCamera(this.#pointerTo(event), cam);
+    }
     const objetos = this.#pickables();
     const hits = objetos.length ? this.raycaster.intersectObjects(objetos, false) : [];
     let mejor = hits[0]?.object?.userData?.itemId ?? '';

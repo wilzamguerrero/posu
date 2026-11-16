@@ -48,16 +48,26 @@ export function viewAspect(camera) {
  * @param {number} [aspect]
  * @returns {number} la distancia, o `Infinity` si el punto no se ve
  */
-export function screenDistance(point, camera, pointer, aspect = viewAspect(camera)) {
+export function screenDistance(point, camera, pointer, aspect = viewAspect(camera), projector = null) {
   if (!point || !camera || !pointer) return Infinity;
-  _p.copy(point).project(camera);
-  // Detras de la camara (o delante del plano cercano) no hay distancia que medir.
-  if (!Number.isFinite(_p.x) || !Number.isFinite(_p.y) || _p.z < -1 || _p.z > 1) return Infinity;
+  let nx, ny;
+  if (projector) {
+    const s = projector(point);
+    if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return Infinity;
+    nx = s.x;
+    ny = s.y;
+  } else {
+    _p.copy(point).project(camera);
+    // Detras de la camara (o delante del plano cercano) no hay distancia que medir.
+    if (!Number.isFinite(_p.x) || !Number.isFinite(_p.y) || _p.z < -1 || _p.z > 1) return Infinity;
+    nx = _p.x;
+    ny = _p.y;
+  }
   // El eje X normalizado abarca el ancho; multiplicarlo por la relacion de
   // aspecto lo pasa a alturas, que es lo que hace que el entorno sea un circulo
   // en pantalla y no una elipse.
-  const dx = (_p.x - pointer.x) * 0.5 * aspect;
-  const dy = (_p.y - pointer.y) * 0.5;
+  const dx = (nx - pointer.x) * 0.5 * aspect;
+  const dy = (ny - pointer.y) * 0.5;
   return Math.hypot(dx, dy);
 }
 
@@ -72,11 +82,12 @@ export function screenDistance(point, camera, pointer, aspect = viewAspect(camer
  * @param {{x:number,y:number}} pointer
  * @param {number} radius radio en alturas de visor
  * @param {number} [aspect]
+ * @param {(p:THREE.Vector3)=>{x:number,y:number}|null} [projector]
  * @returns {number} 0..1
  */
-export function nearFactor(point, camera, pointer, radius, aspect = viewAspect(camera)) {
+export function nearFactor(point, camera, pointer, radius, aspect = viewAspect(camera), projector = null) {
   const r = Math.max(1e-4, Number(radius) || 0);
-  const d = screenDistance(point, camera, pointer, aspect);
+  const d = screenDistance(point, camera, pointer, aspect, projector);
   if (!Number.isFinite(d)) return 0;
   if (d <= r) return 1;
   const t = (r * FADE - d) / (r * (FADE - 1));

@@ -321,5 +321,41 @@ settings.set('camera.minDistance', 0.55);
 check('CameraRig aplica recorte cercano (near) y distancia minima de orbita',
   Math.abs(rig.perspective.near - 0.004) < 1e-6 && Math.abs(rig.controls.minDistance - 0.55) < 1e-6);
 
+// Ida y vuelta exacta entre proyeccion 2D (projectWorld) y rayo 3D (rayFromClient)
+// en todos los modos deformados: 2 puntos curvo, 4 puntos, 5 puntos y 6 puntos (incl. espalda).
+{
+  const rect = { left: 0, top: 0, width: W, height: H };
+  const ray = new THREE.Ray();
+  const roundTripErr = (pt) => {
+    const s = persp.projectWorld(pt, W, H);
+    if (!s) return Infinity;
+    if (!persp.rayFromClient(s.x, s.y, rect, ray)) return Infinity;
+    const expected = pt.clone().sub(rig.active.position).normalize();
+    return ray.direction.angleTo(expected);
+  };
+  place(25, 18);
+  settings.batch({
+    'guides.perspective.mode': '2puntos',
+    'guides.perspective.warp': true,
+    'guides.perspective.pointSpread': 0.55,
+    'guides.perspective.curvature': 0.6,
+  });
+  check('2 puntos deformado: projectWorld y rayFromClient son inversas exactas',
+    roundTripErr(new THREE.Vector3(0.4, 1.3, 0.2)) < 2e-3);
+
+  settings.batch({ 'guides.perspective.mode': '4puntos', 'guides.perspective.curvature': 0.4 });
+  check('4 puntos cilindrico: projectWorld y rayFromClient coinciden incluso lateral',
+    roundTripErr(new THREE.Vector3(-2.1, 0.8, -0.5)) < 1e-3);
+
+  settings.batch({ 'guides.perspective.mode': '5puntos', 'guides.perspective.curvature': 0.5 });
+  check('5 puntos ojo de pez: projectWorld y rayFromClient son inversas exactas',
+    roundTripErr(new THREE.Vector3(0.8, 2.2, 0.4)) < 1e-3);
+
+  settings.batch({ 'guides.perspective.mode': '6puntos', 'guides.perspective.fov6': 360, 'guides.perspective.curvature': -0.4 });
+  const ptBack = rig.active.position.clone().add(new THREE.Vector3(1.5, 0.5, 2.0));
+  check('6 puntos 360°: projectWorld y rayFromClient aciertan tambien detras de la camara',
+    roundTripErr(ptBack) < 1e-3);
+}
+
 console.log('\n' + oks.length + ' correctas / ' + fails.length + ' fallos');
 if (fails.length) process.exit(1);

@@ -89,6 +89,11 @@ export class Guides {
     // resumen la pose (que necesitan los huesos proyectados).
     this.perspective = new Perspective(settings, viewport);
     this.action = new ActionLine(settings, viewport, this.perspective);
+    this.posing = null;
+  }
+
+  setPosing(posing) {
+    this.posing = posing ?? null;
   }
 
   setCharacter(character) {
@@ -101,7 +106,7 @@ export class Guides {
     const g = this.settings.get('guides');
     return !!(g.heads || g.thirds || g.golden || g.symmetry || g.horizon
       || g.diagonals || g.grid > 0 || (g.safeFrame && g.safeFrame !== 'ninguno')
-      || this.perspective.active || this.action.active);
+      || this.perspective.active || this.action.active || this.posing?.enabled);
   }
 
   #fit() {
@@ -188,6 +193,8 @@ export class Guides {
     if (g.heads) this.#heads(ctx, W, H, Math.max(2, Math.round(g.headCount)));
     // Los trazos de la pose van encima de todo: son el dibujo, no la reticula.
     if (this.action.active) this.action.draw(ctx, W, H, this.dpr);
+    // Los manipuladores del rig se pintan en 2D nitido por encima de cualquier deformacion 3D.
+    if (this.posing?.enabled) this.posing.drawOverlay(ctx, W, H, this.dpr);
 
     ctx.globalAlpha = 1;
   }
