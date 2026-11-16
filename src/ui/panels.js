@@ -1220,7 +1220,7 @@ function posesPanel(app) {
       slider({ label: 'Tamano de los manejadores', path: 'pose.handleScale',
         min: 0.01, max: 1, step: 0.01,
         format: (v) => Math.round(v * 100) + ' %',
-        hint: 'Encoge de golpe todos los controles del rig —los del modo directo y los del inverso— sin cambiar sus proporciones ni cual es mas gordo que cual. Empieza al 50 %; al 100 % son los grandes de siempre, y por debajo del 20 % quedan puntos, que tapan menos la figura pero tambien se pinchan peor. Doble clic para volver al 50 %.' }),
+        hint: 'Encoge o amplia todos los controles del rig —los del modo directo y los del inverso— sin cambiar sus proporciones ni el area facil de agarre. Empieza al 10 %; al 100 % son grandes y al 1 % quedan puntos discretos. Doble clic para volver al 10 %.' }),
       field('Hueso seleccionado', boneTag),
       buttons([
         { label: 'Deshacer', icon: 'rotate-ccw', title: 'Deshacer el ultimo giro (Ctrl+Z)', onClick: () => actions.undo() },
@@ -1231,8 +1231,8 @@ function posesPanel(app) {
         { label: 'Pose A', icon: 'person-standing', onClick: () => actions.presetPose('a') },
       ], { cols: 2, compact: true }),
     ]),
-    group({ id: 'ps-fk', title: 'Cinematica directa (FK)', icon: 'rotate-3d' }, [
-      notice('info', 'Girar hueso a hueso, del hombro a la mano: cada giro arrastra lo que cuelga de el, como en un maniqui de madera. Es el modo de la tecla I por la mitad de la izquierda; en modo inverso solo quedan las esferas de los huesos que no lleva ninguna cadena encendida, y para recuperar el resto se apaga esa cadena en <b>Cadenas</b>.'),
+    group({ id: 'ps-fk', title: 'Cinematica directa (FK)', icon: 'rotate-3d',
+      help: 'Girar hueso a hueso, del hombro a la mano: cada giro arrastra lo que cuelga de el, como en un maniqui de madera. Es el modo de la tecla <b>I</b> por la mitad de la izquierda; en modo inverso solo quedan las esferas de los huesos que no lleva ninguna cadena encendida, y para recuperar el resto se apaga esa cadena en <b>Cadenas</b>.' }, [
       segmented({
         label: 'Ejes del giro', path: 'pose.space',
         options: [
@@ -1251,8 +1251,8 @@ function posesPanel(app) {
         hint: 'Con el imantado puesto los huesos giran de 15 en 15 grados, los controles se mueven a saltos de esa medida y la deformacion va de cinco en cinco centesimas (1,05 · 1,10 · 1,15).',
       }).root,
     ]),
-    group({ id: 'ps-ik', title: 'Cinematica inversa (IK)', icon: 'target' }, [
-      notice('info', 'Rombos en manos, pies, pecho y cabeza: arrastras uno y la cadena entera le sigue. W mueve el control, E gira el hueso de la punta y R lo deforma. Se enciende arriba, en <b>Modo del rig</b>, con la tecla I o desde las siglas FK/IK de la barra de abajo.'),
+    group({ id: 'ps-ik', title: 'Cinematica inversa (IK)', icon: 'target',
+      help: 'Rombos en manos, pies, pecho y cabeza: arrastras uno y la cadena entera le sigue. <b>W</b> mueve el control, <b>E</b> gira el hueso de la punta y <b>R</b> lo deforma. Se enciende arriba, en <b>Modo del rig</b>, con la tecla <b>I</b> o desde las siglas FK/IK de la barra de abajo. Los controles sin clavar vuelven solos a la mano o el pie, asi que la cinematica inversa no pelea con la captura ni con la biblioteca de poses.' }, [
       enableWhen(el('div', { class: 'stack' }, [
         field('Cadenas', buttons([
           { label: 'Brazos', icon: 'hand', path: 'ik.arms', title: 'Hombro, codo y mano' },
@@ -1283,11 +1283,9 @@ function posesPanel(app) {
           { label: 'Soltar todo', icon: 'lock-open', title: 'Quita todas las fijaciones', onClick: () => actions.unpinAll?.() },
         ], { cols: 2 }),
       ]), 'ik.enabled', (s) => s.get('ik.enabled') === true),
-      notice('info', 'Los controles sin clavar vuelven solos a la mano o el pie, asi que la cinematica inversa no pelea con la captura ni con la biblioteca de poses.'),
     ]),
-    group({ id: 'ps-deform', title: 'Deformar los huesos', icon: 'scaling' }, [
-      notice('info', 'Con <b>R</b> el giroscopio deforma el hueso del control elegido: es el aplastado a mano de un rig de dibujo animado. El tirador que va <b>a lo largo</b> del hueso lo <b>alarga</b> moviendo la articulacion de abajo, asi que la piel se estira entre las dos sin dar un escalon; los otros dos lo <b>engordan</b> sin moverla. Lo que cuelga del hueso mantiene su tamano, asi que engordar la rodilla no engorda el pie.'),
-      notice('info', 'En los huesos que lleva una cadena encendida no hace falta el giroscopio: se deforman <b>por posicion</b>, arrastrando la bola del pliegue o el pico de volumen del propio hueso. Es la misma deformacion, con los mismos topes, y se apagan juntos en <b>Controles auxiliares</b>.'),
+    group({ id: 'ps-deform', title: 'Deformar los huesos', icon: 'scaling',
+      help: 'Con <b>R</b> el giroscopio deforma el hueso del control elegido (el tirador a lo largo lo alarga y los otros dos lo engordan). En cadenas IK activas se deforma <b>por posicion</b> arrastrando el pliegue o el pico de volumen. La deformacion viaja con la pose, se guarda en la biblioteca y se deshace con Ctrl+Z.' }, [
       field('Deformacion del hueso', deformTag),
       toggle({ path: 'pose.deformVolume', label: 'Conservar el volumen al deformar',
         hint: 'Aplastar y estirar de dibujo animado: al alargar un hueso se adelgaza y al acortarlo se ensancha, la misma cuenta que el squash de las cadenas. Apagado, el largo y el grosor van cada uno a lo suyo.' }),
@@ -1297,9 +1295,9 @@ function posesPanel(app) {
         { label: 'Quitar todas', icon: 'eraser', title: 'Devuelve su tamano a todos los huesos',
           onClick: () => actions.clearDeform?.() },
       ], { cols: 2 }),
-      notice('info', 'La deformacion viaja con la pose: se guarda en la biblioteca, se deshace con Ctrl+Z y no se pierde al cambiar de modo. El estirado del squash tampoco: la silueta es la misma a los dos lados del interruptor.'),
     ]),
-    group({ id: 'ps-manos', title: 'Manos y dedos', icon: 'hand' }, [
+    group({ id: 'ps-manos', title: 'Manos y dedos', icon: 'hand',
+      help: 'Los ejes de flexion se deducen de la geometria de la mano, no de los ejes locales del archivo: funcionan igual en cualquier personaje de Mixamo.' }, [
       segmented({
         label: 'Mano que estas editando', path: 'hands.edit',
         options: [
@@ -1318,7 +1316,6 @@ function posesPanel(app) {
       ], { cols: 2 }),
       toggle({ path: 'hands.fingers', label: 'Manejadores de falange en el posado manual',
         hint: 'Anade 30 esferas pequenas sobre las falanges para girarlas una a una con el giroscopio.' }),
-      notice('info', 'Los ejes de flexion se deducen de la geometria de la mano, no de los ejes locales del archivo: funcionan igual en cualquier personaje de Mixamo.'),
     ]),
     group({ id: 'ps-coloc', title: 'Colocacion', icon: 'move' }, [
       // La colocacion es propia de cada figura: se edita la activa y se
@@ -1326,7 +1323,8 @@ function posesPanel(app) {
       reactive(['scene.figures', 'figure.active'],
         () => figureControls(app, app.figures?.activeId ?? '')),
     ]),
-    group({ id: 'ps-lib', title: 'Biblioteca', icon: 'library' }, [
+    group({ id: 'ps-lib', title: 'Biblioteca', icon: 'library',
+      help: 'Las poses se guardan en este navegador. Exportalas en JSON para llevarlas a otro equipo.' }, [
       field('Guardar la pose actual', el('div', { class: 'field-row' }, [
         nameInput,
         el('button', {
@@ -1339,7 +1337,6 @@ function posesPanel(app) {
         { label: 'Exportar', icon: 'file-down', title: 'Descarga todas las poses en JSON', onClick: () => actions.exportPoses() },
         { label: 'Importar', icon: 'file-up', title: 'Carga un JSON de poses', onClick: () => actions.importPoses() },
       ], { cols: 2 }),
-      notice('info', 'Las poses se guardan en este navegador. Exportalas para llevarlas a otro equipo.'),
     ]),
   ];
 }

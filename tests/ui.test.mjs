@@ -496,9 +496,9 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   revisa('el panel trae la barra del tamano de los manejadores', !!barra);
   revisa('que va del 1 % al 100 %',
     barra?.getAttribute('min') === '0.01' && barra?.getAttribute('max') === '1');
-  revisa('y empieza a la mitad, no a los manejadores grandes de siempre',
-    settings.get('pose.handleScale') === 0.5 && lee() === '50 %'
-    && DEFAULTS.pose.handleScale === 0.5, lee());
+  revisa('y empieza al 10 %, discreto sobre la figura',
+    settings.get('pose.handleScale') === 0.1 && lee() === '10 %'
+    && DEFAULTS.pose.handleScale === 0.1, lee());
   revisa('con la proximidad apagada la barra se puede tocar igual',
     settings.get('pose.proximity') === false && tam?.classList.contains('is-disabled') === false);
   barra.value = '0.4';
@@ -507,7 +507,7 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
     settings.get('pose.handleScale') === 0.4 && lee() === '40 %', lee());
   barra.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
   revisa('y el doble clic devuelve el de fabrica',
-    settings.get('pose.handleScale') === DEFAULTS.pose.handleScale && lee() === '50 %');
+    settings.get('pose.handleScale') === DEFAULTS.pose.handleScale && lee() === '10 %');
 }
 
 // 8d · El panel de poses reune todo el rig: los dos modos con su nombre, la
@@ -697,6 +697,14 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   revisa('Linea de accion lleva la explicacion en el boton de ayuda, no como aviso suelto',
     !!accionGroup?.parentElement?.querySelector('.group-head .help-btn')
     && !accionGroup?.querySelector('.notice'));
+
+  const posesPanel = document.querySelector('#sidebar-host [data-panel="poses"]');
+  const posesAyuda = ['Cinematica directa (FK)', 'Cinematica inversa (IK)', 'Deformar los huesos', 'Manos y dedos', 'Biblioteca']
+    .every((t) => {
+      const b = [...(posesPanel?.querySelectorAll('.group-head') ?? [])].find((h) => h.textContent.includes(t))?.parentElement;
+      return !!b?.querySelector('.group-head .help-btn') && !b?.querySelector('.group-body .notice');
+    });
+  revisa('los grupos de Poses mueven sus textos explicativos al boton de ayuda', posesAyuda);
 
   settings.set('guides.perspective.mode', '6puntos');
   const warpToggle = campo(perspGroup, 'Deformar la escena 3D');

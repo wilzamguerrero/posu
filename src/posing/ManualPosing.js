@@ -661,7 +661,7 @@ export class ManualPosing {
   /** Tamano global de los manejadores: del 1 % al 100 %, y el de fabrica si llega basura. */
   #handleScale(v) {
     const n = Number(v);
-    return Number.isFinite(n) ? THREE.MathUtils.clamp(n, 0.01, 1) : 0.5;
+    return Number.isFinite(n) ? THREE.MathUtils.clamp(n, 0.01, 1) : 0.1;
   }
 
   /**
@@ -1242,7 +1242,7 @@ export class ManualPosing {
     const cssH = H > 0 ? H / dpr : Math.max(1, dom.clientHeight || dom.getBoundingClientRect().height || 1);
     const cam = this.viewport.cameras.active;
     const minDim = Math.max(240, Math.min(cssW, cssH));
-    const scaleBias = 0.2 + 1.4 * this.handleScale;
+    const scaleBias = 0.32 + 1.15 * this.handleScale;
     const minBaseCss = Math.max(2.0, minDim * 0.0052 * scaleBias);
     const maxBaseCss = Math.max(3.5, minDim * 0.0105 * scaleBias);
     const weights = { joint: 1, effector: 1.35, pole: 0.85, body: 1.5, bend: 1.15, tweak: 0.82 };
