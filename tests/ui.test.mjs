@@ -682,6 +682,26 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   });
 }
 
+// 8h · Perspectiva: interruptor de deformacion 3D, distancia de fugas y curvatura
+//      en modos rectilineos y curvilineos (4, 5 y 6 puntos).
+{
+  const perspGroup = grupoPorTitulo('Perspectiva');
+  revisa('el panel de guias trae el grupo de Perspectiva', !!perspGroup);
+  settings.set('guides.perspective.mode', '6puntos');
+  const warpToggle = campo(perspGroup, 'Deformar la escena 3D');
+  const fov6Field = campo(perspGroup, 'Distancia de fugas (campo)');
+  const scaleField = campo(perspGroup, 'Radio / Zoom');
+  const curv6Field = campo(perspGroup, 'Curvatura de proyeccion');
+  revisa('en 6 puntos aparecen los controles de deformacion 3D, campo, zoom y curvatura',
+    !!warpToggle && !!fov6Field && !!scaleField && !!curv6Field);
+  settings.set('guides.perspective.mode', '2puntos');
+  const spreadField = campo(perspGroup, 'Distancia de fugas');
+  const curv2Field = campo(perspGroup, 'Curvatura de lente');
+  revisa('en 2 puntos aparecen Distancia de fugas y Curvatura de lente',
+    !!spreadField && !!curv2Field);
+  settings.set('guides.perspective.mode', 'ninguno');
+}
+
 // 9 · La firma del autor sale en Ayuda > Acerca de.
 const firma = document.querySelector('#sidebar-host .credit');
 console.log('firma:', firma ? firma.textContent.replace(/s+/g, ' ').trim() : 'NO APARECE',

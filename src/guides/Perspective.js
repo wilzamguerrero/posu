@@ -51,6 +51,83 @@ const NZ = new THREE.Vector3(0, 0, -1);
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+/**
+ * Ley radial generalizada para las proyecciones esfericas (5 y 6 puntos):
+ *   k > 0 : estereografica  (2/k)·tan(k·theta/2)
+ *   k = 0 : equidistante    theta
+ *   k < 0 : equisolida/ort. (2/|k|)·sin(|k|·theta/2)
+ */
+export function fisheyeGain(theta, k) {
+  if (Math.abs(k) < 1e-5) return theta;
+  if (k > 0) return (2 / k) * Math.tan(k * theta * 0.5);
+  const ak = -k;
+  return (2 / ak) * Math.sin(ak * theta * 0.5);
+}
+
+/**
+ * Calcula todos los parametros geometricos de la proyeccion activa para un
+ * lienzo de `W x H`. Es la fuente unica de verdad que comparten el dibujo 2D
+ * (`Perspective`) y los shaders de deformacion 3D (`PostFX`).
+ */
+export function computePerspectiveParams(conf, cam, W, H) {
+  const c = conf ?? {};
+  const kind = PERSPECTIVE_BY_ID[c.mode]?.kind ?? 'off';
+  const warp = c.warp !== false;
+  const isPersp = cam?.isPerspectiveCamera === true;
+  const cx = W * 0.5;
+  const cy = H * 0.5;
+  const R = Math.min(W, H) * 0.5;
+  const diag = Math.hypot(cx, cy) || 1;
+  const scale = clamp(Number(c.scale ?? 0.98) || 0.98, 0.35, 2.5);
+  const curvature = clamp(Number(c.curvature ?? 0) || 0, -1, 1);
+
+  const spread = (kind === 'lineal' && warp && isPersp)
+    ? clamp(Number(c.pointSpread ?? 1) || 1, 0.25, 2.5)
+    : 1;
+  const bendK = (kind === 'lineal' && warp && isPersp)
+    ? (curvature >= 0 ? curvature * 0.75 : curvature * 0.28)
+    : 0;
+
+  const baseFov = isPersp ? cam.fov : 40;
+  const baseTanHalf = Math.tan(baseFov * 0.5 * DEG);
+  const targetTanHalf = baseTanHalf / spread;
+  const targetFov = clamp((2 * Math.atan(targetTanHalf)) / DEG, 4, 165);
+  const padWant = bendK > 0 ? 1 + bendK * 1.02 : 1;
+  const maxTanHalf = Math.tan(82.5 * DEG);
+  const renderTanHalf = Math.min(maxTanHalf, targetTanHalf * padWant);
+  const actualPad = renderTanHalf / Math.max(1e-5, targetTanHalf);
+  const renderFov = clamp((2 * Math.atan(renderTanHalf)) / DEG, 4, 165);
+  const fpx = isPersp ? (H * 0.5) / Math.tan(targetFov * 0.5 * DEG) : H * 0.5;
+
+  // Cilindrica (4 puntos)
+  const fov4 = clamp(Number(c.fov4 ?? 200) || 200, 60, 340) * DEG;
+  const fu = ((W * 0.5) / (fov4 * 0.5)) * (scale / 0.98);
+  const uMax = 179 * DEG;
+  const vScale = clamp(1 - curvature * 0.65, 0.25, 1.8);
+
+  // Esfericas (5 y 6 puntos)
+  const fovDeg = kind === 'ojodepez'
+    ? clamp(Number(c.fov5 ?? 180) || 180, 60, 260)
+    : clamp(Number(c.fov6 ?? 360) || 360, 120, 360);
+  const thetaRef = fovDeg * 0.5 * DEG;
+  const thetaMax = Math.min(179.5 * DEG, thetaRef + (fovDeg >= 359 ? 0 : 0.75 * DEG));
+  const kMaxPos = Math.min(1.2, 2.75 / Math.max(0.2, thetaMax));
+  const kMaxNeg = Math.min(2.0, (Math.PI * 0.995) / Math.max(0.2, thetaMax));
+  const k = curvature === 0 ? 0 : (curvature > 0 ? curvature * kMaxPos : curvature * kMaxNeg);
+  const gRef = fisheyeGain(thetaRef, k);
+  const gMax = fisheyeGain(thetaMax, k);
+  const fr = kind === 'cilindrica' ? fu : (R * scale) / Math.max(1e-5, gRef);
+  const rMax = gMax * fr;
+
+  return {
+    kind, warp, W, H, cx, cy, R, diag,
+    scale, curvature, spread, bendK,
+    targetFov, renderFov, actualPad, fpx,
+    fu, uMax, vScale,
+    thetaRef, thetaMax, k, fr, rMax,
+  };
+}
+
 /** Catalogo de modos, con el texto que explica cuando usar cada uno. */
 export const PERSPECTIVE_MODES = [
   { id: 'ninguno', label: 'Ninguna', icon: 'circle-dashed', kind: 'off',
@@ -82,6 +159,8 @@ export class Perspective {
   #limits = null;
   /** @type {THREE.Camera|null} Copia congelada de la camara (modo bloqueo). */
   #frozen = null;
+  /** @type {THREE.PerspectiveCamera|null} Camara temporal con separacion de fugas aplicada. */
+  #effCam = null;
 
   /**
    * @param {import('../core/Settings.js').Settings} settings
@@ -107,6 +186,16 @@ export class Perspective {
 
   /** True cuando hay algo que dibujar (lo consulta Guides.anyActive). */
   get active() { return this.kind !== 'off'; }
+
+  /** True cuando la perspectiva esta deformando activamente la imagen 3D. */
+  get warped() {
+    if (!this.active || this.conf.warp === false) return false;
+    const cam = this.camera;
+    if (!cam?.isPerspectiveCamera) return false;
+    if (this.kind !== 'lineal') return true;
+    return Math.abs((Number(this.conf.pointSpread ?? 1) || 1) - 1) > 1e-4
+      || Math.abs(Number(this.conf.curvature ?? 0) || 0) > 1e-4;
+  }
 
   /** Camara que manda en el dibujo: la congelada si hay bloqueo, si no la viva. */
   get camera() { return this.#frozen ?? this.viewport.cameras.active; }
@@ -183,28 +272,78 @@ export class Perspective {
   /* -- Proyecciones ------------------------------------------------------ */
 
   /**
+   * Devuelve la camara con la separacion de fugas (`pointSpread`) aplicada en
+   * modos rectilineos, sin tocar la configuracion real de `CameraRig`.
+   */
+  #effectiveCamera(cam, p) {
+    if (p.kind !== 'lineal' || !cam.isPerspectiveCamera || Math.abs(p.targetFov - cam.fov) < 1e-4) {
+      return cam;
+    }
+    this.#effCam ??= new THREE.PerspectiveCamera();
+    this.#effCam.copy(cam);
+    this.#effCam.fov = p.targetFov;
+    this.#effCam.updateProjectionMatrix();
+    this.#effCam.matrixWorld.copy(cam.matrixWorld);
+    this.#effCam.matrixWorldInverse.copy(cam.matrixWorldInverse);
+    return this.#effCam;
+  }
+
+  /**
    * Prepara las constantes del fotograma: centro, radio de imagen y factores de
-   * escala de cada proyeccion curva.
+   * escala de cada proyeccion.
    */
   #geometry(ctx, W, H, dpr) {
-    const cam = this.camera;
-    cam.updateMatrixWorld();
-    cam.updateProjectionMatrix?.();
-    const geo = { ctx, W, H, dpr, cam, cx: W / 2, cy: H / 2, kind: this.kind };
-    geo.R = Math.min(W, H) * 0.5;
-    // Focal en pixeles de la camara real (para el cono de vision rectilineo).
-    geo.fpx = cam.isPerspectiveCamera ? (H / 2) / Math.tan((cam.fov * DEG) / 2) : H / 2;
-    // Cilindrica: 200 grados de panoramica ocupan el ancho del lienzo.
-    geo.fu = (W * 0.5) / (100 * DEG);
-    geo.uMax = 178 * DEG;
-    if (geo.kind === 'ojodepez') {
-      // El limite se pasa medio grado del hemisferio: en el borde exacto los
-      // errores de coma flotante harian desaparecer el horizonte a intervalos.
-      geo.fr = (geo.R * 0.98) / (Math.PI / 2);
-      geo.thetaMax = 90.75 * DEG;
+    const rawCam = this.camera;
+    rawCam.updateMatrixWorld();
+    rawCam.updateProjectionMatrix?.();
+    const p = computePerspectiveParams(this.conf, rawCam, W, H);
+    const cam = this.#effectiveCamera(rawCam, p);
+    return {
+      ctx, W, H, dpr, cam,
+      cx: p.cx, cy: p.cy, kind: p.kind, R: p.R, diag: p.diag,
+      fpx: p.fpx, bendK: p.bendK, scale: p.scale,
+      fu: p.fu, uMax: p.uMax, vScale: p.vScale,
+      fr: p.fr, k: p.k, thetaMax: p.thetaMax, rMax: p.rMax,
+    };
+  }
+
+  /**
+   * Deforma una coordenada de pantalla rectilinea segun `curvature` (barril o
+   * corsete), resolviendo `r_dst * (1 + k * r_dst^2) = r_src` para coincidir
+   * exactamente con el muestreo inverso del shader 3D.
+   */
+  #warpLinear(geo, x, y) {
+    const k = geo.bendK;
+    if (!k || Math.abs(k) < 1e-4) return { x, y };
+    const dx = x - geo.cx;
+    const dy = y - geo.cy;
+    const dist = Math.hypot(dx, dy);
+    const s = dist / geo.diag;
+    if (s < 1e-6) return { x, y };
+    let r;
+    if (k > 0) {
+      r = Math.min(s, Math.cbrt(s / k));
+      for (let i = 0; i < 5; i++) {
+        const f = r + k * r * r * r - s;
+        const df = 1 + 3 * k * r * r;
+        r -= f / df;
+      }
+    } else {
+      const rCrit = Math.sqrt(-1 / (3 * k));
+      const sCrit = (2 / 3) * rCrit;
+      if (s >= sCrit * 0.995) {
+        r = rCrit * (s / (sCrit * 0.995));
+      } else {
+        r = s;
+        for (let i = 0; i < 6; i++) {
+          const f = r + k * r * r * r - s;
+          const df = Math.max(0.01, 1 + 3 * k * r * r);
+          r = clamp(r - f / df, 0, rCrit * 0.999);
+        }
+      }
     }
-    else { geo.fr = (geo.R * 0.98) / Math.PI; geo.thetaMax = 179 * DEG; }
-    return geo;
+    const factor = (r * geo.diag) / dist;
+    return { x: geo.cx + dx * factor, y: geo.cy + dy * factor };
   }
 
   /**
@@ -218,10 +357,9 @@ export class Perspective {
         .applyMatrix4(geo.cam.matrixWorldInverse)
         .applyMatrix4(geo.cam.projectionMatrix);
       if (_v4.w <= EPS) return null;
-      return {
-        x: ((_v4.x / _v4.w) * 0.5 + 0.5) * geo.W,
-        y: (-(_v4.y / _v4.w) * 0.5 + 0.5) * geo.H,
-      };
+      const sx = ((_v4.x / _v4.w) * 0.5 + 0.5) * geo.W;
+      const sy = (-(_v4.y / _v4.w) * 0.5 + 0.5) * geo.H;
+      return this.#warpLinear(geo, sx, sy);
     }
     _v3.set(p.x, p.y, p.z).applyMatrix4(geo.cam.matrixWorldInverse);
     return this.#screenFromCam(geo, _v3);
@@ -236,8 +374,8 @@ export class Perspective {
   /**
    * Nucleo de las proyecciones curvilineas: un vector en espacio de camara
    * (que mira a -Z) se convierte en pixeles.
-   *  · cilindrica  u = f·atan2(x,-z),  v = f·y/hypot(x,z)
-   *  · ojo de pez  r = f·theta   con theta medido desde el eje visual
+   *  · cilindrica  u = f·atan2(x,-z),  v = f·tan(phi·a)/a
+   *  · ojo de pez  r = f·g_k(theta)   con theta medido desde el eje visual
    */
   #screenFromCam(geo, v) {
     const len = v.length();
@@ -248,11 +386,17 @@ export class Perspective {
       if (rho < EPS) return null;              // justo en el cenit: indefinido
       const u = Math.atan2(x, -z);
       if (Math.abs(u) > geo.uMax) return null;
-      return { x: geo.cx + u * geo.fu, y: geo.cy - (y / rho) * geo.fu };
+      let vy;
+      if (Math.abs(geo.vScale - 1) < 1e-5) vy = y / rho;
+      else {
+        const phi = Math.atan2(y, rho);
+        vy = Math.tan(phi * geo.vScale) / geo.vScale;
+      }
+      return { x: geo.cx + u * geo.fu, y: geo.cy - vy * geo.fu };
     }
     const theta = Math.acos(clamp(-z, -1, 1));
     if (theta > geo.thetaMax) return null;
-    const r = theta * geo.fr;
+    const r = fisheyeGain(theta, geo.k) * geo.fr;
     const plano = Math.hypot(x, y);
     if (plano < EPS) return { x: geo.cx, y: geo.cy };
     return { x: geo.cx + (x / plano) * r, y: geo.cy - (y / plano) * r };
@@ -260,7 +404,7 @@ export class Perspective {
 
   /**
    * Punto de fuga de una direccion del mundo en los modos rectilineos.
-   * @returns {{paralela:false,x:number,y:number}|{paralela:true,dx:number,dy:number}|null}
+   * @returns {{paralela:false,x:number,y:number,rawX:number,rawY:number}|{paralela:true,dx:number,dy:number}|null}
    */
   #vp(geo, d) {
     _v4.set(d.x, d.y, d.z, 0)
@@ -274,11 +418,10 @@ export class Perspective {
       if (n < EPS) return null;
       return { paralela: true, dx: dx / n, dy: dy / n };
     }
-    return {
-      paralela: false,
-      x: ((_v4.x / _v4.w) * 0.5 + 0.5) * geo.W,
-      y: (-(_v4.y / _v4.w) * 0.5 + 0.5) * geo.H,
-    };
+    const rawX = ((_v4.x / _v4.w) * 0.5 + 0.5) * geo.W;
+    const rawY = (-(_v4.y / _v4.w) * 0.5 + 0.5) * geo.H;
+    const w = this.#warpLinear(geo, rawX, rawY);
+    return { paralela: false, x: w.x, y: w.y, rawX, rawY };
   }
 
   /**
@@ -300,22 +443,37 @@ export class Perspective {
 
   /* -- Trazos basicos ---------------------------------------------------- */
 
-  /** Recta infinita por (px,py) con direccion (dx,dy), recortada al lienzo. */
+  /** Recta infinita por (px,py) con direccion (dx,dy), recortada al lienzo (y curvada si hay deformacion). */
   #lineThrough(geo, px, py, dx, dy) {
     const { ctx, W, H } = geo;
+    const curved = geo.kind === 'lineal' && Math.abs(geo.bendK) > 1e-4;
+    const padX = curved ? W * 0.45 : 0;
+    const padY = curved ? H * 0.45 : 0;
+    const minX = -padX, maxX = W + padX;
+    const minY = -padY, maxY = H + padY;
     const ts = [];
-    if (Math.abs(dx) > EPS) ts.push((0 - px) / dx, (W - px) / dx);
-    if (Math.abs(dy) > EPS) ts.push((0 - py) / dy, (H - py) / dy);
+    if (Math.abs(dx) > EPS) ts.push((minX - px) / dx, (maxX - px) / dx);
+    if (Math.abs(dy) > EPS) ts.push((minY - py) / dy, (maxY - py) / dy);
     let a = null, b = null;
     for (const t of ts) {
       const x = px + dx * t, y = py + dy * t;
-      if (x < -1 || x > W + 1 || y < -1 || y > H + 1) continue;
+      if (x < minX - 1 || x > maxX + 1 || y < minY - 1 || y > maxY + 1) continue;
       if (a === null) a = t; else b = t;
     }
     if (a === null || b === null || Math.abs(a - b) < 0.5) return;
     ctx.beginPath();
-    ctx.moveTo(px + dx * a, py + dy * a);
-    ctx.lineTo(px + dx * b, py + dy * b);
+    if (!curved) {
+      ctx.moveTo(px + dx * a, py + dy * a);
+      ctx.lineTo(px + dx * b, py + dy * b);
+    } else {
+      const steps = 28;
+      for (let i = 0; i <= steps; i++) {
+        const t = a + (b - a) * (i / steps);
+        const p = this.#warpLinear(geo, px + dx * t, py + dy * t);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+    }
     ctx.stroke();
   }
 
@@ -324,10 +482,15 @@ export class Perspective {
    * la fuga muy fuera de pantalla casi todos los radios caerian invisibles.
    */
   #angleRange(geo, vp) {
-    if (vp.x >= 0 && vp.x <= geo.W && vp.y >= 0 && vp.y <= geo.H) return { from: 0, span: Math.PI };
-    const angs = [[0, 0], [geo.W, 0], [geo.W, geo.H], [0, geo.H]]
+    const vx = vp.rawX ?? vp.x;
+    const vy = vp.rawY ?? vp.y;
+    const pad = Math.abs(geo.bendK) > 1e-4 ? 0.35 : 0;
+    const minX = -geo.W * pad, maxX = geo.W * (1 + pad);
+    const minY = -geo.H * pad, maxY = geo.H * (1 + pad);
+    if (vx >= minX && vx <= maxX && vy >= minY && vy <= maxY) return { from: 0, span: Math.PI };
+    const angs = [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]]
       .map(([x, y]) => {
-        const a = Math.atan2(y - vp.y, x - vp.x);
+        const a = Math.atan2(y - vy, x - vx);
         return ((a % Math.PI) + Math.PI) % Math.PI;   // las rectas son bidireccionales
       })
       .sort((p, q) => p - q);
@@ -347,13 +510,15 @@ export class Perspective {
     if (vp.paralela) { this.#parallels(geo, vp, n); return; }
     const total = Math.max(3, Math.round(n));
     const { from, span } = this.#angleRange(geo, vp);
+    const vx = vp.rawX ?? vp.x;
+    const vy = vp.rawY ?? vp.y;
     const base = geo.ctx.globalAlpha;
     for (let i = 0; i < total; i++) {
       const t = (i + 0.5) / total;
       const ang = from + span * t;
       // Con degradado, los radios centrales pesan mas que los de los extremos.
       if (fade) geo.ctx.globalAlpha = base * (0.45 + 0.55 * Math.sin(Math.PI * t));
-      this.#lineThrough(geo, vp.x, vp.y, Math.cos(ang), Math.sin(ang));
+      this.#lineThrough(geo, vx, vy, Math.cos(ang), Math.sin(ang));
     }
     geo.ctx.globalAlpha = base;
   }
@@ -518,13 +683,16 @@ export class Perspective {
   #horizonLine(geo, a, b) {
     const fin = [a, b].filter((v) => v && !v.paralela);
     if (fin.length >= 2) {
-      const dx = fin[1].x - fin[0].x, dy = fin[1].y - fin[0].y;
+      const x0 = fin[0].rawX ?? fin[0].x, y0 = fin[0].rawY ?? fin[0].y;
+      const x1 = fin[1].rawX ?? fin[1].x, y1 = fin[1].rawY ?? fin[1].y;
+      const dx = x1 - x0, dy = y1 - y0;
       const n = Math.hypot(dx, dy);
-      if (n > EPS) { this.#lineThrough(geo, fin[0].x, fin[0].y, dx / n, dy / n); return; }
+      if (n > EPS) { this.#lineThrough(geo, x0, y0, dx / n, dy / n); return; }
     }
     const par = [a, b].find((v) => v && v.paralela);
     if (fin.length === 1) {
-      this.#lineThrough(geo, fin[0].x, fin[0].y, par ? par.dx : 1, par ? par.dy : 0);
+      const x0 = fin[0].rawX ?? fin[0].x, y0 = fin[0].rawY ?? fin[0].y;
+      this.#lineThrough(geo, x0, y0, par ? par.dx : 1, par ? par.dy : 0);
       return;
     }
     // Sin fugas finitas (ortografica): se usa la imagen de un punto lejano a la
@@ -584,8 +752,8 @@ export class Perspective {
   #curved(geo, c) {
     const ctx = geo.ctx;
     const n = clamp(Math.round(c.meridians ?? 16), 4, 72);
-    const elMax = geo.kind === 'cilindrica' ? 80 : 89.5;
-    const pasoEl = geo.kind === 'cilindrica' ? 15 : 15;
+    const elMax = geo.kind === 'cilindrica' ? (geo.vScale < 0.9 ? 88 : 80) : 89.5;
+    const pasoEl = 15;
 
     // Meridianos: las verticales del mundo. En la proyeccion cilindrica salen
     // rectas y verticales; en las esfericas convergen en cenit y nadir.
@@ -652,7 +820,7 @@ export class Perspective {
     const E = clamp(c.gridExtent ?? 8, 1, 40);
     const step = clamp(c.gridStep ?? 0.5, 0.05, 5);
     const n = Math.floor(E / step);
-    const m = geo.kind === 'lineal' ? 1 : 28;
+    const m = geo.kind === 'lineal' ? (Math.abs(geo.bendK) > 1e-4 ? 20 : 1) : 28;
     for (let i = -n; i <= n; i++) {
       const t = i * step;
       this.#polyline3(geo, this.#segmentPts(_pa.set(t, 0, -E), _pb.set(t, 0, E), m));
@@ -666,7 +834,7 @@ export class Perspective {
     const step = clamp(c.gridStep ?? 0.5, 0.05, 5);
     const alto = Math.min(E, 4);
     const n = Math.floor(E / step);
-    const m = geo.kind === 'lineal' ? 1 : 20;
+    const m = geo.kind === 'lineal' ? (Math.abs(geo.bendK) > 1e-4 ? 16 : 1) : 20;
     for (let i = -n; i <= n; i++) {
       const t = i * step;
       this.#polyline3(geo, this.#segmentPts(_pa.set(t, 0, -E), _pb.set(t, alto, -E), m));
@@ -686,7 +854,7 @@ export class Perspective {
       .map(([x, y, z]) => new THREE.Vector3(x, y, z));
     const A = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4],
       [0, 4], [1, 5], [2, 6], [3, 7]];
-    const m = geo.kind === 'lineal' ? 1 : 18;
+    const m = geo.kind === 'lineal' ? (Math.abs(geo.bendK) > 1e-4 ? 16 : 1) : 18;
     const ctx = geo.ctx;
     const g = ctx.globalAlpha;
     ctx.globalAlpha = Math.min(1, g + 0.35);
@@ -698,8 +866,13 @@ export class Perspective {
 
   /** Radio en pixeles del circulo que abarca un angulo total de vision. */
   #coneRadius(geo, ang) {
-    if (geo.kind === 'lineal') return geo.fpx * Math.tan(clamp(ang, 2 * DEG, 175 * DEG) / 2);
-    return geo.fr * (ang / 2);
+    if (geo.kind === 'lineal') {
+      const raw = geo.fpx * Math.tan(clamp(ang, 2 * DEG, 175 * DEG) / 2);
+      if (Math.abs(geo.bendK) > 1e-4) return this.#warpLinear(geo, geo.cx + raw, geo.cy).x - geo.cx;
+      return raw;
+    }
+    if (geo.kind === 'cilindrica') return geo.fu * (ang / 2);
+    return fisheyeGain(ang / 2, geo.k) * geo.fr;
   }
 
   /** Cono de vision: la zona donde la perspectiva rectilinea no se deforma. */
@@ -723,7 +896,7 @@ export class Perspective {
   #vignette(geo, c) {
     const r = c.cone
       ? this.#coneRadius(geo, clamp(c.coneAngle ?? 60, 10, 170) * DEG)
-      : (geo.kind === 'lineal' ? geo.fpx * Math.tan(30 * DEG) : geo.R * 0.98);
+      : (geo.kind === 'lineal' ? this.#coneRadius(geo, 60 * DEG) : geo.rMax || geo.R * geo.scale);
     if (!(r > 4)) return;
     const ctx = geo.ctx;
     ctx.save();

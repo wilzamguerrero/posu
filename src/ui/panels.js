@@ -1346,13 +1346,109 @@ function posesPanel(app) {
  * cuando cambia `mode`, nunca cuando se arrastra un deslizador.
  */
 function perspectiveControls(app) {
-  const modo = app.settings.get('guides.perspective.mode') ?? 'ninguno';
+  const { settings, actions } = app;
+  const modo = settings.get('guides.perspective.mode') ?? 'ninguno';
   const def = PERSPECTIVE_BY_ID[modo];
   const out = [];
   if (def?.note) out.push(el('div', { class: 'field-hint', text: def.note }));
   if (modo === 'ninguno') return out;
 
   const lineal = def.kind === 'lineal';
+  out.push(toggle({
+    path: 'guides.perspective.warp',
+    label: 'Deformar la escena 3D',
+    hint: 'Aplica la proyeccion elegida sobre la figura y el escenario 3D (esfera de 6 puntos, ojo de pez, cilindrica o curvatura optica), no solo las lineas de guia.',
+  }));
+
+  if (lineal) {
+    out.push(
+      slider({
+        label: 'Distancia de fugas', path: 'guides.perspective.pointSpread',
+        min: 0.25, max: 2.5, step: 0.01, format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Acerca (< 100 %) o aleja (> 100 %) los puntos de fuga respecto al centro. Valores bajos abren el angulo para meter las fugas dentro del visor.',
+      }),
+      buttons([
+        { label: 'Dramatica', title: 'Fugas cercanas (45 %)', onClick: () => settings.set('guides.perspective.pointSpread', 0.45) },
+        { label: 'Natural', title: 'Distancia normal de camara (100 %)', onClick: () => settings.set('guides.perspective.pointSpread', 1) },
+        { label: 'Plana', title: 'Fugas lejanas / tele (175 %)', onClick: () => settings.set('guides.perspective.pointSpread', 1.75) },
+      ], { cols: 3, compact: true }),
+      slider({
+        label: 'Curvatura de lente', path: 'guides.perspective.curvature',
+        min: -1, max: 1, step: 0.01,
+        format: (v) => (v > 0.005 ? '+' : '') + Math.round(v * 100) + ' %',
+        hint: 'Deforma las rectas en barril (+) o corsete (-), tanto en el render 3D como en la reticula de perspectiva.',
+      }),
+    );
+  } else if (def.kind === 'cilindrica') {
+    out.push(
+      slider({
+        label: 'Distancia de fugas (campo)', path: 'guides.perspective.fov4',
+        min: 60, max: 340, step: 1, format: (v) => Math.round(v) + '°',
+        hint: 'Amplitud horizontal de la panoramica. Subir los grados junta F2 y F4 hacia el centro; bajarlos los separa hacia los bordes.',
+      }),
+      slider({
+        label: 'Escala / Encuadre', path: 'guides.perspective.scale',
+        min: 0.4, max: 2.2, step: 0.01, format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Acerca o aleja la proyeccion cilindrica sin alterar el angulo relativo.',
+      }),
+      slider({
+        label: 'Curvatura vertical', path: 'guides.perspective.curvature',
+        min: -1, max: 1, step: 0.01,
+        format: (v) => (v > 0.005 ? '+' : '') + Math.round(v * 100) + ' %',
+        hint: 'Comprime (+) la vertical para abarcar suelo y techo con mas curva, o la estira (-) en cilindrica clasica.',
+      }),
+    );
+  } else {
+    const cinco = def.kind === 'ojodepez';
+    out.push(
+      slider({
+        label: 'Distancia de fugas (campo)',
+        path: cinco ? 'guides.perspective.fov5' : 'guides.perspective.fov6',
+        min: cinco ? 60 : 120, max: cinco ? 260 : 360, step: 1,
+        format: (v) => Math.round(v) + '°',
+        hint: cinco
+          ? 'Campo angular del ojo de pez. A 180° las fugas del horizonte caen en el borde; bajarlo las empuja fuera y amplia el centro.'
+          : 'Campo angular de la esfera completa. A 360° se ven los 6 puntos a la vez (F1 al frente, F2/F4/F5/F6 a mitad de radio y F3 detras en el borde).',
+      }),
+      slider({
+        label: 'Radio / Zoom', path: 'guides.perspective.scale',
+        min: 0.4, max: 2.2, step: 0.01, format: (v) => Math.round(v * 100) + ' %',
+        hint: 'Tamano de la esfera en pantalla. Al 98 % cabe completa; por encima de 130 % llena todo el visor rectangular.',
+      }),
+      buttons([
+        { label: 'Esfera', title: 'Equisolida: amplia el centro y envuelve los bordes',
+          onClick: () => settings.set('guides.perspective.curvature', -0.75) },
+        { label: 'Equidist.', title: 'Clasica de 5 y 6 puntos (lineal en angulo)',
+          onClick: () => settings.set('guides.perspective.curvature', 0) },
+        { label: 'Estereog.', title: 'Conformal: conserva proporciones anatomicas en los bordes',
+          onClick: () => settings.set('guides.perspective.curvature', 0.75) },
+      ], { cols: 3, compact: true }),
+      slider({
+        label: 'Curvatura de proyeccion', path: 'guides.perspective.curvature',
+        min: -1, max: 1, step: 0.01,
+        format: (v) => (v > 0.005 ? '+' : '') + Math.round(v * 100) + ' %',
+        hint: 'Ley radial continua: negativo comprime la periferia como una bola reflectante; 0 es equidistante; positivo expande los bordes sin aplastar formas.',
+      }),
+    );
+  }
+
+  out.push(buttons([
+    { label: 'Alinear camara', icon: 'crosshair',
+      title: 'Lleva la camara a la orientacion canonica del modo',
+      onClick: () => actions.alignPerspective?.() },
+    { label: 'Restablecer lente', icon: 'rotate-ccw',
+      title: 'Devuelve la distancia, escala y curvatura de perspectiva a sus valores iniciales',
+      onClick: () => settings.batch({
+        'guides.perspective.warp': true,
+        'guides.perspective.pointSpread': 1,
+        'guides.perspective.fov4': 200,
+        'guides.perspective.fov5': 180,
+        'guides.perspective.fov6': 360,
+        'guides.perspective.scale': 0.98,
+        'guides.perspective.curvature': 0,
+      }) },
+  ], { cols: 2, compact: true }));
+
   if (lineal) {
     out.push(slider({ label: 'Radios por fuga', path: 'guides.perspective.rays',
       min: 4, max: 60, step: 1, format: (v) => Math.round(v) + ' lineas' }));
@@ -1379,7 +1475,7 @@ function guidesPanel(app) {
     group({ id: 'gu-persp', title: 'Perspectiva', icon: 'vector-square' }, [
       presetGrid({ path: 'guides.perspective.mode', cols: 4,
         options: PERSPECTIVE_MODES.map((m) => ({ value: m.id, label: m.label, icon: m.icon, title: m.note })),
-        hint: 'Las fugas se calculan desde la camara real, no se colocan a mano.' }),
+        hint: 'Las fugas se calculan desde la camara real y deforman el visor 3D segun la proyeccion elegida.' }),
       reactive('guides.perspective.mode', () => perspectiveControls(app)),
     ]),
     group({ id: 'gu-persp-malla', title: 'Reticulas y volumen', icon: 'grid-3x3', open: false }, [

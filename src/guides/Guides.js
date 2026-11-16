@@ -88,7 +88,7 @@ export class Guides {
     // necesita la camara para calcular los puntos de fuga) y los trazos que
     // resumen la pose (que necesitan los huesos proyectados).
     this.perspective = new Perspective(settings, viewport);
-    this.action = new ActionLine(settings, viewport);
+    this.action = new ActionLine(settings, viewport, this.perspective);
   }
 
   setCharacter(character) {
@@ -121,6 +121,19 @@ export class Guides {
 
   /** Proyecta un punto del mundo a pixeles del lienzo. */
   #project(point, out) {
+    if (this.perspective?.warped) {
+      const s = this.perspective.screenPoint(point, this.canvas.width, this.canvas.height, this.dpr);
+      if (!s) {
+        out.x = NaN;
+        out.y = NaN;
+        out.z = 2;
+        return out;
+      }
+      out.x = s.x;
+      out.y = s.y;
+      out.z = 0;
+      return out;
+    }
     const cam = this.viewport.cameras.active;
     _v.copy(point).project(cam);
     out.x = (_v.x * 0.5 + 0.5) * this.canvas.width;

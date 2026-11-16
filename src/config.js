@@ -386,7 +386,14 @@ export const DEFAULTS = {
 
     /** Sistema de perspectiva: 1, 2 y 3 puntos mas curvilineas de 4, 5 y 6. */
     perspective: {
-      mode: 'ninguno',          // ninguno | 1 | 2 | 3 | 4 | 5 | 6
+      mode: 'ninguno',          // ninguno | 1punto | 2puntos | 3puntos | 4puntos | 5puntos | 6puntos
+      warp: true,               // deformar la escena 3D segun el modo elegido
+      pointSpread: 1,           // separacion de fugas en 1/2/3 puntos (0.25..2.5)
+      fov4: 200,                // amplitud panoramica en 4 puntos (grados)
+      fov5: 180,                // campo de vision en 5 puntos (grados)
+      fov6: 360,                // campo de vision en 6 puntos (grados)
+      scale: 0.98,              // radio / escala del encuadre curvilineo (0.4..2.2)
+      curvature: 0,             // curvatura de lente (-1..+1)
       rays: 20,                 // radios por punto de fuga
       horizon: true,
       points: true,

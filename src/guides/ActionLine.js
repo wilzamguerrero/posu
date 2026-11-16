@@ -168,10 +168,12 @@ export class ActionLine {
   /**
    * @param {import('../core/Settings.js').Settings} settings
    * @param {import('../core/Viewport.js').Viewport} viewport
+   * @param {import('./Perspective.js').Perspective|null} [perspective]
    */
-  constructor(settings, viewport) {
+  constructor(settings, viewport, perspective = null) {
     this.settings = settings;
     this.viewport = viewport;
+    this.perspective = perspective;
     this.character = null;
   }
 
@@ -636,10 +638,17 @@ export class ActionLine {
     ]);
     for (const [a, b] of HUESOS) { claves.add(a); claves.add(b); }
     const out = new Map();
+    const warped = this.perspective?.warped === true;
     for (const key of claves) {
       const bone = ch.bones[key];
       if (!bone) continue;
-      bone.getWorldPosition(_v).project(cam);
+      bone.getWorldPosition(_v);
+      if (warped) {
+        const s = this.perspective.screenPoint(_v, W, H);
+        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) out.set(key, s);
+        continue;
+      }
+      _v.project(cam);
       // Detras de la camara: el punto proyectado no significa nada.
       if (!Number.isFinite(_v.x) || !Number.isFinite(_v.y) || _v.z > 1) continue;
       out.set(key, { x: (_v.x * 0.5 + 0.5) * W, y: (-_v.y * 0.5 + 0.5) * H });

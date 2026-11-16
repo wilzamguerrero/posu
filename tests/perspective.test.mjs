@@ -33,7 +33,8 @@ const check = (name, cond, extra) => {
 const { Settings } = await import('../src/core/Settings.js');
 const { DEFAULTS } = await import('../src/config.js');
 const { CameraRig } = await import('../src/core/CameraRig.js');
-const { Perspective, PERSPECTIVE_MODES } = await import('../src/guides/Perspective.js');
+const { Perspective, PERSPECTIVE_MODES, computePerspectiveParams } = await import('../src/guides/Perspective.js');
+const { CurvilinearPerspectiveShader, LinearPerspectiveWarpShader } = await import('../src/core/shaders/PerspectiveShader.js');
 
 const W = 1600;
 const H = 900;
@@ -199,6 +200,60 @@ settings.set('guides.perspective.lock', false);
 const suelta = persp.vanishingPoint(new THREE.Vector3(1, 0, 0), W, H);
 check('soltar: la fuga vuelve a seguir a la camara',
   !!suelta && Math.abs(suelta.x - antes.x) > 1);
+
+/* ----------------------- distancia de fugas, campo, escala y curvatura ----- */
+
+settings.batch({
+  'guides.perspective.mode': '2puntos',
+  'guides.perspective.warp': true,
+  'guides.perspective.pointSpread': 1,
+  'guides.perspective.curvature': 0,
+});
+place(45, 0);
+check('warped: en 2 puntos por defecto no deforma', persp.warped === false);
+const vxBase = persp.vanishingPoint(AX, W, H);
+settings.set('guides.perspective.pointSpread', 0.5);
+check('warped: en 2 puntos con separacion 50% si esta activo', persp.warped === true);
+const vxCerca = persp.vanishingPoint(AX, W, H);
+check('distancia de fugas: al 50% las fugas se acercan a la mitad del centro',
+  !!vxBase && !!vxCerca && Math.abs((vxCerca.x - W / 2) - (vxBase.x - W / 2) * 0.5) < 2,
+  vxBase && vxCerca ? Math.round(vxCerca.x - W / 2) + ' vs ' + Math.round((vxBase.x - W / 2) * 0.5) : '');
+
+settings.set('guides.perspective.curvature', 0.6);
+const ctxCurv = stubCtx();
+persp.draw(ctxCurv, W, H, 1);
+check('2 puntos con curvatura positiva dibuja sin fallos', ctxCurv.strokes > 20, ctxCurv.strokes + ' trazos');
+
+settings.batch({
+  'guides.perspective.mode': '6puntos',
+  'guides.perspective.warp': true,
+  'guides.perspective.fov6': 360,
+  'guides.perspective.scale': 0.98,
+  'guides.perspective.curvature': 0,
+});
+place(0, 0);
+check('warped: en 6 puntos se activa automaticamente', persp.warped === true);
+const nadirFull = persp.vanishingPoint(new THREE.Vector3(0, -1, 0), W, H);
+settings.set('guides.perspective.fov6', 180);
+const nadirZoom = persp.vanishingPoint(new THREE.Vector3(0, -1, 0), W, H);
+check('6 puntos: bajar el campo de 360 a 180 duplica el radio del nadir',
+  !!nadirFull && !!nadirZoom && Math.abs((nadirZoom.y - H / 2) - (nadirFull.y - H / 2) * 2) < 3,
+  nadirFull && nadirZoom ? Math.round(nadirZoom.y - H / 2) + ' vs ' + Math.round((nadirFull.y - H / 2) * 2) : '');
+
+settings.batch({ 'guides.perspective.fov6': 360, 'guides.perspective.scale': 1.5, 'guides.perspective.curvature': 0.75 });
+const nadirEstereo = persp.vanishingPoint(new THREE.Vector3(0, -1, 0), W, H);
+check('6 puntos: escala y curvatura estereografica recalculan el nadir',
+  !!nadirEstereo && Math.abs(nadirEstereo.y - H / 2) > Math.abs(nadirFull.y - H / 2),
+  nadirEstereo ? 'dy=' + Math.round(nadirEstereo.y - H / 2) : '');
+
+settings.set('guides.perspective.warp', false);
+check('desactivar deformacion apaga warped en 6 puntos', persp.warped === false);
+
+const p6 = computePerspectiveParams(settings.get('guides.perspective'), rig.active, W, H);
+check('shaders de perspectiva exportan uniformes y fuentes GLSL',
+  typeof CurvilinearPerspectiveShader.fragmentShader === 'string'
+  && typeof LinearPerspectiveWarpShader.fragmentShader === 'string'
+  && p6.kind === 'esferica');
 
 console.log('\n' + oks.length + ' correctas / ' + fails.length + ' fallos');
 if (fails.length) process.exit(1);

@@ -21,6 +21,8 @@ import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
 import { LensShader } from './shaders/LensShader.js';
+import { CurvilinearPerspectiveShader, LinearPerspectiveWarpShader } from './shaders/PerspectiveShader.js';
+import { computePerspectiveParams } from '../guides/Perspective.js';
 import { OutlineFX } from './OutlineFX.js';
 
 export class PostFX {
@@ -43,11 +45,16 @@ export class PostFX {
     this.passes = {};
     /** Provee las mallas con contorno; lo fija quien conoce figuras y solidos. */
     this.outlineCollect = null;
+    /** Recursos bajo demanda para proyecciones curvilineas (4, 5 y 6 puntos). */
+    this.cubeTarget = null;
+    this.cubeCamera = null;
+    this.warpCam = new THREE.PerspectiveCamera();
+    this._useWarpCam = false;
 
     settings.on(
       ['camera.dof', 'camera.bloom', 'camera.distortion', 'camera.distortion2', 'camera.chromatic',
         'camera.vignette', 'camera.grain', 'camera.projection', 'quality.ssao', 'quality.antialias',
-        'outline.enabled'],
+        'outline.enabled', 'guides.perspective.*'],
       () => { this.dirty = true; },
     );
   }
@@ -75,9 +82,48 @@ export class PostFX {
     this.#build(want);
   }
 
+  /** Camara que deben usar los pases rectilineos (la normal o la ampliada por `pointSpread`/`pad`). */
+  get activeCamera() {
+    return this._useWarpCam ? this.warpCam : this.rig.active;
+  }
+
+  /** Crea o redimensiona bajo demanda el mapa cubico para 4, 5 y 6 puntos. */
+  #ensureCubeRig(cam) {
+    const tier = this.profile?.tier;
+    const size = (tier === 'compat' || tier === 'bajo') ? 768 : 1024;
+    if (!this.cubeTarget || this.cubeTarget.width !== size) {
+      this.cubeTarget?.dispose();
+      this.cubeTarget = new THREE.WebGLCubeRenderTarget(size, {
+        type: THREE.HalfFloatType,
+        generateMipmaps: true,
+        minFilter: THREE.LinearMipmapLinearFilter,
+        magFilter: THREE.LinearFilter,
+      });
+      this.cubeCamera = new THREE.CubeCamera(cam.near || 0.05, cam.far || 200, this.cubeTarget);
+    }
+    this.cubeCamera.position.copy(cam.position);
+    this.cubeCamera.layers.mask = cam.layers.mask;
+    for (const c of this.cubeCamera.children) {
+      if (c.near !== cam.near || c.far !== cam.far) {
+        c.near = cam.near;
+        c.far = cam.far;
+        c.updateProjectionMatrix();
+      }
+    }
+  }
+
   /** Cadena de efectos deseada segun los ajustes actuales. */
   #wanted() {
     const s = this.settings;
+    const isPersp = s.get('camera.projection') === 'perspectiva';
+    const pConf = s.get('guides.perspective') ?? {};
+    const pParams = computePerspectiveParams(pConf, this.rig.active, this.size.x, this.size.y);
+    const perspActive = isPersp && pConf.warp !== false && pParams.kind !== 'off';
+    const curvilinear = perspActive && pParams.kind !== 'lineal';
+    const linearSpread = perspActive && pParams.kind === 'lineal' && Math.abs(pParams.spread - 1) > 1e-4;
+    const linearBend = perspActive && pParams.kind === 'lineal'
+      && (Math.abs(pParams.bendK) > 1e-4 || Math.abs(pParams.actualPad - 1) > 1e-4);
+
     const lens =
       Math.abs(s.get('camera.distortion')) > 0.001 ||
       Math.abs(s.get('camera.distortion2')) > 0.001 ||
@@ -85,12 +131,15 @@ export class PostFX {
       s.get('camera.vignette') > 0.001 ||
       s.get('camera.grain') > 0.001;
     return {
-      // La profundidad de campo no tiene sentido en proyeccion ortografica:
-      // esa camara no tiene plano focal fisico.
-      dof: s.get('camera.dof') && s.get('camera.projection') === 'perspectiva',
+      // En modo curvilineo (4/5/6 puntos) los pases de profundidad/normal planos
+      // no casan con la esfera de 360 grados y se omiten para evitar artefactos.
+      dof: !curvilinear && s.get('camera.dof') && isPersp,
       bloom: s.get('camera.bloom') > 0.001,
-      ssao: s.get('quality.ssao'),
-      outline: s.get('outline.enabled') === true,
+      ssao: !curvilinear && s.get('quality.ssao'),
+      outline: !curvilinear && s.get('outline.enabled') === true,
+      curvilinear,
+      linearSpread,
+      linearBend,
       lens,
     };
   }
@@ -104,8 +153,10 @@ export class PostFX {
     this.composer?.dispose();
     this.passes = {};
 
-    if (!want.dof && !want.bloom && !want.ssao && !want.outline && !want.lens) {
+    if (!want.dof && !want.bloom && !want.ssao && !want.outline && !want.lens
+        && !want.curvilinear && !want.linearSpread && !want.linearBend) {
       this.composer = null;
+      this._useWarpCam = false;
       return;
     }
 
@@ -118,10 +169,18 @@ export class PostFX {
         samples: this.settings.get('quality.antialias') ? this.profile.samples : 0,
       }),
     );
-    composer.addPass(new RenderPass(this.scene, this.rig.active));
+
+    if (want.curvilinear) {
+      const curv = new ShaderPass(CurvilinearPerspectiveShader);
+      curv.clear = true;
+      composer.addPass(curv);
+      this.passes.curvilinear = curv;
+    } else {
+      composer.addPass(new RenderPass(this.scene, this.activeCamera));
+    }
 
     if (want.ssao) {
-      const ssao = new SSAOPass(this.scene, this.rig.active, this.size.x, this.size.y);
+      const ssao = new SSAOPass(this.scene, this.activeCamera, this.size.x, this.size.y);
       ssao.kernelRadius = 0.14;
       ssao.minDistance = 0.0008;
       ssao.maxDistance = 0.08;
@@ -129,7 +188,7 @@ export class PostFX {
       this.passes.ssao = ssao;
     }
     if (want.dof) {
-      const bokeh = new BokehPass(this.scene, this.rig.active, { focus: 3, aperture: 0.0002, maxblur: 0.01 });
+      const bokeh = new BokehPass(this.scene, this.activeCamera, { focus: 3, aperture: 0.0002, maxblur: 0.01 });
       composer.addPass(bokeh);
       this.passes.bokeh = bokeh;
     }
@@ -145,11 +204,17 @@ export class PostFX {
     // que el color del trazo salga tal cual, y antes de la lente para que la
     // distorsion y el grano lo afecten como al resto de la imagen.
     if (want.outline) {
-      const outline = new OutlineFX(this.scene, () => this.rig.active);
+      const outline = new OutlineFX(this.scene, () => this.activeCamera);
       if (this.outlineCollect) outline.collectGroups = this.outlineCollect;
       outline.setSize(this.size.x, this.size.y);
       composer.addPass(outline);
       this.passes.outline = outline;
+    }
+
+    if (want.linearBend) {
+      const linWarp = new ShaderPass(LinearPerspectiveWarpShader);
+      composer.addPass(linWarp);
+      this.passes.linearWarp = linWarp;
     }
 
     if (want.lens) {
@@ -169,10 +234,54 @@ export class PostFX {
     this.passes.outline?.setSize(width, height);
   }
 
-  /** Traduce los ajustes fotograficos a los uniformes de cada pase. */
+  /** Traduce los ajustes fotograficos y de perspectiva a los uniformes de cada pase. */
   #sync(dt) {
     const s = this.settings;
-    const cam = this.rig.active;
+    const rawCam = this.rig.active;
+    const isPersp = s.get('camera.projection') === 'perspectiva' && rawCam.isPerspectiveCamera;
+    const pConf = s.get('guides.perspective') ?? {};
+    const p = computePerspectiveParams(pConf, rawCam, this.size.x, this.size.y);
+    const perspActive = isPersp && pConf.warp !== false && p.kind !== 'off';
+
+    this._useWarpCam = perspActive && p.kind === 'lineal'
+      && (Math.abs(p.spread - 1) > 1e-4 || Math.abs(p.bendK) > 1e-4);
+
+    if (this._useWarpCam) {
+      rawCam.updateMatrixWorld();
+      this.warpCam.copy(rawCam);
+      this.warpCam.fov = p.renderFov;
+      this.warpCam.aspect = rawCam.aspect;
+      this.warpCam.updateProjectionMatrix();
+      this.warpCam.matrixWorld.copy(rawCam.matrixWorld);
+      this.warpCam.matrixWorldInverse.copy(rawCam.matrixWorldInverse);
+    }
+
+    const cam = this.activeCamera;
+
+    if (this.passes.curvilinear) {
+      rawCam.updateMatrixWorld();
+      this.#ensureCubeRig(rawCam);
+      const u = this.passes.curvilinear.uniforms;
+      u.uCube.value = this.cubeTarget.texture;
+      u.uCamBasis.value.setFromMatrix4(rawCam.matrixWorld);
+      u.uMode.value = p.kind === 'cilindrica' ? 4 : p.kind === 'ojodepez' ? 5 : 6;
+      u.uResolution.value.set(this.size.x, this.size.y);
+      u.uFu.value = p.fu;
+      u.uUMax.value = p.uMax;
+      u.uVScale.value = p.vScale;
+      u.uFr.value = p.fr;
+      u.uK.value = p.k;
+      u.uThetaMax.value = p.thetaMax;
+      u.uRMax.value = p.rMax;
+    }
+
+    if (this.passes.linearWarp) {
+      const u = this.passes.linearWarp.uniforms;
+      u.uResolution.value.set(this.size.x, this.size.y);
+      u.uDiag.value = p.diag;
+      u.uBendK.value = p.bendK;
+      u.uPad.value = p.actualPad;
+    }
 
     if (this.passes.ssao) this.passes.ssao.camera = cam;
 
@@ -220,10 +329,13 @@ export class PostFX {
     this.#sync(dt);
 
     if (this.composer) {
-      // El RenderPass es siempre el primero: se le reasigna la camara activa
-      // para que el interruptor perspectiva/ortografica no exija reconstruir.
+      if (this.passes.curvilinear && this.cubeCamera) {
+        this.cubeCamera.update(this.renderer, this.scene);
+      }
+      // El RenderPass es siempre el primero en modos planos: se le reasigna la
+      // camara activa (o warpCam) para que el cambio no exija reconstruir.
       const first = this.composer.passes[0];
-      if (first?.isRenderPass || first instanceof RenderPass) first.camera = this.rig.active;
+      if (first?.isRenderPass || first instanceof RenderPass) first.camera = this.activeCamera;
       this.composer.render(dt);
     } else {
       this.renderer.render(this.scene, this.rig.active);
@@ -231,7 +343,11 @@ export class PostFX {
   }
 
   dispose() {
+    this.passes.outline?.dispose();
     this.composer?.dispose();
+    this.cubeTarget?.dispose();
+    this.cubeTarget = null;
+    this.cubeCamera = null;
     this.composer = null;
     this.passes = {};
   }
