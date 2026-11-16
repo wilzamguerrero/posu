@@ -1004,10 +1004,10 @@ async function main() {
   let detWindow = 0;
   let detCount = 0;
 
-  viewport.onFrame((dt) => {
-    // Guias 2D: el propio modulo corta pronto si no hay ninguna activa.
-    guides.draw();
+  // Las guias 2D se pintan tras actualizar la camara para no ir un cuadro por detras al orbitar.
+  viewport.onAfterCamera(() => guides.draw());
 
+  viewport.onFrame((dt) => {
     if (!source.active) return;
 
     if (source.kind === 'imagen') {

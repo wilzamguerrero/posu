@@ -110,7 +110,9 @@ export function computePerspectiveParams(conf, cam, W, H) {
     ? clamp(Number(c.fov5 ?? 180) || 180, 60, 260)
     : clamp(Number(c.fov6 ?? 360) || 360, 120, 360);
   const thetaRef = fovDeg * 0.5 * DEG;
-  const thetaMax = Math.min(179.5 * DEG, thetaRef + (fovDeg >= 359 ? 0 : 0.75 * DEG));
+  const thetaMax = (kind === 'esferica' && fovDeg >= 359)
+    ? Math.PI
+    : Math.min(179.5 * DEG, thetaRef + 0.75 * DEG);
   const kMaxPos = Math.min(1.2, 2.75 / Math.max(0.2, thetaMax));
   const kMaxNeg = Math.min(2.0, (Math.PI * 0.995) / Math.max(0.2, thetaMax));
   const k = curvature === 0 ? 0 : (curvature > 0 ? curvature * kMaxPos : curvature * kMaxNeg);
@@ -395,10 +397,10 @@ export class Perspective {
       return { x: geo.cx + u * geo.fu, y: geo.cy - vy * geo.fu };
     }
     const theta = Math.acos(clamp(-z, -1, 1));
-    if (theta > geo.thetaMax) return null;
+    if (theta > geo.thetaMax + 1e-6) return null;
     const r = fisheyeGain(theta, geo.k) * geo.fr;
     const plano = Math.hypot(x, y);
-    if (plano < EPS) return { x: geo.cx, y: geo.cy };
+    if (plano < 1e-12) return z > 0 ? { x: geo.cx, y: geo.cy - r } : { x: geo.cx, y: geo.cy };
     return { x: geo.cx + (x / plano) * r, y: geo.cy - (y / plano) * r };
   }
 
@@ -410,8 +412,8 @@ export class Perspective {
     _v4.set(d.x, d.y, d.z, 0)
       .applyMatrix4(geo.cam.matrixWorldInverse)
       .applyMatrix4(geo.cam.projectionMatrix);
-    if (Math.abs(_v4.w) < 1e-5) {
-      // w = 0: la fuga esta en el infinito de la imagen. La familia se ve
+    if (Math.abs(_v4.w) < 5e-4) {
+      // w ~ 0: la fuga esta en el infinito de la imagen. La familia se ve
       // paralela y (x,y) del clip da su direccion en pantalla.
       const dx = _v4.x, dy = -_v4.y;
       const n = Math.hypot(dx, dy);
@@ -501,7 +503,7 @@ export class Perspective {
       if (d > hueco) { hueco = d; idx = i; }
     }
     const span = Math.PI - hueco;
-    return span > 0.01 ? { from: angs[(idx + 1) % angs.length], span } : { from: 0, span: Math.PI };
+    return span > 1e-6 ? { from: angs[(idx + 1) % angs.length], span } : { from: 0, span: Math.PI };
   }
 
   /** Haz de radios de un punto de fuga (o familia paralela si esta en el infinito). */
@@ -561,6 +563,8 @@ export class Perspective {
    */
   #polyline3(geo, pts, esDir = false) {
     const ctx = geo.ctx;
+    const isCyl = geo.kind === 'cilindrica';
+    const isSph = geo.kind === 'ojodepez' || geo.kind === 'esferica';
     ctx.beginPath();
     let prev = null, prevS = null, trazando = false;
     for (const p of pts) {
@@ -570,7 +574,15 @@ export class Perspective {
         if (b) { ctx.moveTo(b.x, b.y); trazando = true; }
       }
       if (s) {
-        if (trazando) ctx.lineTo(s.x, s.y);
+        const seamJump = trazando && prevS && (
+          (isCyl && Math.abs(s.x - prevS.x) > geo.W * 0.45)
+          || (isSph && Math.hypot(s.x - prevS.x, s.y - prevS.y) > Math.max(24, Math.min(geo.R, geo.rMax || geo.R) * 0.45))
+        );
+        if (seamJump) {
+          // Cruce de costura (±180 grados en cilindrica o antipoda en 6 puntos):
+          // cortamos el trazo para no cruzar el lienzo con una cuerda falsa.
+          ctx.moveTo(s.x, s.y);
+        } else if (trazando) ctx.lineTo(s.x, s.y);
         else { ctx.moveTo(s.x, s.y); trazando = true; }
       } else if (trazando && prevS) {
         const b = this.#boundary(geo, prev, p, esDir);
@@ -638,13 +650,17 @@ export class Perspective {
     const rays = Math.max(3, Math.round(c.rays ?? 20));
     const pocos = Math.max(4, Math.round(rays * 0.4));
 
-    // En 1 punto manda el eje horizontal mas alineado con la vista; el otro
-    // horizontal y la vertical se dibujan flojos (y salen paralelos cuando la
-    // camara esta bien enfrentada, que es la definicion del modo).
-    geo.cam.getWorldDirection(_v3);
-    const principalZ = Math.abs(_v3.z) >= Math.abs(_v3.x);
-    const primero = principalZ ? vpZ : vpX;
-    const segundo = principalZ ? vpX : vpZ;
+    // En 1 punto manda el eje horizontal mas alineado con la vista; en 2 y 3
+    // puntos ambos ejes horizontales reciben el mismo haz y conservan etiqueta
+    // fija (F1=Z, F2=X) para que no intercambien nombre al orbitar por 45°.
+    let primero = vpZ;
+    let segundo = vpX;
+    if (c.mode === '1punto') {
+      geo.cam.getWorldDirection(_v3);
+      const principalZ = Math.abs(_v3.z) >= Math.abs(_v3.x);
+      primero = principalZ ? vpZ : vpX;
+      segundo = principalZ ? vpX : vpZ;
+    }
 
     if (c.mode === '1punto') {
       this.#fan(geo, primero, rays, c.fade);

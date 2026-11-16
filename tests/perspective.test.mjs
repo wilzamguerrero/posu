@@ -255,5 +255,71 @@ check('shaders de perspectiva exportan uniformes y fuentes GLSL',
   && typeof LinearPerspectiveWarpShader.fragmentShader === 'string'
   && p6.kind === 'esferica');
 
+/* -------- estabilidad al orbitar (fugas lejanas, antipoda y recorte) ------ */
+
+settings.batch({
+  'guides.perspective.mode': '2puntos',
+  'guides.perspective.warp': true,
+  'guides.perspective.pointSpread': 1,
+  'guides.perspective.curvature': 0,
+  'guides.perspective.floorGrid': false,
+  'guides.perspective.wallGrid': false,
+  'guides.perspective.cube': false,
+  'guides.perspective.cone': false,
+  'guides.perspective.measuring': false,
+  'guides.perspective.objects': false,
+  'guides.perspective.letterbox': false,
+  'guides.perspective.rays': 20,
+});
+// Casi frontal: la fuga transversal queda lejísimos (antes saltaban 19 de 20 rayos).
+place(0.15, 0);
+const ctxLejos = stubCtx();
+persp.draw(ctxLejos, W, H, 1);
+check('2 puntos con fuga muy lejana conserva los rayos sobre el lienzo',
+  ctxLejos.strokes >= 30, ctxLejos.strokes + ' trazos');
+
+// En 6 puntos la direccion opuesta exacta (antipoda) no desaparece.
+settings.batch({ 'guides.perspective.mode': '6puntos', 'guides.perspective.fov6': 360, 'guides.perspective.scale': 0.98, 'guides.perspective.curvature': 0 });
+place(0, 0);
+const antipoda = persp.vanishingPoint(AZ, W, H);
+check('6 puntos: la antipoda exacta sigue proyectandose en el borde exterior',
+  !!antipoda && Math.abs(Math.hypot(antipoda.x - W / 2, antipoda.y - H / 2) - Math.min(W, H) * 0.5 * 0.98) < 2);
+
+// En 4 puntos y 6 puntos los paralelos que cruzan la costura no tiran cuerdas largas.
+{
+  const segs = [];
+  let cur = null;
+  const checkCtx = {
+    lineWidth: 1, globalAlpha: 1, strokeStyle: '', fillStyle: '', font: '', textAlign: '', lineCap: '', lineJoin: '',
+    save() {}, restore() {}, beginPath() {}, closePath() {}, arc() {}, rect() {}, ellipse() {}, setLineDash() {}, clip() {}, translate() {},
+    fill() {}, fillText() {}, stroke() {}, measureText() { return { width: 10 }; },
+    moveTo(x, y) { cur = { x, y }; },
+    lineTo(x, y) { if (cur) segs.push(Math.hypot(x - cur.x, y - cur.y)); cur = { x, y }; },
+  };
+  place(35, -35);
+  persp.draw(checkCtx, W, H, 1);
+  const maxSalto6 = Math.max(0, ...segs);
+  check('6 puntos: sin saltos de cuerda al cruzar el borde al orbitar',
+    maxSalto6 < Math.min(W, H) * 0.25, 'max=' + Math.round(maxSalto6) + ' px');
+
+  segs.length = 0;
+  const dxs = [];
+  checkCtx.lineTo = (x, y) => {
+    if (cur) { segs.push(Math.hypot(x - cur.x, y - cur.y)); dxs.push(Math.abs(x - cur.x)); }
+    cur = { x, y };
+  };
+  settings.set('guides.perspective.mode', '4puntos');
+  persp.draw(checkCtx, W, H, 1);
+  const maxDx4 = Math.max(0, ...dxs);
+  check('4 puntos: sin saltos horizontales al cruzar la costura ±180°',
+    maxDx4 < W * 0.25, 'maxDx=' + Math.round(maxDx4) + ' px');
+}
+
+// CameraRig: recorte cercano y distancia minima de orbita.
+settings.set('camera.near', 0.004);
+settings.set('camera.minDistance', 0.55);
+check('CameraRig aplica recorte cercano (near) y distancia minima de orbita',
+  Math.abs(rig.perspective.near - 0.004) < 1e-6 && Math.abs(rig.controls.minDistance - 0.55) < 1e-6);
+
 console.log('\n' + oks.length + ' correctas / ' + fails.length + ' fallos');
 if (fails.length) process.exit(1);

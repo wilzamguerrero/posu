@@ -276,6 +276,8 @@ export const DEFAULTS = {
     focalLength: 50,            // mm sobre sensor full-frame
     filmGauge: 36,              // ancho del sensor en mm
     orthoZoom: 1,
+    near: 0.015,                // plano cercano de recorte en metros
+    minDistance: 0.25,          // distancia minima de orbita respecto al objetivo
     roll: 0,                    // grados
     shiftH: 0,                  // descentrado horizontal (lente tilt-shift)
     shiftV: 0,

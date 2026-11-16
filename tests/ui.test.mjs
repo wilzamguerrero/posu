@@ -703,8 +703,10 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
   const fov6Field = campo(perspGroup, 'Distancia de fugas (campo)');
   const scaleField = campo(perspGroup, 'Radio / Zoom');
   const curv6Field = campo(perspGroup, 'Curvatura de proyeccion');
-  revisa('en 6 puntos aparecen los controles de deformacion 3D, campo, zoom y curvatura',
-    !!warpToggle && !!fov6Field && !!scaleField && !!curv6Field);
+  const nearField = campo(perspGroup, 'Recorte cercano (near)');
+  const minDistField = campo(perspGroup, 'Distancia minima (orbita)');
+  revisa('en 6 puntos aparecen los controles de deformacion 3D, campo, zoom, curvatura y recorte',
+    !!warpToggle && !!fov6Field && !!scaleField && !!curv6Field && !!nearField && !!minDistField);
   settings.set('guides.perspective.mode', '2puntos');
   const spreadField = campo(perspGroup, 'Distancia de fugas');
   const curv2Field = campo(perspGroup, 'Curvatura de lente');

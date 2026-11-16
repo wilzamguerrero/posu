@@ -35,7 +35,8 @@ export class CameraRig {
     this.settings = settings;
     this.aspect = 1;
 
-    this.perspective = new THREE.PerspectiveCamera(40, 1, 0.05, 200);
+    const near = Math.max(0.002, Math.min(2, Number(settings.get('camera.near')) || 0.015));
+    this.perspective = new THREE.PerspectiveCamera(40, 1, near, 200);
     this.perspective.filmGauge = settings.get('camera.filmGauge');
     this.perspective.position.set(1.6, 1.35, 3.4);
 
@@ -48,11 +49,22 @@ export class CameraRig {
     this.controls.target.set(0, 0.95, 0);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.075;
-    this.controls.minDistance = 0.25;
+    this.controls.minDistance = Math.max(0.05, Number(settings.get('camera.minDistance')) || 0.25);
     this.controls.maxDistance = 40;
     this.controls.maxPolarAngle = Math.PI * 0.99;
     this.controls.zoomToCursor = true;
     this.controls.panSpeed = 0.9;
+
+    // OrbitControls.update() recalcula la orientacion con `lookAt(target)`, lo
+    // que borra el giro de horizonte (roll) incluso en llamadas sincronas desde
+    // pointermove/wheel o setView. Envolverlo garantiza que el roll y la matriz
+    // del mundo sigan vigentes en todo momento y no salten al orbitar.
+    const rawControlsUpdate = this.controls.update.bind(this.controls);
+    this.controls.update = (deltaTime) => {
+      const changed = rawControlsUpdate(deltaTime);
+      this.applyRoll();
+      return changed;
+    };
 
     /** Proveedor de puntos de interes de la figura (lo inyecta la app). */
     this.focusProvider = null;
@@ -75,6 +87,9 @@ export class CameraRig {
       this.applyFocalLength();
     });
     s.on('camera.orthoZoom', () => this.applyOrtho());
+    s.on('camera.near', () => this.applyNear());
+    s.on('camera.minDistance', () => this.applyMinDistance());
+    s.on('camera.roll', () => this.controls.update());
     s.on(['camera.shiftH', 'camera.shiftV'], () => this.applyShift());
     s.on('camera.damping', (v) => {
       this.controls.enableDamping = v;
@@ -82,6 +97,20 @@ export class CameraRig {
   }
 
   /* -- Parametros opticos ---------------------------------------------- */
+
+  /** Plano cercano de recorte: controla a partir de que distancia se corta lo muy proximo. */
+  applyNear() {
+    const near = Math.max(0.002, Math.min(2, Number(this.settings.get('camera.near')) || 0.015));
+    this.perspective.near = near;
+    this.applyShift();
+  }
+
+  /** Distancia minima de orbita respecto al objetivo. */
+  applyMinDistance() {
+    const min = Math.max(0.05, Math.min(5, Number(this.settings.get('camera.minDistance')) || 0.25));
+    this.controls.minDistance = min;
+    this.controls.update();
+  }
 
   /** Traduce mm de focal a angulo de vision usando el ancho de sensor real. */
   applyFocalLength() {
@@ -170,6 +199,13 @@ export class CameraRig {
 
   /* -- Bucle ------------------------------------------------------------ */
 
+  /** Reaplica el giro de horizonte tras el `lookAt` de OrbitControls. */
+  applyRoll() {
+    const roll = this.settings.get('camera.roll');
+    if (roll) this.active.rotateZ(roll * DEG);
+    this.active.updateMatrixWorld();
+  }
+
   /**
    * Se llama una vez por fotograma. Aplica el giro automatico (turntable), el
    * amortiguado de OrbitControls, el giro de horizonte y el autofoco.
@@ -186,10 +222,6 @@ export class CameraRig {
     }
 
     this.controls.update();
-
-    const roll = this.settings.get('camera.roll');
-    if (roll) this.active.rotateZ(roll * DEG);
-
     this.refreshFocus();
   }
 
@@ -281,6 +313,8 @@ export class CameraRig {
       focalLength: this.settings.get('camera.focalLength'),
       projection: this.settings.get('camera.projection'),
       orthoZoom: this.settings.get('camera.orthoZoom'),
+      near: this.settings.get('camera.near'),
+      minDistance: this.settings.get('camera.minDistance'),
       roll: this.settings.get('camera.roll'),
       shiftH: this.settings.get('camera.shiftH'),
       shiftV: this.settings.get('camera.shiftV'),
@@ -293,6 +327,8 @@ export class CameraRig {
       s.set('camera.projection', snap.projection ?? 'perspectiva');
       s.set('camera.focalLength', snap.focalLength ?? 50);
       s.set('camera.orthoZoom', snap.orthoZoom ?? 1);
+      s.set('camera.near', snap.near ?? 0.015);
+      s.set('camera.minDistance', snap.minDistance ?? 0.25);
       s.set('camera.roll', snap.roll ?? 0);
       s.set('camera.shiftH', snap.shiftH ?? 0);
       s.set('camera.shiftV', snap.shiftV ?? 0);

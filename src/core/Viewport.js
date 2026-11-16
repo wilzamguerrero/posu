@@ -40,6 +40,7 @@ export class Viewport {
     this.canvas = canvas;
     this.settings = settings;
     this.callbacks = new Set();
+    this.afterCameraCallbacks = new Set();
     this.clock = new THREE.Clock();
     this.frameAccum = 0;
     this.stats = { fps: 0, ms: 0, triangles: 0, calls: 0 };
@@ -223,6 +224,12 @@ export class Viewport {
     return () => this.callbacks.delete(cb);
   }
 
+  /** Registra una funcion que se ejecuta tras actualizar la camara, alineada con el render 3D. */
+  onAfterCamera(cb) {
+    this.afterCameraCallbacks.add(cb);
+    return () => this.afterCameraCallbacks.delete(cb);
+  }
+
   start() {
     if (this.running) return;
     this.running = true;
@@ -253,6 +260,7 @@ export class Viewport {
 
     // El propio equipo de camara aplica el giro automatico y el autofoco.
     this.cameras.update(dt);
+    for (const cb of this.afterCameraCallbacks) cb(dt);
 
     this.#updateShadows(t0);
     this.postfx.render(dt);

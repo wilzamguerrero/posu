@@ -181,6 +181,14 @@ rig.update(1 / 60); rig.update(1 / 60); rig.update(1 / 60);
 const up4 = new THREE.Vector3(0, 1, 0).applyQuaternion(rig.active.quaternion);
 check('el giro de horizonte no se acumula fotograma a fotograma',
   up4.angleTo(up1) < 1e-3, 'deriva=' + (up4.angleTo(up1) / DEG).toFixed(4) + ' grados');
+rig.controls.update();
+const upTrasControls = new THREE.Vector3(0, 1, 0).applyQuaternion(rig.active.quaternion);
+check('controls.update() directo conserva el giro de horizonte (roll)',
+  upTrasControls.angleTo(up1) < 1e-3, 'deriva=' + (upTrasControls.angleTo(up1) / DEG).toFixed(4) + ' grados');
+rig.setView(nombres[0]);
+const upTrasVista = new THREE.Vector3(0, 1, 0).applyQuaternion(rig.active.quaternion);
+check('setView() conserva el giro de horizonte (roll)',
+  Math.abs(rig.active.matrixWorld.elements[1]) > 0.1 && upTrasVista.angleTo(new THREE.Vector3(0, 1, 0)) > 10 * DEG);
 settings.set('camera.roll', 0);
 
 settings.set('camera.turntable', 30);

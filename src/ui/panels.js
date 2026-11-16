@@ -860,6 +860,8 @@ function cameraPanel(app) {
       slider({ label: 'Descentrado H', path: 'camera.shiftH', min: -1, max: 1, step: 0.01,
         hint: 'Lente tilt-shift: desplaza el encuadre sin girar la camara.' }),
       slider({ label: 'Descentrado V', path: 'camera.shiftV', min: -1, max: 1, step: 0.01 }),
+      nearClipSlider(),
+      minDistSlider(),
     ]),
     ...guides.slice(0, 3),
     group({ id: 'cam-views', title: 'Encuadres', icon: 'frame' }, [
@@ -1348,6 +1350,19 @@ function posesPanel(app) {
  * Controles que dependen del modo de perspectiva elegido. Se reconstruyen solo
  * cuando cambia `mode`, nunca cuando se arrastra un deslizador.
  */
+const nearClipSlider = () => slider({
+  label: 'Recorte cercano (near)', path: 'camera.near',
+  min: 0.002, max: 1, step: 0.002,
+  format: (v) => (v < 0.1 ? Math.round(v * 1000) + ' mm' : v.toFixed(2) + ' m'),
+  hint: 'Distancia minima desde la lente antes de cortar la geometria. Bajalo (2-10 mm) para evitar que los hombros o manos se abran como un hueco al acercarte mucho en 5 o 6 puntos; subelo para recortar lo que estorba delante.',
+});
+
+const minDistSlider = () => slider({
+  label: 'Distancia minima (orbita)', path: 'camera.minDistance',
+  min: 0.05, max: 2, step: 0.01, unit: ' m',
+  hint: 'Tope de acercamiento al hacer zoom hacia el objetivo, util para que la camara no entre dentro del cuerpo al orbitar.',
+});
+
 function perspectiveControls(app) {
   const { settings, actions } = app;
   const modo = settings.get('guides.perspective.mode') ?? 'ninguno';
@@ -1432,6 +1447,8 @@ function perspectiveControls(app) {
         format: (v) => (v > 0.005 ? '+' : '') + Math.round(v * 100) + ' %',
         hint: 'Ley radial continua: negativo comprime la periferia como una bola reflectante; 0 es equidistante; positivo expande los bordes sin aplastar formas.',
       }),
+      nearClipSlider(),
+      minDistSlider(),
     );
   }
 
