@@ -27,6 +27,14 @@ import {
   setProvider,
 } from '../ai/config.js';
 import { startDeviceFlow, waitForDeviceToken } from '../ai/device.js';
+import {
+  clearFreePiAd,
+  fetchFreePiAd,
+  getFreePiAdState,
+  isFreePiAdFresh,
+  reportDisplayedFreePiAd,
+  subscribeFreePiAd,
+} from '../ai/freepiAds.js';
 import { freePiAccount, startFreePiFlow, waitForFreePiToken } from '../ai/freepiDevice.js';
 import { cachedCatalog, forgetCatalog, listModels } from '../ai/models.js';
 import { builtinInfo, isBuiltin, isCustom } from '../ai/providers.js';
@@ -197,20 +205,44 @@ export function buildAiSettingsControl() {
     }
   }
 
+  async function syncAdSettings(force = false) {
+    if (activeProvider() !== 'freepi' || !hasCredential('freepi')) return;
+    const ad = await fetchFreePiAd({ force });
+    if (ad && root.isConnected && activeProvider() === 'freepi') {
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      if (root.isConnected) await reportDisplayedFreePiAd(ad);
+    }
+  }
+
   async function testConnection() {
     const provider = activeProvider();
     const selectedModel = chosenModel(provider) || state.defaultModel;
     state.probing = true;
     setStatus('Probando respuesta del modelo…');
+    const pingOnce = () => streamChat({
+      provider,
+      model: selectedModel || undefined,
+      messages: [
+        { role: 'system', content: 'Contesta en una palabra: listo.' },
+        { role: 'user', content: 'ping' },
+      ],
+    });
     try {
-      const reply = await streamChat({
-        provider,
-        model: selectedModel || undefined,
-        messages: [
-          { role: 'system', content: 'Contesta en una palabra: listo.' },
-          { role: 'user', content: 'ping' },
-        ],
-      });
+      let reply;
+      try {
+        reply = await pingOnce();
+      } catch (err) {
+        const isAdsRequired = provider === 'freepi'
+          && (err?.code === 'ads_required' || /ads_required|ads aren't displaying/i.test(err?.message || ''));
+        if (!isAdsRequired) throw err;
+        setStatus('Cargando anuncio de free-pi para activar la conexión…');
+        const ad = await fetchFreePiAd({ force: true });
+        render();
+        const reported = ad ? await reportDisplayedFreePiAd(ad) : false;
+        if (!ad || !reported) throw err;
+        await new Promise((r) => setTimeout(r, 350));
+        reply = await pingOnce();
+      }
       setStatus(`Conexión OK: "${reply.replace(/\s+/g, ' ').trim().slice(0, 60)}"`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Fallo al probar conexión.', true);
@@ -419,9 +451,54 @@ export function buildAiSettingsControl() {
               type: 'button',
               class: 'btn',
               text: 'Desconectar',
-              onClick: () => { clearKey('freepi'); state.freepiMe = null; },
+              onClick: () => { clearKey('freepi'); clearFreePiAd(); state.freepiMe = null; },
             }),
           ]));
+          const adSt = getFreePiAdState();
+          if (adSt.ad) {
+            const c = adSt.ad.creative ?? {};
+            box.append(el('div', { class: 'ai-ad-card' }, [
+              el('div', { class: 'ai-ad-head' }, [
+                el('span', { text: adSt.reported ? 'Anuncio free-pi · activo' : 'Anuncio free-pi · pendiente' }),
+                el('button', {
+                  type: 'button',
+                  class: 'icon-btn tiny',
+                  title: 'Pedir otro anuncio de free-pi',
+                  disabled: adSt.loading,
+                  onClick: () => void syncAdSettings(true),
+                }, icon('refresh-cw', 11)),
+              ]),
+              c.headline ? el('strong', { class: 'ai-ad-title', text: c.headline }) : null,
+              c.body ? el('p', { class: 'ai-ad-body', text: c.body }) : null,
+              adSt.ad.click_url
+                ? el('a', {
+                  class: 'ai-ad-link',
+                  href: adSt.ad.click_url,
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  text: `${c.cta || 'Ver más'} →`,
+                })
+                : null,
+            ]));
+          } else {
+            box.append(el('div', { class: 'ai-ad-card is-empty' }, [
+              el('span', {
+                text: adSt.loading
+                  ? 'Cargando anuncio de free-pi…'
+                  : (adSt.noAd ? 'free-pi sin anuncio disponible ahora (204)' : 'Sin anuncio cargado'),
+              }),
+              el('button', {
+                type: 'button',
+                class: 'btn',
+                disabled: adSt.loading,
+                text: 'Mostrar anuncio',
+                onClick: () => void syncAdSettings(true),
+              }),
+            ]));
+            if (!adSt.loading && !isFreePiAdFresh() && !adSt.noAd) {
+              queueMicrotask(() => { void syncAdSettings(false); });
+            }
+          }
         } else {
           box.append(el('button', {
             type: 'button',
@@ -582,11 +659,13 @@ export function buildAiSettingsControl() {
   void probeServerKeys();
   const unsub1 = aiConfig.subscribe(() => render());
   const unsub2 = serverKeys.subscribe(() => render());
+  const unsubAd = subscribeFreePiAd(() => render());
   render();
 
   root.dispose = () => {
     unsub1();
     unsub2();
+    unsubAd();
     authAbort?.abort();
     catalogAbort?.abort();
     meAbort?.abort();

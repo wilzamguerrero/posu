@@ -6,6 +6,7 @@ import {
   handleAiChat,
   handleAiModels,
   handleAiRegistry,
+  handleFreePiAd,
   handleFreePiDevice,
   handleGithubDevice,
   handleHealth,
@@ -155,6 +156,7 @@ function aiProxyApi() {
     '/api/ai-chat': (req, env) => handleAiChat(req, env),
     '/api/ai-models': (req, env) => handleAiModels(req, env),
     '/api/ai-registry': (req, env) => handleAiRegistry(req, env),
+    '/api/freepi-ad': (req, env) => handleFreePiAd(req, env),
     '/api/freepi-device': (req) => handleFreePiDevice(req),
     '/api/github-device': (req, env) => handleGithubDevice(req, env),
   };

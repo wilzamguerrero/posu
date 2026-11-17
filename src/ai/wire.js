@@ -32,14 +32,22 @@ export async function readJson(response) {
   return await response.json().catch(() => null);
 }
 
-export async function readError(response) {
+export async function readErrorDetail(response) {
   const payload = await readJson(response);
   if (payload && typeof payload === 'object') {
     const nested = typeof payload.error === 'object' && payload.error ? payload.error : null;
+    const code = (typeof payload.error === 'string' && payload.error)
+      || (nested && (typeof nested.type === 'string' ? nested.type : nested.code))
+      || '';
     const msg = (typeof payload.message === 'string' && payload.message.trim())
       || (nested && typeof nested.message === 'string' && nested.message.trim());
-    if (msg) return msg;
+    if (msg) return { message: msg, code, status: response.status };
   }
   const text = await response.text().catch(() => '');
-  return text.trim().slice(0, 240) || `HTTP ${response.status}`;
+  return { message: text.trim().slice(0, 240) || `HTTP ${response.status}`, code: '', status: response.status };
+}
+
+export async function readError(response) {
+  const detail = await readErrorDetail(response);
+  return detail.message;
 }

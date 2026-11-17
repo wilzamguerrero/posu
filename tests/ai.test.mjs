@@ -25,8 +25,9 @@ for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLCanvasEl
 
 const { readTarget, safeBase, BUILTIN_IDS } = await import('../server/ai/common.mjs');
 const { toAnthropicBody, fromAnthropicReply } = await import('../server/ai/anthropic.mjs');
-const { checkMessages, handleHealth, runNodeHandler } = await import('../server/ai/handlers.mjs');
+const { checkMessages, handleFreePiAd, handleHealth, runNodeHandler } = await import('../server/ai/handlers.mjs');
 const { CONSENT_VERSION } = await import('../server/ai/freepiDevice.mjs');
+const { isGravityUrl, sanitizeAd } = await import('../server/ai/freepiAds.mjs');
 const { freepiHeaders } = await import('../server/ai/freepi.mjs');
 const {
   aiConfig, setProvider, setKey, clearKey, browserKey,
@@ -388,6 +389,39 @@ await test('FloatingAI y AiSettings se montan e interactuan en DOM sin errores',
   floating.dispose();
   aiCfgUi.dispose?.();
   aiCfgUi.remove();
+});
+
+await test('free-pi ads: validacion de creativos, pixels gravity y handleFreePiAd', async () => {
+  assert.equal(isGravityUrl('https://pixel.trygravity.ai/imp?id=1'), true);
+  assert.equal(isGravityUrl('https://trygravity.com/track'), true);
+  assert.equal(isGravityUrl('http://trygravity.ai/imp'), false);
+  assert.equal(isGravityUrl('https://evil.example/imp'), false);
+
+  const clean = sanitizeAd({
+    ad_id: 'ad-1',
+    click_token: 'tok-1',
+    source: 'gravity',
+    click_url: 'javascript:alert(1)',
+    imp_url: 'https://pixel.trygravity.ai/imp?t=1',
+    creative: { headline: 'Tool', body: 'Desc', cta: 'Abrir' },
+  });
+  assert.equal(clean.ad_id, 'ad-1');
+  assert.equal(clean.click_url, '');
+  assert.equal(clean.imp_url, 'https://pixel.trygravity.ai/imp?t=1');
+
+  const noKey = await handleFreePiAd(new Request('https://localhost/api/freepi-ad', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'next' }),
+  }), {});
+  assert.equal(noKey.status, 401);
+
+  const badAd = await handleFreePiAd(new Request('https://localhost/api/freepi-ad', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Ai-Key': 'fp-test' },
+    body: JSON.stringify({ action: 'impression', ad: {} }),
+  }), {});
+  assert.equal(badAd.status, 400);
 });
 
 console.log(`\nai.test.mjs: ${passed} comprobaciones superadas`);

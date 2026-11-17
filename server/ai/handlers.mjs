@@ -31,6 +31,7 @@ import {
   usableModels,
 } from './copilot.mjs';
 import { freepiCatalog, freepiHeaders, isFreePi, pipeFreePiResponse, replyText } from './freepi.mjs';
+import { fetchNextAd, reportAdImpression } from './freepiAds.mjs';
 import { deviceConsent, devicePoll, deviceStart, freepiMe } from './freepiDevice.mjs';
 import { registryByApi, registryDirectory, registryProvider } from './registry.mjs';
 import { mismoOrigen } from '../imageSearch.mjs';
@@ -241,6 +242,12 @@ export async function handleAiChat(request, env) {
 
     if (!upstream.ok) {
       const errText = await upstream.text().catch(() => '');
+      if (freepi && upstream.status === 403 && /ads_required|ads aren't displaying/i.test(errText)) {
+        return jsonRes({
+          error: 'ads_required',
+          message: 'free-pi pausó las respuestas porque aún no consta ningún anuncio mostrado (ads_required).',
+        }, 403);
+      }
       const contentType = upstream.headers.get('content-type');
       const customOpenAi = target.custom && target.format === 'openai';
       const plain = summarizeError(upstream.status, target.label, contentType, errText, customOpenAi);
@@ -593,6 +600,44 @@ export async function handleFreePiDevice(request) {
     return jsonRes({ error: 'bad_action', message: 'Acción no reconocida.' }, 400);
   } catch (err) {
     console.error('[freepi-device]', describeError(err));
+    return jsonRes({ error: 'provider_unreachable', message: describeError(err) }, 502);
+  }
+}
+
+/* ── /api/freepi-ad ──────────────────────────────────────────────────────── */
+
+export async function handleFreePiAd(request, env) {
+  if (request.method !== 'POST') {
+    return jsonRes({ error: 'method_not_allowed', message: 'Usa POST.' }, 405, { Allow: 'POST' });
+  }
+  const found = readTarget(request.headers, 'freepi', env);
+  if (!found.ok) return jsonRes({ error: found.code, message: found.message }, 400);
+  const key = resolveKey(request.headers, found.target, env);
+  if (!key) return jsonRes({ error: 'missing_key', message: 'Falta la credencial de free-pi.' }, 401);
+
+  const parsed = await readJsonBody(request, 64 * 1024);
+  if (parsed.error) return jsonRes({ error: 'bad_request', message: parsed.error }, parsed.status);
+  const body = parsed.data ?? {};
+  const action = body.action || 'next';
+
+  try {
+    if (action === 'next') {
+      const result = await fetchNextAd(key, body.slot === 'inline' ? 'inline' : 'banner');
+      if (!result.ok) {
+        return jsonRes({ error: 'ad_error', message: result.message || 'No se pudo pedir el anuncio.' }, result.status || 502);
+      }
+      return jsonRes({ ok: true, noAd: result.noAd, ad: result.ad });
+    }
+    if (action === 'impression') {
+      const result = await reportAdImpression(key, body.ad);
+      if (!result.ok) {
+        return jsonRes({ error: 'ad_impression_error', message: result.message || 'No se pudo reportar la impresión.' }, result.status || 502);
+      }
+      return jsonRes({ ok: true, fired: result.fired });
+    }
+    return jsonRes({ error: 'bad_action', message: 'Acción no reconocida.' }, 400);
+  } catch (err) {
+    console.error('[freepi-ad]', describeError(err));
     return jsonRes({ error: 'provider_unreachable', message: describeError(err) }, 502);
   }
 }

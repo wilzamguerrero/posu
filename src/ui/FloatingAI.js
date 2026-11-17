@@ -11,6 +11,14 @@ import { icon } from './icons.js';
 import { OrganicOrb } from './OrganicOrb.js';
 import { streamChat } from '../ai/chat.js';
 import {
+  FREEPI_AD_TTL_MS,
+  fetchFreePiAd,
+  getFreePiAdState,
+  isFreePiAdFresh,
+  reportDisplayedFreePiAd,
+  subscribeFreePiAd,
+} from '../ai/freepiAds.js';
+import {
   activeProvider,
   aiConfig,
   chosenModel,
@@ -312,8 +320,18 @@ export class FloatingAI {
     this.#syncPositions();
 
     void probeServerKeys();
-    this.unsubCfg = aiConfig.subscribe(() => this.#renderFooterAndStatus());
-    this.unsubSrv = serverKeys.subscribe(() => this.#renderFooterAndStatus());
+    this.unsubCfg = aiConfig.subscribe(() => {
+      this.#renderFooterAndStatus();
+      this.#renderFreePiAd();
+      if (this.open) void this.#syncFreePiAd();
+    });
+    this.unsubSrv = serverKeys.subscribe(() => {
+      this.#renderFooterAndStatus();
+      this.#renderFreePiAd();
+      if (this.open) void this.#syncFreePiAd();
+    });
+    this.unsubFreePiAd = subscribeFreePiAd(() => this.#renderFreePiAd());
+    this._adTimer = 0;
 
     this._onResize = () => {
       this.handlePos = clampPos(this.handlePos, HANDLE_W, HANDLE_H);
@@ -346,9 +364,12 @@ export class FloatingAI {
       this.winPos = clampPos(this.winPos, this.winSize.width, this.winSize.height);
       this.#syncPositions();
       this.#scrollLogBottom();
+      void this.#syncFreePiAd();
       requestAnimationFrame(() => this.textareaEl?.focus());
     } else {
       this.pop.classList.remove('is-entering');
+      clearTimeout(this._adTimer);
+      this._adTimer = 0;
       this.#stopDictation();
     }
   }
@@ -565,6 +586,7 @@ export class FloatingAI {
   #renderWindow() {
     this.convsEl = el('div', { class: 'atom-ai-convs' });
     this.logEl = el('div', { class: 'atom-ai-log' });
+    this.adBarEl = el('div', { class: 'atom-ai-ad hidden' });
     this.footWarnEl = el('div', { class: 'atom-ai-foot-warn hidden' });
     this.attachStripEl = el('div', { class: 'atom-ai-attach-strip hidden' });
 
@@ -693,6 +715,7 @@ export class FloatingAI {
     this.pop.replaceChildren(
       grip,
       this.logEl,
+      this.adBarEl,
       this.footWarnEl,
       this.attachStripEl,
       form,
@@ -702,6 +725,7 @@ export class FloatingAI {
 
     this.#renderConvTabs();
     this.#renderLog();
+    this.#renderFreePiAd();
     this.#renderAttachments();
     this.#renderFooterAndStatus();
   }
@@ -834,6 +858,93 @@ export class FloatingAI {
 
     this.footWarnEl.className = 'atom-ai-foot-warn hidden';
     this.footWarnEl.replaceChildren();
+  }
+
+  #renderFreePiAd() {
+    if (!this.adBarEl) return;
+    if (activeProvider() !== 'freepi' || !hasCredential('freepi')) {
+      this.adBarEl.className = 'atom-ai-ad hidden';
+      this.adBarEl.replaceChildren();
+      return;
+    }
+
+    const st = getFreePiAdState();
+    const ad = st.ad;
+    if (!ad && !st.loading && !st.noAd) {
+      this.adBarEl.className = 'atom-ai-ad hidden';
+      this.adBarEl.replaceChildren();
+      return;
+    }
+
+    this.adBarEl.className = 'atom-ai-ad';
+    if (!ad) {
+      this.adBarEl.replaceChildren(
+        el('div', { class: 'atom-ai-ad-empty' }, [
+          el('span', {
+            text: st.loading
+              ? 'Cargando anuncio de free-pi…'
+              : 'free-pi sin anuncio disponible ahora mismo',
+          }),
+          el('button', {
+            type: 'button',
+            class: 'icon-btn tiny',
+            title: 'Pedir anuncio de free-pi',
+            disabled: st.loading,
+            onClick: () => void this.#syncFreePiAd(true),
+          }, icon('refresh-cw', 11)),
+        ]),
+      );
+      return;
+    }
+
+    const c = ad.creative ?? {};
+    const title = c.headline || c.body || 'Patrocinado por free-pi';
+    const desc = c.headline && c.body ? c.body : '';
+    this.adBarEl.replaceChildren(
+      el('div', { class: 'atom-ai-ad-row' }, [
+        el('span', { class: 'atom-ai-ad-tag', text: 'Anuncio free-pi' }),
+        el('div', { class: 'atom-ai-ad-copy' }, [
+          el('strong', { text: title }),
+          desc ? el('span', { text: desc }) : null,
+        ]),
+        ad.click_url
+          ? el('a', {
+            class: 'atom-ai-ad-cta',
+            href: ad.click_url,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: c.cta || 'Ver',
+          })
+          : null,
+        el('button', {
+          type: 'button',
+          class: 'icon-btn tiny',
+          title: st.reported ? 'Anuncio activo · pedir otro' : 'Cargar otro anuncio',
+          disabled: st.loading,
+          onClick: () => void this.#syncFreePiAd(true),
+        }, icon('refresh-cw', 11)),
+      ]),
+    );
+  }
+
+  async #syncFreePiAd(force = false) {
+    clearTimeout(this._adTimer);
+    this._adTimer = 0;
+    if (!this.open || activeProvider() !== 'freepi' || !hasCredential('freepi')) return null;
+
+    const ad = await fetchFreePiAd({ force });
+    if (!this.open || activeProvider() !== 'freepi' || !hasCredential('freepi')) return null;
+
+    this.#renderFreePiAd();
+    if (ad) {
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      if (this.open) await reportDisplayedFreePiAd(ad);
+    }
+
+    if (this.open) {
+      this._adTimer = setTimeout(() => { void this.#syncFreePiAd(true); }, FREEPI_AD_TTL_MS);
+    }
+    return ad;
   }
 
   /* ── Conversaciones y envio ────────────────────────────────────────────── */
@@ -993,19 +1104,52 @@ export class FloatingAI {
       ];
 
       let accumulated = '';
-      const fullReply = await streamChat({
-        messages: history,
-        provider,
-        model: chosenModel(provider) || undefined,
-        signal: ac.signal,
-        onDelta: (chunk) => {
-          accumulated += chunk;
-          const visible = accumulated.replace(/<atom_actions>[\s\S]*$/i, '').trim();
-          this.#updateConv(convId, (prev) =>
-            prev.map((t) => (t.id === assistantId ? { ...t, text: visible || '…' } : t)),
-          );
-        },
-      });
+      const runChat = () => {
+        accumulated = '';
+        return streamChat({
+          messages: history,
+          provider,
+          model: chosenModel(provider) || undefined,
+          signal: ac.signal,
+          onDelta: (chunk) => {
+            accumulated += chunk;
+            const visible = accumulated.replace(/<atom_actions>[\s\S]*$/i, '').trim();
+            this.#updateConv(convId, (prev) =>
+              prev.map((t) => (t.id === assistantId ? { ...t, text: visible || '…' } : t)),
+            );
+          },
+        });
+      };
+
+      if (provider === 'freepi' && this.open && !isFreePiAdFresh()) {
+        await this.#syncFreePiAd();
+      }
+
+      let fullReply;
+      try {
+        fullReply = await runChat();
+      } catch (err) {
+        const isAdsRequired = provider === 'freepi'
+          && !ac.signal.aborted
+          && (err?.code === 'ads_required' || /ads_required|ads aren't displaying/i.test(err?.message || ''));
+        if (!isAdsRequired) throw err;
+
+        this.#updateConv(convId, (prev) =>
+          prev.map((t) => (t.id === assistantId ? { ...t, text: 'Mostrando anuncio de free-pi para reanudar…' } : t)),
+        );
+        const ad = await fetchFreePiAd({ force: true, signal: ac.signal });
+        this.#renderFreePiAd();
+        let reported = false;
+        if (ad && this.open) {
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          reported = await reportDisplayedFreePiAd(ad, { signal: ac.signal });
+        }
+        if (!ad || !reported) {
+          throw new Error('free-pi pausó las respuestas porque no devolvió anuncio para mostrar ahora. Pulsa ↻ en la barra del anuncio o prueba otro proveedor en Ajustes IA.');
+        }
+        await new Promise((r) => setTimeout(r, 350));
+        fullReply = await runChat();
+      }
 
       const { cleanText, actions } = extractAtomActions(fullReply || accumulated);
       const applied = actions.length > 0 ? await executeAtomActions(actions, this.app) : [];
@@ -1098,8 +1242,10 @@ export class FloatingAI {
     this.#stopChat();
     this.#stopDictation();
     this.dragCleanup?.();
+    clearTimeout(this._adTimer);
     this.unsubCfg?.();
     this.unsubSrv?.();
+    this.unsubFreePiAd?.();
     this.orbHandle.dispose();
     this.orbMini.dispose();
     window.removeEventListener('resize', this._onResize);

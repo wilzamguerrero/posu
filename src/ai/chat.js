@@ -1,12 +1,15 @@
 /**
  * ATOM · Cliente de chat SSE + JSON con soporte multimodal (texto e imagenes/bocetos)
  */
-import { aiHeaders, readError, readJson, wireProvider } from './wire.js';
+import { aiHeaders, readErrorDetail, readJson, wireProvider } from './wire.js';
 import { activeProvider, chosenModel } from './config.js';
 
 function streamError(parsed) {
-  const msg = parsed?.error?.message;
-  return typeof msg === 'string' && msg.trim() ? msg.trim() : null;
+  const err = parsed?.error;
+  const msg = typeof err?.message === 'string' ? err.message.trim() : '';
+  if (!msg) return null;
+  const code = (typeof err?.type === 'string' && err.type) || (typeof err?.code === 'string' && err.code) || '';
+  return { message: msg, code };
 }
 
 function deltaOf(parsed) {
@@ -47,7 +50,11 @@ async function readEventStream(body, onDelta) {
         continue;
       }
       const err = streamError(parsed);
-      if (err) throw new Error(err);
+      if (err) {
+        const e = new Error(err.message);
+        if (err.code) e.code = err.code;
+        throw e;
+      }
 
       const piece = deltaOf(parsed);
       if (piece) {
@@ -79,7 +86,13 @@ export async function streamChat({ messages, provider, model, stream = true, sig
     signal,
   });
 
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    const err = new Error(detail.message);
+    if (detail.code) err.code = detail.code;
+    err.status = detail.status;
+    throw err;
+  }
 
   const type = (response.headers.get('content-type') || '').toLowerCase();
   if (type.includes('text/event-stream') && response.body) {
@@ -89,7 +102,11 @@ export async function streamChat({ messages, provider, model, stream = true, sig
   const parsed = await readJson(response);
   if (parsed && typeof parsed === 'object') {
     const err = streamError(parsed);
-    if (err) throw new Error(err);
+    if (err) {
+      const e = new Error(err.message);
+      if (err.code) e.code = err.code;
+      throw e;
+    }
   }
   const text = wholeReply(parsed);
   if (text) onDelta?.(text);
