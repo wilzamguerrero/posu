@@ -449,6 +449,7 @@ export const DEFAULTS = {
   },
 
   quality: {
+    level: 'auto',              // auto | bajo | medio | alto | custom
     pixelRatio: 'auto',         // auto | 1 | 1.5 | 2
     shadowMap: 2048,
     antialias: true,

@@ -13,6 +13,7 @@ import './styles/app.css';
 
 import { DEFAULTS, STORAGE_KEY, MODEL_LIBRARY } from './config.js';
 import { Settings } from './core/Settings.js';
+import { bindQualityLevel, resolveQualityPreset } from './core/capabilities.js';
 import { Viewport } from './core/Viewport.js';
 import { FigureSet, MAX_FIGURAS, libraryUrl } from './model/FigureSet.js';
 import { refreshModelLibrary } from './model/library.js';
@@ -88,7 +89,16 @@ async function main() {
   hydrateIcons(document);
   initToasts(document.getElementById('toasts'));
 
+  let hadSaved = false;
+  try { hadSaved = Boolean(localStorage.getItem(STORAGE_KEY)); } catch { /* modo privado */ }
   const settings = new Settings(DEFAULTS, STORAGE_KEY);
+  bindQualityLevel(settings);
+  // En una sesion nueva, si el equipo es modesto/movil se alinean los valores
+  // iniciales con el nivel automatico detectado para no exigir GPU de sobremesa.
+  if (!hadSaved && settings.get('quality.level') === 'auto') {
+    const autoValues = resolveQualityPreset('auto', settings.get('quality.compat') === true);
+    if (autoValues) settings.batch(autoValues);
+  }
   // La captura nunca arranca congelada por un valor heredado de la sesion.
   settings.set('mocap.frozen', false, { silent: true });
   // La vista en espejo pasa a estar apagada por defecto. Lo guardado gana sobre

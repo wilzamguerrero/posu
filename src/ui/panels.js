@@ -1741,6 +1741,23 @@ function settingsPanel(app) {
       buildAiSettingsControl(),
     ]),
     group({ id: 'st-quality', title: 'Rendimiento', icon: 'gauge' }, [
+      select({ label: 'Nivel de rendimiento', path: 'quality.level',
+        hint: 'Automatico detecta tu equipo. Bajo reduce resolucion, sombras, suavizado y deteccion de poses para PCs antiguos; Personalizado aparece si ajustas controles sueltos.',
+        options: [
+          { value: 'auto', label: 'Automatico (segun equipo)' },
+          { value: 'bajo', label: 'Bajo (PC antiguo)' },
+          { value: 'medio', label: 'Equilibrado' },
+          { value: 'alto', label: 'Alto' },
+          { value: 'custom', label: 'Personalizado' },
+        ] }).root,
+      field('Perfil activo', reactive(['quality.level', 'quality.compat'], () => {
+        const p = app.viewport?.profile;
+        if (!p) return el('span', { class: 'value', text: '—' });
+        const names = { alto: 'Alto', medio: 'Equilibrado', bajo: 'Bajo', compat: 'Compatible' };
+        const shadow = p.shadow === 'vsm' ? 'VSM' : 'PCF';
+        const msaa = p.samples > 0 ? `MSAA ${p.samples}×` : 'sin MSAA';
+        return el('span', { class: 'value', text: `${names[p.tier] ?? p.tier} · ${shadow} · ${msaa}` });
+      })),
       select({ label: 'Resolucion de render', path: 'quality.pixelRatio',
         options: [
           { value: 'auto', label: 'Automatica (pantalla)' },

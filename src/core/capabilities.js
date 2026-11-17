@@ -59,12 +59,58 @@ function nivelAutomatico() {
 }
 
 /**
+ * Ajustes concretos por nivel de rendimiento. Al elegir un nivel distinto de
+ * `custom` se aplican en lote para bajar resolucion, sombras, posproceso y
+ * carga del detector de poses de una sola vez en equipos antiguos.
+ */
+export const QUALITY_PRESETS = {
+  bajo: {
+    'quality.pixelRatio': '1',
+    'quality.shadowMap': 512,
+    'quality.antialias': false,
+    'quality.ssao': false,
+    'quality.fpsCap': 30,
+    'mocap.modelQuality': 'lite',
+    'mocap.detectFps': 15,
+  },
+  medio: {
+    'quality.pixelRatio': 'auto',
+    'quality.shadowMap': 1024,
+    'quality.antialias': true,
+    'quality.ssao': false,
+    'quality.fpsCap': 0,
+    'mocap.modelQuality': 'full',
+    'mocap.detectFps': 0,
+  },
+  alto: {
+    'quality.pixelRatio': 'auto',
+    'quality.shadowMap': 2048,
+    'quality.antialias': true,
+    'quality.ssao': false,
+    'quality.fpsCap': 0,
+    'mocap.modelQuality': 'full',
+    'mocap.detectFps': 0,
+  },
+};
+
+/** Ajustes individuales cuyo cambio manual pasa `quality.level` a `custom`. */
+export const QUALITY_KNOBS = [
+  'quality.pixelRatio',
+  'quality.shadowMap',
+  'quality.antialias',
+  'quality.ssao',
+  'quality.fpsCap',
+];
+
+/**
  * Perfil efectivo con el que se configuran renderizador, sombras y compositor.
  * @param {boolean} compat Fuerza el modo compatible (lo pide el usuario o un
  *   contexto perdido en el arranque).
+ * @param {string} [level] Nivel elegido (`auto`, `bajo`, `medio`, `alto` o `custom`).
  */
-export function graphicsProfile(compat = false) {
-  const tier = compat ? 'compat' : nivelAutomatico();
+export function graphicsProfile(compat = false, level = 'auto') {
+  const forced = (level === 'bajo' || level === 'medio' || level === 'alto') ? level : null;
+  const tier = compat ? 'compat' : (forced ?? nivelAutomatico());
   return {
     tier,
     compat: tier === 'compat',
@@ -78,6 +124,53 @@ export function graphicsProfile(compat = false) {
     powerPreference: (PLATFORM.linux || PLATFORM.mobile || tier === 'compat')
       ? 'default'
       : 'high-performance',
+  };
+}
+
+/** Devuelve el mapa de ajustes que corresponde a un nivel (`null` en `custom`). */
+export function resolveQualityPreset(level, compat = false) {
+  if (level === 'custom') return null;
+  if (level === 'auto') {
+    const { tier } = graphicsProfile(compat, 'auto');
+    return QUALITY_PRESETS[tier === 'compat' ? 'bajo' : tier] ?? QUALITY_PRESETS.medio;
+  }
+  return QUALITY_PRESETS[level] ?? null;
+}
+
+function matchesPreset(settings, preset) {
+  return QUALITY_KNOBS.every((path) => settings.get(path) === preset[path]);
+}
+
+/**
+ * Enlaza `quality.level` con los ajustes sueltos: elegir un nivel aplica su
+ * lote y tocar un ajuste suelto marca `quality.level` como `custom`.
+ */
+export function bindQualityLevel(settings) {
+  let applying = false;
+  const apply = (level) => {
+    const values = resolveQualityPreset(level, settings.get('quality.compat') === true);
+    if (!values) return;
+    applying = true;
+    try {
+      settings.batch(values);
+    } finally {
+      applying = false;
+    }
+  };
+
+  const offLevel = settings.on('quality.level', apply);
+  const offKnobs = settings.on(QUALITY_KNOBS, () => {
+    if (applying) return;
+    const cur = settings.get('quality.level');
+    if (cur === 'custom') return;
+    const preset = resolveQualityPreset(cur, settings.get('quality.compat') === true);
+    if (preset && matchesPreset(settings, preset)) return;
+    settings.set('quality.level', 'custom');
+  });
+
+  return () => {
+    offLevel();
+    offKnobs();
   };
 }
 

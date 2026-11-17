@@ -120,6 +120,53 @@ const ESCRITORIO = { hardwareConcurrency: 16, deviceMemory: 16, maxTouchPoints: 
     !isSoftwareRenderer('NVIDIA GeForce RTX 4070') && !isSoftwareRenderer(''));
 }
 
+// ------------------------------------------------ niveles elegibles a mano ---
+{
+  const { graphicsProfile, bindQualityLevel } = await conEquipo('niveles', {
+    ...ESCRITORIO,
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0',
+    platform: 'Win32',
+  });
+  const { DEFAULTS } = await import('../src/config.js');
+  const { Settings } = await import('../src/core/Settings.js');
+
+  const forcedLow = graphicsProfile(false, 'bajo');
+  check('nivel manual bajo: usa PCF sin MSAA aunque el equipo sea potente',
+    forcedLow.tier === 'bajo' && forcedLow.shadow === 'pcf' && forcedLow.samples === 0,
+    forcedLow.tier + ' / ' + forcedLow.shadow);
+
+  const forcedCompat = graphicsProfile(true, 'alto');
+  check('modo compatible prevalece sobre nivel alto',
+    forcedCompat.tier === 'compat' && forcedCompat.compat === true, forcedCompat.tier);
+
+  const settings = new Settings(DEFAULTS, null);
+  bindQualityLevel(settings);
+
+  settings.set('quality.level', 'bajo');
+  check('nivel bajo aplica lote completo',
+    settings.get('quality.pixelRatio') === '1'
+      && settings.get('quality.shadowMap') === 512
+      && settings.get('quality.antialias') === false
+      && settings.get('quality.fpsCap') === 30
+      && settings.get('mocap.modelQuality') === 'lite'
+      && settings.get('mocap.detectFps') === 15);
+
+  settings.set('quality.shadowMap', 1024);
+  check('tocar un ajuste suelto cambia el nivel a personalizado',
+    settings.get('quality.level') === 'custom', settings.get('quality.level'));
+
+  settings.set('quality.level', 'medio');
+  check('nivel equilibrado restaura sombras 1024 y antialias',
+    settings.get('quality.shadowMap') === 1024
+      && settings.get('quality.antialias') === true
+      && settings.get('quality.fpsCap') === 0
+      && settings.get('mocap.modelQuality') === 'full');
+
+  settings.reset();
+  check('reset devuelve quality.level a auto sin quedar en custom',
+    settings.get('quality.level') === 'auto', settings.get('quality.level'));
+}
+
 console.log('\n' + oks.length + ' correctas / ' + fails.length + ' fallos');
 if (fails.length) {
   console.log('FALLOS:\n - ' + fails.join('\n - '));

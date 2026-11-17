@@ -47,7 +47,7 @@ export class Viewport {
     this.running = false;
 
     /** Techo de calidad de este equipo; el modo compatible lo baja al minimo. */
-    this.profile = graphicsProfile(settings.get('quality.compat') === true);
+    this.profile = graphicsProfile(settings.get('quality.compat') === true, settings.get('quality.level'));
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -162,6 +162,7 @@ export class Viewport {
   #bind() {
     const s = this.settings;
     s.on(['camera.toneMapping', 'camera.exposure'], () => this.applyTone());
+    s.on('quality.level', () => this.applyQualityProfile());
     s.on('quality.pixelRatio', () => {
       this.applyPixelRatio();
       this.resize();
@@ -174,6 +175,37 @@ export class Viewport {
       if (path === 'camera.focusDistance') return;
       this.invalidateShadows();
     });
+  }
+
+  /**
+   * Reaplica el perfil grafico cuando el usuario cambia el nivel de rendimiento
+   * (`auto`, `bajo`, `medio`, `alto`) manteniendo el modo compatible si esta
+   * activo o si el navegador dibuja por software.
+   */
+  applyQualityProfile() {
+    const compat = this.settings.get('quality.compat') === true || isSoftwareRenderer(this.gpuName);
+    const next = graphicsProfile(compat, this.settings.get('quality.level'));
+    const shadowTypeChanged = this.profile.shadow !== next.shadow;
+    this.profile = next;
+    this.lighting.profile = next;
+    this.postfx.profile = next;
+    this.lighting.key.shadow.blurSamples = next.blurSamples;
+    const shadowType = SHADOW_TYPE[next.shadow] ?? THREE.PCFSoftShadowMap;
+    if (this.renderer.shadowMap.type !== shadowType || shadowTypeChanged) {
+      this.renderer.shadowMap.type = shadowType;
+      this.lighting.key.shadow.map?.dispose();
+      this.lighting.key.shadow.map = null;
+      this.scene.traverse((obj) => {
+        if (!obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) m.needsUpdate = true;
+      });
+    }
+    this.lighting.applyShadowMap();
+    this.applyPixelRatio();
+    this.postfx.invalidate();
+    this.resize();
+    this.invalidateShadows();
   }
 
   applyTone() {
