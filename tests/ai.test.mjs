@@ -27,7 +27,7 @@ const { readTarget, safeBase, BUILTIN_IDS } = await import('../server/ai/common.
 const { toAnthropicBody, fromAnthropicReply } = await import('../server/ai/anthropic.mjs');
 const { checkMessages, handleFreePiAd, handleHealth, runNodeHandler } = await import('../server/ai/handlers.mjs');
 const { CONSENT_VERSION } = await import('../server/ai/freepiDevice.mjs');
-const { isGravityUrl, sanitizeAd } = await import('../server/ai/freepiAds.mjs');
+const { isGravityUrl, sanitizeAd, ensureAdShown } = await import('../server/ai/freepiAds.mjs');
 const { freepiHeaders } = await import('../server/ai/freepi.mjs');
 const {
   aiConfig, setProvider, setKey, clearKey, browserKey,
@@ -391,6 +391,43 @@ await test('FloatingAI y AiSettings se montan e interactuan en DOM sin errores',
   aiCfgUi.remove();
 });
 
+await test('el anuncio de free-pi funciona en segundo plano, sin mostrarse en ninguna parte', async () => {
+  setProvider('freepi');
+  setKey('freepi', 'fp-local-test');
+
+  const settings = new Settings(DEFAULTS, STORAGE_KEY);
+  const app = {
+    settings,
+    figures: {
+      get defs() { return settings.get('scene.figures') ?? []; },
+      get count() { return this.defs.length; },
+      get activeId() { return settings.get('figure.active'); },
+      async add() { return null; },
+      remove() { return false; },
+    },
+    viewport: { cameras: { setView() {} }, lighting: { setPreset() {} } },
+  };
+
+  const floating = new FloatingAI(app, { mount: document.body });
+  floating.toggle(true);
+  floating.dispose();
+
+  const ui = buildAiSettingsControl();
+  document.body.appendChild(ui);
+  await new Promise((r) => setTimeout(r, 30));
+
+  // Ni en el chat ni en Ajustes: no hay tarjeta, ni linea, ni boton de anuncio.
+  assert.equal(document.querySelectorAll('.atom-ai-ad, .ai-ad-line, .ai-ad-card').length, 0,
+    'no se pinta ningun cuadro de anuncio');
+  assert.ok(ui.textContent.includes('free-pi'), 'la configuracion de free-pi sigue visible');
+
+  ui.dispose?.();
+  ui.remove();
+
+  clearKey('freepi');
+  setProvider('openai');
+});
+
 await test('free-pi ads: validacion de creativos, pixels gravity y handleFreePiAd', async () => {
   assert.equal(isGravityUrl('https://pixel.trygravity.ai/imp?id=1'), true);
   assert.equal(isGravityUrl('https://trygravity.com/track'), true);
@@ -422,6 +459,48 @@ await test('free-pi ads: validacion de creativos, pixels gravity y handleFreePiA
     body: JSON.stringify({ action: 'impression', ad: {} }),
   }), {});
   assert.equal(badAd.status, 400);
+});
+
+await test('free-pi ads: la impresión se pide y se reporta sola (camino automático)', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  const json = (data, status = 200) => new Response(JSON.stringify(data), {
+    status, headers: { 'Content-Type': 'application/json' },
+  });
+
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    calls.push({ url: u, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+    if (u.includes('/ads/next')) {
+      return json({
+        ad_id: 'ad-9',
+        click_token: 'tok-9',
+        source: 'own',
+        click_url: 'https://example.test/ad',
+        creative: { headline: 'H', body: 'B', cta: 'Ir' },
+      });
+    }
+    if (u.includes('/ads/impression')) return json({ ok: true });
+    return json({ message: 'no esperado' }, 500);
+  };
+
+  try {
+    const shown = await ensureAdShown('fp-test');
+    assert.equal(shown.reported, true);
+    assert.equal(shown.ad.ad_id, 'ad-9');
+    const imp = calls.find((c) => c.url.includes('/ads/impression'));
+    assert.equal(imp.method, 'POST');
+    assert.equal(imp.body.ad_id, 'ad-9');
+    assert.equal(imp.body.click_token, 'tok-9');
+
+    // 204 = el backend no tiene anuncio para ese hueco: no hay nada que reportar.
+    globalThis.fetch = async () => new Response(null, { status: 204 });
+    const none = await ensureAdShown('fp-test');
+    assert.equal(none.noAd, true);
+    assert.equal(none.reported, false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 console.log(`\nai.test.mjs: ${passed} comprobaciones superadas`);

@@ -1,10 +1,15 @@
 /**
- * ATOM · Gestion de anuncios visibles de free-pi
+ * ATOM · Gestion de anuncios de free-pi
  * ---------------------------------------------------------------------------
- * free-pi exige que el cliente muestre un anuncio y reporte su impresion
- * (`/ads/next` + `/ads/impression`); mientras no conste, responde con
- * `403 ads_required`. La impresion solo se envia despues de pintar la tarjeta
- * en una interfaz abierta y visible para el usuario.
+ * free-pi paga la inferencia gratuita con anuncios: pide el creativo
+ * (`/ads/next`) y reporta su impresion (`/ads/impression`); mientras no conste,
+ * el backend corta con `403 ads_required`.
+ *
+ * El flujo es AUTOMATICO (igual que en el portal): la app pide el anuncio y
+ * reporta la impresion sola, primero al arrancar y luego lo renueva cada
+ * FREEPI_AD_TTL_MS. El anuncio no se muestra en el chat: en la interfaz solo
+ * queda una linea de estado dentro de Ajustes > Asistente IA, donde se
+ * configura la API de free-pi.
  */
 import { aiHeaders, readError, readJson } from './wire.js';
 import { hasCredential } from './config.js';
@@ -108,7 +113,7 @@ export async function fetchFreePiAd({ force = false, signal } = {}) {
   return await run;
 }
 
-/** Reporta la impresion una unica vez por `click_token` tras mostrarse en pantalla. */
+/** Reporta la impresion una unica vez por `click_token`. */
 export async function reportDisplayedFreePiAd(ad = state.ad, { signal } = {}) {
   if (!ad?.ad_id || !ad?.click_token || !hasCredential('freepi')) return false;
   if (state.reportedToken === ad.click_token) return true;
@@ -139,4 +144,65 @@ export async function reportDisplayedFreePiAd(ad = state.ad, { signal } = {}) {
 
   inflightReport = run;
   return await run;
+}
+
+/**
+ * Camino automatico: deja un anuncio pedido y reportado. Se llama al arrancar,
+ * al abrir los ajustes y antes de cada peticion a free-pi. Si el anuncio que
+ * ya hay sigue vigente no se pide otro: solo se asegura que conste reportado.
+ */
+export async function ensureFreePiAd({ force = false, signal } = {}) {
+  if (!hasCredential('freepi')) return null;
+  const ad = await fetchFreePiAd({ force, signal });
+  if (!ad) return null;
+  await reportDisplayedFreePiAd(ad, { signal });
+  return ad;
+}
+
+/* ── Renovacion automatica en segundo plano ─────────────────────────────── */
+
+let autoTimer = 0;
+let autoRunning = false;
+
+function visible() {
+  if (typeof document === 'undefined') return true;
+  return document.visibilityState !== 'hidden';
+}
+
+/** setTimeout que no mantiene vivo el proceso en Node (pruebas). */
+function later(fn, ms) {
+  const t = setTimeout(fn, ms);
+  if (t && typeof t === 'object' && typeof t.unref === 'function') t.unref();
+  return t;
+}
+
+async function autoTick() {
+  autoTimer = 0;
+  if (!autoRunning) return;
+  // Sin free-pi configurado no hay nada que renovar: se apaga solo.
+  if (!hasCredential('freepi')) {
+    autoRunning = false;
+    return;
+  }
+  if (!visible()) {
+    autoTimer = later(autoTick, 30_000);
+    return;
+  }
+  await ensureFreePiAd();
+  if (!autoRunning) return;
+  autoTimer = later(autoTick, FREEPI_AD_TTL_MS);
+}
+
+/** Arranca la renovacion automatica (idempotente). */
+export function startFreePiAdAutoSync(delayMs = 2_000) {
+  if (autoRunning) return;
+  if (!hasCredential('freepi')) return;
+  autoRunning = true;
+  autoTimer = later(autoTick, delayMs);
+}
+
+export function stopFreePiAdAutoSync() {
+  autoRunning = false;
+  if (autoTimer) clearTimeout(autoTimer);
+  autoTimer = 0;
 }

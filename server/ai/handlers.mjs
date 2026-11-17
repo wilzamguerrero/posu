@@ -31,7 +31,7 @@ import {
   usableModels,
 } from './copilot.mjs';
 import { freepiCatalog, freepiHeaders, isFreePi, pipeFreePiResponse, replyText } from './freepi.mjs';
-import { fetchNextAd, reportAdImpression } from './freepiAds.mjs';
+import { ensureAdShown, fetchNextAd, reportAdImpression } from './freepiAds.mjs';
 import { deviceConsent, devicePoll, deviceStart, freepiMe } from './freepiDevice.mjs';
 import { registryByApi, registryDirectory, registryProvider } from './registry.mjs';
 import { mismoOrigen } from '../imageSearch.mjs';
@@ -157,6 +157,12 @@ function summarizeError(status, label, contentType, text, customOpenAi) {
   return explainBody(status, label, contentType, text, customOpenAi);
 }
 
+/** ¿Es el 403 de free-pi por falta de anuncios mostrados? */
+function adsRequired(status, text) {
+  if (status !== 403) return false;
+  return /ads_required|ads aren't displaying/i.test(text || '');
+}
+
 async function readJsonBody(request, maxBytes) {
   const len = Number(request.headers.get('content-length') || 0);
   if (len > maxBytes) return { error: 'La petición supera el tamaño máximo permitido.', status: 413 };
@@ -233,19 +239,37 @@ export async function handleAiChat(request, env) {
     ? toAnthropicBody(model, checked.messages, stream)
     : { model, messages: checked.messages, ...(stream ? { stream: true } : {}) };
 
+  const postChat = () => fetchWithFallback(chatUrls, {
+    method: 'POST',
+    headers: reqHeaders,
+    body: JSON.stringify(payload),
+  }, { noRedirect: target.custom });
+
   try {
-    const upstream = await fetchWithFallback(chatUrls, {
-      method: 'POST',
-      headers: reqHeaders,
-      body: JSON.stringify(payload),
-    }, { noRedirect: target.custom });
+    let upstream = await postChat();
 
     if (!upstream.ok) {
-      const errText = await upstream.text().catch(() => '');
-      if (freepi && upstream.status === 403 && /ads_required|ads aren't displaying/i.test(errText)) {
+      let errText = await upstream.text().catch(() => '');
+
+      // free-pi cobra la gratuidad con anuncios: si el backend corta con
+      // `403 ads_required` se pide un anuncio, se reporta su impresión y se
+      // reintenta UNA vez. Así la respuesta nunca se cae porque "nadie vio un
+      // anuncio": se arregla en el acto, sin que el usuario toque nada.
+      if (freepi && adsRequired(upstream.status, errText)) {
+        const ensured = await ensureAdShown(key).catch(() => null);
+        if (ensured?.reported) {
+          console.log('[ai-chat] free-pi 403 ads_required -> anuncio reportado, reintentando');
+          upstream = await postChat();
+          errText = upstream.ok ? '' : await upstream.text().catch(() => '');
+        } else {
+          console.warn('[ai-chat] free-pi 403 ads_required sin anuncio disponible', ensured?.message || '');
+        }
+      }
+
+      if (freepi && adsRequired(upstream.status, errText)) {
         return jsonRes({
           error: 'ads_required',
-          message: 'free-pi pausó las respuestas porque aún no consta ningún anuncio mostrado (ads_required).',
+          message: 'free-pi pausó las respuestas porque no hay anuncio disponible ahora mismo. Reintenta en unos segundos.',
         }, 403);
       }
       const contentType = upstream.headers.get('content-type');

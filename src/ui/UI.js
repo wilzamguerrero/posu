@@ -14,6 +14,8 @@ import { buildPanels } from './panels.js';
 import { SearchBar } from './SearchBar.js';
 import { toast } from './Toast.js';
 import { FloatingAI } from './FloatingAI.js';
+import { startFreePiAdAutoSync } from '../ai/freepiAds.js';
+import { aiConfig } from '../ai/config.js';
 import { PERSPECTIVE_MODES, PERSPECTIVE_BY_ID } from '../guides/Perspective.js';
 
 /** Botón de icono cuyo estado activo sigue una ruta booleana del almacen. */
@@ -86,6 +88,10 @@ export class UI {
       mount: document.body,
       onOpenSettings: () => app.hooks.openAiSettings?.(),
     });
+    // Los anuncios de free-pi se piden y se reportan solos en segundo plano:
+    // no hay que abrir nada ni mirarlos para que las respuestas no se corten.
+    startFreePiAdAutoSync();
+    aiConfig.subscribe(() => startFreePiAdAutoSync());
     app.floatingAI = this.floatingAI;
     hydrateIcons(document);
   }

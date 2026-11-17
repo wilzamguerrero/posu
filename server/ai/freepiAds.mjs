@@ -140,3 +140,22 @@ export async function reportAdImpression(token, rawAd) {
   }
   return { ok: true, status: response.status, fired };
 }
+
+/**
+ * Camino automatico: pide un anuncio y reporta su impresion de una sola vez.
+ * Es lo que destraba un `403 ads_required` sin que el usuario toque nada.
+ */
+export async function ensureAdShown(token, slot = 'banner') {
+  const next = await fetchNextAd(token, slot);
+  if (!next.ok) return { ok: false, noAd: false, ad: null, reported: false, message: next.message };
+  if (!next.ad) return { ok: true, noAd: true, ad: null, reported: false };
+  const impression = await reportAdImpression(token, next.ad);
+  return {
+    ok: true,
+    noAd: false,
+    ad: next.ad,
+    reported: impression.ok === true,
+    fired: impression.fired === true,
+    message: impression.ok ? '' : impression.message,
+  };
+}
