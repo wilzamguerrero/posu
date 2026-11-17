@@ -1,8 +1,8 @@
 /**
- * ATOM · Orbe organico animado para el boton flotante del asistente IA
+ * ATOM · Orbe minimalista interactivo para el asistente IA
  * ---------------------------------------------------------------------------
- * Dibuja un nucleo op-art con franjas concentricas suaves, halo reactivo y
- * estela luminosa acorde con el acento de la interfaz (--accent).
+ * Esfera limpia con un unico iris/pupila que sigue suavemente el puntero,
+ * parpadeo sutil y arco dinamico de estado al pasar el raton o pensar.
  */
 
 export class OrganicOrb {
@@ -14,7 +14,11 @@ export class OrganicOrb {
     this.thinking = thinking;
     this.hover = false;
     this.look = { x: 0, y: 0 };
+    this.targetLook = { x: 0, y: 0 };
     this.phase = Math.random() * Math.PI * 2;
+    this.blink = 1; // 1 = abierto, ~0.12 = parpadeo
+    this.blinkAt = 140 + Math.random() * 180;
+    this.frameCount = 0;
     this.raf = 0;
     this.disposed = false;
 
@@ -29,10 +33,13 @@ export class OrganicOrb {
       if (!rect.width || !rect.height) return;
       const cx = rect.left + rect.width * 0.5;
       const cy = rect.top + rect.height * 0.5;
-      const dx = Math.max(-1, Math.min(1, (ev.clientX - cx) / 140));
-      const dy = Math.max(-1, Math.min(1, (ev.clientY - cy) / 140));
-      this.look.x += (dx - this.look.x) * 0.25;
-      this.look.y += (dy - this.look.y) * 0.25;
+      const dx = ev.clientX - cx;
+      const dy = ev.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      const maxReach = 180;
+      const norm = dist > 1 ? Math.min(1, dist / maxReach) : 0;
+      this.targetLook.x = dist > 1 ? (dx / dist) * norm : 0;
+      this.targetLook.y = dist > 1 ? (dy / dist) * norm : 0;
     };
     this._onEnter = () => { this.hover = true; };
     this._onLeave = () => { this.hover = false; };
@@ -59,7 +66,26 @@ export class OrganicOrb {
 
   #tick() {
     if (this.disposed || !this.ctx) return;
-    this.phase += this.thinking ? 0.085 : 0.028;
+    this.frameCount += 1;
+    this.phase += this.thinking ? 0.08 : 0.025;
+
+    // Seguimiento fluido de la mirada
+    this.look.x += (this.targetLook.x - this.look.x) * 0.16;
+    this.look.y += (this.targetLook.y - this.look.y) * 0.16;
+
+    // Parpadeo breve natural cada pocos segundos (solo en reposo)
+    if (!this.thinking && this.frameCount >= this.blinkAt) {
+      const t = this.frameCount - this.blinkAt;
+      if (t <= 4) this.blink = Math.max(0.14, 1 - t * 0.22);
+      else if (t <= 9) this.blink = Math.min(1, 0.14 + (t - 4) * 0.18);
+      else {
+        this.blink = 1;
+        this.blinkAt = this.frameCount + 220 + Math.random() * 260;
+      }
+    } else if (this.thinking) {
+      this.blink += (1 - this.blink) * 0.25;
+    }
+
     this.#draw();
     if (typeof requestAnimationFrame === 'function') {
       this.raf = requestAnimationFrame(() => this.#tick());
@@ -74,82 +100,89 @@ export class OrganicOrb {
     const h = this.canvas.height;
     const cx = w * 0.5;
     const cy = h * 0.5;
-    const r = Math.min(w, h) * 0.42;
+    const baseR = Math.min(w, h) * 0.41;
+    const pulse = this.thinking
+      ? 1 + Math.sin(this.phase * 2) * 0.035
+      : 1 + Math.sin(this.phase) * 0.015;
+    const r = baseR * pulse;
+
+    const accentRgb = this.thinking ? '78, 201, 176' : '77, 170, 252';
+    const accentHex = this.thinking ? '#4ec9b0' : '#4daafc';
 
     ctx.clearRect(0, 0, w, h);
 
-    // Resplandor exterior suave
-    const glow = ctx.createRadialGradient(cx, cy, r * 0.45, cx, cy, r * 1.18);
-    glow.addColorStop(0, this.thinking ? 'rgba(78, 201, 176, 0.38)' : 'rgba(0, 120, 212, 0.34)');
-    glow.addColorStop(0.65, this.thinking ? 'rgba(197, 134, 192, 0.16)' : 'rgba(77, 170, 252, 0.12)');
+    // 1. Resplandor ambiental discreto
+    const glow = ctx.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 1.24);
+    glow.addColorStop(0, `rgba(${accentRgb}, ${this.hover || this.thinking ? 0.34 : 0.2})`);
     glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(cx, cy, r * 1.18, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r * 1.24, 0, Math.PI * 2);
     ctx.fill();
 
-    // Silueta organica modulada
+    // 2. Esfera limpia de fondo oscuro
     ctx.save();
     ctx.beginPath();
-    const steps = 48;
-    const amp = this.thinking ? 0.075 : (this.hover ? 0.055 : 0.036);
-    for (let i = 0; i <= steps; i += 1) {
-      const a = (i / steps) * Math.PI * 2;
-      const wobble = 1
-        + Math.sin(a * 3 + this.phase) * amp
-        + Math.cos(a * 2 - this.phase * 1.3) * (amp * 0.65);
-      const px = cx + Math.cos(a) * r * wobble;
-      const py = cy + Math.sin(a) * r * wobble;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-
-    // Relleno de estudio oscuro con reflejo azulado
-    const bg = ctx.createRadialGradient(
-      cx - r * 0.25 + this.look.x * r * 0.15,
-      cy - r * 0.25 + this.look.y * r * 0.15,
-      r * 0.1,
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    const fillGrad = ctx.createRadialGradient(
+      cx - r * 0.28,
+      cy - r * 0.28,
+      r * 0.08,
       cx,
       cy,
-      r * 1.05,
+      r,
     );
-    bg.addColorStop(0, '#2a4158');
-    bg.addColorStop(0.55, '#19222d');
-    bg.addColorStop(1, '#101216');
-    ctx.fillStyle = bg;
+    fillGrad.addColorStop(0, '#252c36');
+    fillGrad.addColorStop(0.7, '#181c22');
+    fillGrad.addColorStop(1, '#101216');
+    ctx.fillStyle = fillGrad;
     ctx.fill();
     ctx.clip();
 
-    // Anillos op-art descentrados hacia la mirada del cursor
-    const ox = this.look.x * r * 0.24;
-    const oy = this.look.y * r * 0.24;
-    const rings = 5;
-    for (let i = 0; i < rings; i += 1) {
-      const k = 1 - i / rings;
-      const ringR = r * (0.22 + k * 0.68);
-      const shift = Math.sin(this.phase + i * 0.8) * r * 0.06;
-      ctx.beginPath();
-      ctx.arc(cx + ox * (1 - k * 0.4) + shift, cy + oy * (1 - k * 0.4), ringR, 0, Math.PI * 2);
-      ctx.lineWidth = Math.max(1.2, r * 0.07);
-      ctx.strokeStyle = i % 2 === 0
-        ? (this.thinking ? 'rgba(78, 201, 176, 0.78)' : 'rgba(77, 170, 252, 0.72)')
-        : 'rgba(255, 255, 255, 0.18)';
-      ctx.stroke();
-    }
+    // 3. Pupila / ojo unico que mira al cursor (acotado para no tocar el borde)
+    const irisR = r * (this.thinking ? 0.32 : (this.hover ? 0.34 : 0.3));
+    const maxOffset = Math.max(0, r - irisR - r * 0.16);
+    const ex = cx + this.look.x * maxOffset;
+    const ey = cy + this.look.y * maxOffset;
 
-    // Nucleo brillante
+    ctx.save();
+    ctx.translate(ex, ey);
+    ctx.scale(1, this.blink);
+
+    // Un solo aro fino de iris + nucleo limpio (sin circulos amontonados)
     ctx.beginPath();
-    ctx.arc(cx + ox * 0.9, cy + oy * 0.9, r * (this.thinking ? 0.2 : 0.16), 0, Math.PI * 2);
-    ctx.fillStyle = this.thinking ? '#4ec9b0' : '#4daafc';
+    ctx.arc(0, 0, irisR * 1.38, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(1, r * 0.065);
+    ctx.strokeStyle = `rgba(${accentRgb}, 0.55)`;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, irisR * 0.72, 0, Math.PI * 2);
+    ctx.fillStyle = accentHex;
     ctx.fill();
+
+    // Brillo especular diminuto para darle vida de lente/ojo
+    ctx.beginPath();
+    ctx.arc(-irisR * 0.24, -irisR * 0.24, Math.max(1, irisR * 0.2), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fill();
+
+    ctx.restore();
     ctx.restore();
 
-    // Borde nitido
+    // 4. Borde unico exterior + arco dinamico rotatorio
     ctx.beginPath();
-    ctx.arc(cx, cy, r * 0.96, 0, Math.PI * 2);
-    ctx.lineWidth = Math.max(1, r * 0.045);
-    ctx.strokeStyle = this.thinking ? 'rgba(78, 201, 176, 0.65)' : 'rgba(77, 170, 252, 0.48)';
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(1, r * 0.06);
+    ctx.strokeStyle = `rgba(${accentRgb}, ${this.hover ? 0.52 : 0.34})`;
+    ctx.stroke();
+
+    ctx.beginPath();
+    const arcLen = this.thinking ? Math.PI * 0.85 : Math.PI * 0.48;
+    ctx.arc(cx, cy, r, this.phase, this.phase + arcLen);
+    ctx.lineWidth = Math.max(1.2, r * 0.075);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = accentHex;
     ctx.stroke();
   }
 
