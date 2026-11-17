@@ -24,10 +24,28 @@ import { LIGHT_BY_ID, LIGHT_TYPES, lightDefaults } from './lights.js';
 import { Bounds } from './Bounds.js';
 import { crearMaterial, aplicarParametros, materialDefaults, proyectaSombra } from '../model/MaterialLibrary.js';
 import { nuevoId } from '../core/ids.js';
+import {
+  buildWarpedGizmoScreen,
+  pickWarpedGizmo2D,
+  drawWarpedGizmo2D,
+  createWarpedDragState,
+  stepWarpedDragState,
+  distSeg2D,
+} from '../core/warpedGizmo.js';
 
 const DEG = Math.PI / 180;
 const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const _p = new THREE.Vector3();
+const _pa = new THREE.Vector3();
+const _pb = new THREE.Vector3();
+
+const PICK_LIMBS = [
+  ['head', 'neck'], ['neck', 'spine2'], ['spine2', 'spine'], ['spine', 'hips'],
+  ['spine2', 'leftArm'], ['leftArm', 'leftForeArm'], ['leftForeArm', 'leftHand'],
+  ['spine2', 'rightArm'], ['rightArm', 'rightForeArm'], ['rightForeArm', 'rightHand'],
+  ['hips', 'leftUpLeg'], ['leftUpLeg', 'leftLeg'], ['leftLeg', 'leftFoot'],
+  ['hips', 'rightUpLeg'], ['rightUpLeg', 'rightLeg'], ['rightLeg', 'rightFoot'],
+];
 
 export class SceneEditor {
   /**
@@ -59,6 +77,9 @@ export class SceneEditor {
     /** @type {Map<string, {def: object, object: THREE.Object3D, helper?: THREE.Object3D, target?: THREE.Object3D, pick?: THREE.Mesh, material?: THREE.Material}>} */
     this.items = new Map();
     this.dragging = false;
+    this.warpedAxis = null;
+    this.warpedDrag = null;
+    this._warpedGizmo = null;
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -85,10 +106,14 @@ export class SceneEditor {
 
     viewport.add(this.group, this.helpers, this.gizmoHelper);
 
+    this._onCaptureDown = (e) => this.#onCaptureDown(e);
     this._onPointerDown = (e) => this.#onPointerDown(e);
     this._onPointerMove = (e) => this.#onPointerMove(e);
     this._onPointerLeave = () => this.#setHover('');
+    this._onWindowMove = (e) => this.#onWindowMove(e);
+    this._onWindowUp = (e) => this.#onWindowUp(e);
     const dom = viewport.renderer.domElement;
+    dom.addEventListener('pointerdown', this._onCaptureDown, { capture: true });
     dom.addEventListener('pointerdown', this._onPointerDown);
     dom.addEventListener('pointermove', this._onPointerMove);
     dom.addEventListener('pointerleave', this._onPointerLeave);
@@ -479,10 +504,24 @@ export class SceneEditor {
 
   /* ── Gizmo y seleccion ──────────────────────────────────────────────── */
 
+  #isWarped() {
+    return this.perspective?.warped === true;
+  }
+
+  #syncGizmoVisibility() {
+    const warped = this.#isWarped();
+    const hasObj = !!this.gizmo.object;
+    this.gizmo.enabled = hasObj && !warped;
+    this.gizmoHelper.visible = hasObj && !warped;
+  }
+
   #attach(id) {
     const item = id ? this.items.get(id) : null;
     if (!item) {
+      this.warpedAxis = null;
+      this._warpedGizmo = null;
       this.gizmo.detach();
+      this.gizmo.enabled = false;
       this.gizmoHelper.visible = false;
       this.#paintBounds();
       this.onSelect?.('');
@@ -494,7 +533,7 @@ export class SceneEditor {
     else this.#paintBounds();
     this.gizmo.showX = this.gizmo.showY = this.gizmo.showZ = true;
     this.gizmo.setMode(this.#modeFor(item));
-    this.gizmoHelper.visible = true;
+    this.#syncGizmoVisibility();
     // Seleccionar una figura tambien la hace la activa (la que recibe camara,
     // poses y manos). Al contrario no: pinchar un cubo no cambia la activa.
     if (item.kind === 'figura') this.figures?.setActive(id);
@@ -564,26 +603,100 @@ export class SceneEditor {
   /**
    * Id del elemento que hay bajo el puntero, o '' si no hay ninguno.
    *
-   * Las figuras se apuntan por su caja envolvente, no por su malla: la anatomia
-   * son decenas de miles de triangulos con esqueleto y esto se llama en cada
-   * movimiento del raton. Es lo mismo que dibuja el contorno azul, asi que se
-   * selecciona exactamente lo que se resalta.
+   * En modos de perspectiva deformada (4/5/6 puntos o curvatura) combina el
+   * rayo desenrollado con distancia 2D en pantalla sobre las extremidades reales
+   * de cada esqueleto: asi es facil elegir cualquier figura aunque sus cajas
+   * se solapen o esten muy cerca del borde del ojo de pez.
    */
   #pickAt(event) {
     const cam = this.viewport.cameras.active;
-    if (this.perspective?.warped) {
-      const rect = this.viewport.renderer.domElement.getBoundingClientRect();
-      if (!this.perspective.rayFromClient(event.clientX, event.clientY, rect, this.raycaster.ray)) {
-        return '';
-      }
+    const dom = this.viewport.renderer.domElement;
+    const rect = dom.getBoundingClientRect();
+    const warped = this.#isWarped();
+    let hasRay = false;
+    if (warped) {
+      hasRay = this.perspective.rayFromClient(event.clientX, event.clientY, rect, this.raycaster.ray);
       this.raycaster.camera = cam;
     } else {
       this.raycaster.setFromCamera(this.#pointerTo(event), cam);
+      hasRay = true;
     }
-    const objetos = this.#pickables();
-    const hits = objetos.length ? this.raycaster.intersectObjects(objetos, false) : [];
-    let mejor = hits[0]?.object?.userData?.itemId ?? '';
-    let cerca = hits[0]?.distance ?? Infinity;
+
+    let mejor = '';
+    let cerca = Infinity;
+
+    if (hasRay) {
+      const objetos = this.#pickables();
+      const hits = objetos.length ? this.raycaster.intersectObjects(objetos, false) : [];
+      if (hits[0]?.object?.userData?.itemId) {
+        mejor = hits[0].object.userData.itemId;
+        cerca = hits[0].distance;
+      }
+    }
+
+    if (warped) {
+      const px = event.clientX - rect.left;
+      const py = event.clientY - rect.top;
+      const cssW = Math.max(1, rect.width || dom.clientWidth || 1);
+      const cssH = Math.max(1, rect.height || dom.clientHeight || 1);
+
+      // 1) Figuras: prioridad por distancia real en pixeles deformados a los huesos
+      let bestLimbId = '';
+      let bestLimbScore = Infinity;
+      for (const item of this.items.values()) {
+        if (item.kind !== 'figura' || !item.object.visible) continue;
+        const bones = item.character?.bones;
+        if (bones) {
+          let minD = Infinity;
+          let minDist = Infinity;
+          for (const [aKey, bKey] of PICK_LIMBS) {
+            const ba = bones[aKey];
+            const bb = bones[bKey];
+            if (!ba || !bb) continue;
+            ba.getWorldPosition(_pa);
+            bb.getWorldPosition(_pb);
+            const sa = this.perspective.projectWorld(_pa, cssW, cssH);
+            const sb = this.perspective.projectWorld(_pb, cssW, cssH);
+            if (!sa || !sb) continue;
+            if (Math.hypot(sa.x - sb.x, sa.y - sb.y) > 260) continue;
+            const d = distSeg2D(px, py, sa.x, sa.y, sb.x, sb.y);
+            if (d < minD) { minD = d; minDist = Math.min(sa.dist, sb.dist); }
+          }
+          if (minD <= 24) {
+            const score = minD + minDist * 0.25;
+            if (score < bestLimbScore) {
+              bestLimbScore = score;
+              bestLimbId = item.def.id;
+            }
+          }
+        }
+      }
+      if (bestLimbId && !mejor) return bestLimbId;
+      if (bestLimbId && mejor) {
+        // Si un hueso visible esta practicamente bajo el puntero y el otro hit era caja lejana
+        const figItem = this.items.get(bestLimbId);
+        if (figItem) {
+          figItem.object.getWorldPosition(_p);
+          const figDist = cam.position.distanceTo(_p);
+          if (figDist <= cerca + 0.35) return bestLimbId;
+        }
+      }
+
+      // 2) Luces en pantalla (esferas pequeñas en gran angular)
+      if (!mejor) {
+        let bestLightDist = 18;
+        for (const item of this.items.values()) {
+          if (!item.object?.visible || !item.object.isLight) continue;
+          item.object.getWorldPosition(_p);
+          const s = this.perspective.projectWorld(_p, cssW, cssH);
+          if (!s) continue;
+          const d = Math.hypot(px - s.x, py - s.y);
+          if (d < bestLightDist) { bestLightDist = d; mejor = item.def.id; }
+        }
+      }
+    }
+
+    if (!hasRay) return mejor;
 
     for (const item of this.items.values()) {
       if (item.kind !== 'figura' || !item.object.visible) continue;
@@ -606,7 +719,98 @@ export class SceneEditor {
    * sin esta condicion el visor se quedaba sordo a los clics.
    */
   #gizmoBusy() {
-    return this.dragging || (!!this.gizmo.object && !!this.gizmo.axis);
+    return this.dragging || !!this.warpedDrag || (!!this.gizmo.object && (this.#isWarped() ? !!this.warpedAxis : !!this.gizmo.axis));
+  }
+
+  #buildWarpedGizmo(cssW, cssH) {
+    this._warpedGizmo = null;
+    const obj = this.gizmo.object;
+    if (!obj || !this.perspective) return null;
+    const item = this.items.get(this.settings.get('scene.selected'));
+    const mode = this.#modeFor(item);
+    const localSpace = (this.settings.get('scene.space') ?? 'world') === 'local';
+    obj.getWorldPosition(_p);
+    this._warpedGizmo = buildWarpedGizmoScreen({
+      perspective: this.perspective,
+      cam: this.viewport.cameras.active,
+      position: _p,
+      quaternion: obj.quaternion,
+      mode,
+      localSpace,
+      cssW,
+      cssH,
+      targetPx: 68,
+    });
+    return this._warpedGizmo;
+  }
+
+  #pickWarpedGizmo(event) {
+    if (!this.gizmo.object || !this.#isWarped()) return null;
+    const dom = this.viewport.renderer.domElement;
+    const rect = dom.getBoundingClientRect();
+    const cssW = Math.max(1, rect.width || dom.clientWidth || 1);
+    const cssH = Math.max(1, rect.height || dom.clientHeight || 1);
+    const g = this.#buildWarpedGizmo(cssW, cssH);
+    if (!g) return null;
+    return pickWarpedGizmo2D(g, event.clientX - rect.left, event.clientY - rect.top, 15);
+  }
+
+  #onCaptureDown(event) {
+    if (event.button !== 0 || this.warpedDrag || this.dragging || this.blocked(event)) return;
+    if (!this.#isWarped() || !this.gizmo.object) return;
+    const axis = this.#pickWarpedGizmo(event);
+    if (!axis) return;
+    const dom = this.viewport.renderer.domElement;
+    const rect = dom.getBoundingClientRect();
+    const g = this._warpedGizmo;
+    if (!g) return;
+
+    event.stopPropagation();
+    event.preventDefault();
+    this.warpedAxis = axis;
+    this.dragging = true;
+    this.viewport.cameras.controls.enabled = false;
+    this.warpedDrag = createWarpedDragState({
+      g,
+      axis,
+      object: this.gizmo.object,
+      cam: this.viewport.cameras.active,
+      perspective: this.perspective,
+      rect,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    window.addEventListener('pointermove', this._onWindowMove);
+    window.addEventListener('pointerup', this._onWindowUp);
+    window.addEventListener('pointercancel', this._onWindowUp);
+  }
+
+  #onWindowMove(event) {
+    if (!this.warpedDrag || !this.gizmo.object) return;
+    const rect = this.viewport.renderer.domElement.getBoundingClientRect();
+    stepWarpedDragState(this.warpedDrag, {
+      object: this.gizmo.object,
+      perspective: this.perspective,
+      rect,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      snapT: this.gizmo.translationSnap,
+      snapR: this.gizmo.rotationSnap,
+      snapS: this.gizmo.scaleSnap,
+    });
+    this.gizmo.object.updateMatrixWorld?.(true);
+    this.viewport.invalidateShadows?.();
+  }
+
+  #onWindowUp() {
+    window.removeEventListener('pointermove', this._onWindowMove);
+    window.removeEventListener('pointerup', this._onWindowUp);
+    window.removeEventListener('pointercancel', this._onWindowUp);
+    if (!this.warpedDrag) return;
+    this.warpedDrag = null;
+    this.dragging = false;
+    this.viewport.cameras.controls.enabled = true;
+    this.#writeTransform();
   }
 
   /** Seleccion con el raton en el visor. El gizmo y el posado tienen prioridad. */
@@ -627,7 +831,25 @@ export class SceneEditor {
    * Sin esto la seleccion en el visor no se descubre, y hay que ir a la lista.
    */
   #onPointerMove(event) {
-    if (this.#gizmoBusy() || this.blocked(event)) { this.#setHover(''); return; }
+    if (this.dragging || this.warpedDrag || this.blocked(event)) {
+      this.warpedAxis = null;
+      this.#setHover('');
+      return;
+    }
+    const dom = this.viewport.renderer.domElement;
+    if (this.#isWarped() && this.gizmo.object) {
+      const axis = this.#pickWarpedGizmo(event);
+      this.warpedAxis = axis;
+      if (axis) {
+        this.#setHover('');
+        dom.style.cursor = 'grab';
+        return;
+      }
+      if (dom.style.cursor === 'grab') dom.style.cursor = '';
+    } else {
+      this.warpedAxis = null;
+    }
+    if (this.#gizmoBusy()) { this.#setHover(''); return; }
     this.#setHover(this.#pickAt(event));
   }
 
@@ -668,10 +890,29 @@ export class SceneEditor {
     return item ? this.bounds.size(item) : null;
   }
 
+  /** Pinta el gizmo de elemento en 2D cuando la perspectiva esta deformada. */
+  drawOverlay(ctx, W, H, dpr, posing = null) {
+    if (!this.#isWarped() || !this.gizmo.object || !this.gizmo.object.visible) return;
+    const selectedId = this.settings.get('scene.selected');
+    const item = selectedId ? this.items.get(selectedId) : null;
+    if (!item) return;
+    // Si el usuario esta manipulando un hueso concreto con pose manual sobre esta
+    // misma figura, cede protagonismo al gizmo del hueso para no solaparse.
+    if (item.kind === 'figura' && posing?.enabled && posing?.selected && item.def?.id === this.figures?.activeId) {
+      return;
+    }
+    const cssW = Math.max(1, W / Math.max(0.5, dpr));
+    const cssH = Math.max(1, H / Math.max(0.5, dpr));
+    const g = this.#buildWarpedGizmo(cssW, cssH);
+    if (!g) return;
+    drawWarpedGizmo2D(ctx, g, this.warpedAxis, dpr);
+  }
+
   /** Por fotograma: la camara del gizmo, las cajas y los ayudantes de luz. */
   #sync() {
     const cam = this.viewport.cameras.active;
     if (this.gizmo.camera !== cam) this.gizmo.camera = cam;
+    this.#syncGizmoVisibility();
     this.#paintBounds();
     // Mientras se arrastra el gizmo, el elemento se mueve fuera del almacen: hay
     // que pedir el repintado de la sombra en cada fotograma.
@@ -704,9 +945,13 @@ export class SceneEditor {
   dispose() {
     this.unsubscribe?.();
     const dom = this.viewport.renderer.domElement;
+    dom.removeEventListener('pointerdown', this._onCaptureDown, { capture: true });
     dom.removeEventListener('pointerdown', this._onPointerDown);
     dom.removeEventListener('pointermove', this._onPointerMove);
     dom.removeEventListener('pointerleave', this._onPointerLeave);
+    window.removeEventListener('pointermove', this._onWindowMove);
+    window.removeEventListener('pointerup', this._onWindowUp);
+    window.removeEventListener('pointercancel', this._onWindowUp);
     for (const item of this.items.values()) this.#destroy(item);
     this.items.clear();
     this.gizmo.detach();

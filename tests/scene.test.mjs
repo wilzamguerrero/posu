@@ -314,6 +314,29 @@ check('vaciar la escena no se lleva las figuras',
   editor.items.has('fig1') && (settings.get('scene.figures') ?? []).length === 1,
   editor.items.size + ' elementos');
 
+// Bajo perspectiva deformada, el gizmo WebGL se oculta y responde al picking 2D.
+const fakePersp = {
+  warped: true,
+  projectWorld(p, cssW, cssH) {
+    const v = p.clone().project(rig.active);
+    if (v.z > 1) return null;
+    return { x: (v.x * 0.5 + 0.5) * cssW, y: (-v.y * 0.5 + 0.5) * cssH, dist: rig.active.position.distanceTo(p) };
+  },
+  rayFromClient(clientX, clientY, rect, ray) {
+    const rc = new THREE.Raycaster();
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((clientY - rect.top) / rect.height) * 2 + 1;
+    rc.setFromCamera({ x: nx, y: ny }, rig.active);
+    ray.copy(rc.ray);
+    return true;
+  },
+};
+const warpedEditor = new SceneEditor({ settings, viewport, figures, perspective: fakePersp });
+settings.set('scene.selected', 'fig1');
+check('en perspectiva deformada se oculta el gizmo WebGL del elemento',
+  warpedEditor.gizmoHelper.visible === false && warpedEditor.gizmo.enabled === false);
+warpedEditor.dispose();
+
 console.log('\n' + oks.length + ' correctas / ' + fails.length + ' fallos');
 if (fails.length) {
   console.log('FALLOS:\n - ' + fails.join('\n - '));

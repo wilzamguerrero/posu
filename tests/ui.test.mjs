@@ -740,6 +740,16 @@ console.log('lista de escena:', grupoPorTitulo('Elementos de la escena')?.queryS
     gPersp2?.classList.contains('is-collapsed') === true
     && gMalla2?.classList.contains('is-collapsed') === false
     && estabaCerrado === true && !!reloadedUI);
+
+  // 8b · Captura: portapapeles y temporizador de parada.
+  const mocapPanel = document.querySelector('#sidebar-host .panel[data-panel="mocap"]');
+  const pasteBox = mocapPanel?.querySelector('.clipboard-paste-box');
+  revisa('el panel Captura incluye espacio clickable para pegar del portapapeles', !!pasteBox);
+  const timerBtns = [...(mocapPanel?.querySelectorAll('.mocap-timer-presets .btn') ?? [])];
+  const btn10 = timerBtns.find((b) => b.textContent?.trim() === '10 s');
+  btn10?.click();
+  revisa('los preajustes de temporizador actualizan mocap.timerSeconds',
+    Number(reloadedSettings.get('mocap.timerSeconds')) === 10 && !!document.getElementById('mocap-timer'));
 }
 
 // 9 · La firma del autor sale en Ayuda > Acerca de.

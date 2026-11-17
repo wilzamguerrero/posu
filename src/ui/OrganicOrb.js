@@ -22,6 +22,7 @@ export class OrganicOrb {
     this.canvas.className = 'atom-ai-orb';
     this.canvas.setAttribute('aria-hidden', 'true');
     this.#syncSize();
+    this.ctx = this.canvas.getContext?.('2d') ?? null;
 
     this._onMove = (ev) => {
       const rect = this.canvas.getBoundingClientRect();
@@ -41,7 +42,7 @@ export class OrganicOrb {
     }
     this.canvas.addEventListener('pointerenter', this._onEnter);
     this.canvas.addEventListener('pointerleave', this._onLeave);
-    this.#tick();
+    if (this.ctx) this.#tick();
   }
 
   setThinking(v) {
@@ -57,7 +58,7 @@ export class OrganicOrb {
   }
 
   #tick() {
-    if (this.disposed) return;
+    if (this.disposed || !this.ctx) return;
     this.phase += this.thinking ? 0.085 : 0.028;
     this.#draw();
     if (typeof requestAnimationFrame === 'function') {
@@ -66,7 +67,7 @@ export class OrganicOrb {
   }
 
   #draw() {
-    const ctx = this.canvas.getContext?.('2d');
+    const ctx = this.ctx;
     if (!ctx) return;
 
     const w = this.canvas.width;

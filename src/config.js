@@ -358,6 +358,7 @@ export const DEFAULTS = {
     positionRange: 0.45,
     frozen: false,
     autoStart: false,
+    timerSeconds: 0,            // 0 = sin temporizador; >0 detiene la camara automaticamente tras N seg
   },
 
   /**

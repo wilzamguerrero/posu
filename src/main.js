@@ -440,6 +440,70 @@ async function main() {
     if (!file) return;
     await actions.handleDroppedFile(file);
   };
+  actions.pasteImageFromClipboard = async () => {
+    const useBlob = async (blob, name = 'portapapeles.png') => {
+      const file = blob instanceof File
+        ? blob
+        : new File([blob], name, { type: blob.type || 'image/png' });
+      await actions.handleDroppedFile(file);
+      toast('Imagen pegada desde el portapapeles', 'ok');
+      return 'ok';
+    };
+    const useTextUrl = async (rawText) => {
+      const text = (rawText || '').trim();
+      if (!text) return false;
+      if (/^data:image\//i.test(text)) {
+        const res = await fetch(text);
+        await useBlob(await res.blob(), 'portapapeles.png');
+        return true;
+      }
+      if (/^https?:\/\/\S+$/i.test(text)) {
+        try {
+          const proxied = `/api/img-proxy?u=${encodeURIComponent(text)}`;
+          const res = await fetch(proxied);
+          if (res.ok && /^image\//i.test(res.headers.get('content-type') || '')) {
+            await useBlob(await res.blob(), 'portapapeles.png');
+            return true;
+          }
+        } catch { /* fallback */ }
+      }
+      return false;
+    };
+
+    try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imgType = item.types.find((t) => t.startsWith('image/'));
+          if (imgType) {
+            const blob = await item.getType(imgType);
+            return await useBlob(blob);
+          }
+        }
+      }
+      if (navigator.clipboard?.readText) {
+        const txt = await navigator.clipboard.readText();
+        if (await useTextUrl(txt)) return 'ok';
+      }
+      toast('No hay ninguna imagen en el portapapeles (copia una o pulsa Ctrl+V)', 'warn');
+      return 'empty';
+    } catch {
+      toast('Pulsa Ctrl+V para pegar la imagen del portapapeles', 'info');
+      return 'focus';
+    }
+  };
+  document.addEventListener('paste', async (ev) => {
+    const active = document.activeElement;
+    if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable)) {
+      if (!active.classList?.contains('clipboard-paste-box')) return;
+    }
+    const items = [...(ev.clipboardData?.items ?? [])];
+    const imgFile = items.find((i) => i.type?.startsWith('image/'))?.getAsFile();
+    if (!imgFile) return;
+    ev.preventDefault();
+    await actions.handleDroppedFile(imgFile);
+    toast('Imagen pegada desde el portapapeles', 'ok');
+  });
   /** Abre la paleta de busqueda de imagenes de referencia (tecla Espacio). */
   actions.searchImage = () => app.ui?.toggleSearch?.();
   actions.detectStill = async () => {
@@ -785,6 +849,7 @@ async function main() {
     onPick: () => app.hooks.revealScene?.(),
   });
   app.scene = sceneEditor;
+  guides.setScene(sceneEditor);
 
   // Contorno de post-proceso: el pase pregunta en cada fotograma que grupos
   // pintar. Con ambito «todas», un solo grupo global (todas las figuras + los
@@ -1006,10 +1071,99 @@ async function main() {
   let detWindow = 0;
   let detCount = 0;
 
+  // Temporizador visual para detener la camara automaticamente y conservar la pose.
+  const timerHost = document.getElementById('mocap-timer');
+  let timerCountNode = null;
+  let timerBarFill = null;
+  let captureTimerDeadline = 0;
+  let captureTimerDuration = 0;
+  let captureTimerLastText = '';
+
+  const ensureTimerDom = () => {
+    if (!timerHost || timerCountNode) return;
+    timerCountNode = document.createElement('span');
+    timerCountNode.className = 'mocap-timer-count';
+    timerCountNode.textContent = '0 s';
+
+    const label = document.createElement('span');
+    label.className = 'mocap-timer-label';
+    label.textContent = 'Deteniendo captura con tu pose';
+
+    const bar = document.createElement('div');
+    bar.className = 'mocap-timer-bar';
+    timerBarFill = document.createElement('i');
+    timerBarFill.style.width = '100%';
+    bar.appendChild(timerBarFill);
+
+    const meta = document.createElement('div');
+    meta.className = 'mocap-timer-meta';
+    meta.append(label, bar);
+
+    const stopBtn = document.createElement('button');
+    stopBtn.type = 'button';
+    stopBtn.className = 'mocap-timer-stop';
+    stopBtn.textContent = 'Parar ya';
+    stopBtn.addEventListener('click', () => stopCapture());
+
+    timerHost.replaceChildren(timerCountNode, meta, stopBtn);
+  };
+
+  const clearCaptureTimer = () => {
+    captureTimerDeadline = 0;
+    captureTimerDuration = 0;
+    captureTimerLastText = '';
+    timerHost?.classList.add('hidden');
+    timerHost?.classList.remove('is-urgent');
+  };
+
+  const armCaptureTimer = (seconds) => {
+    const secs = Math.max(0, Number(seconds) || 0);
+    if (!secs) { clearCaptureTimer(); return; }
+    ensureTimerDom();
+    captureTimerDuration = secs * 1000;
+    captureTimerDeadline = performance.now() + captureTimerDuration;
+    captureTimerLastText = '';
+    if (timerHost) {
+      timerHost.classList.remove('hidden', 'is-urgent');
+    }
+  };
+
+  const tickCaptureTimer = () => {
+    if (!captureTimerDeadline || !source.active || source.kind !== 'webcam') return;
+    const remaining = captureTimerDeadline - performance.now();
+    if (remaining <= 0) {
+      clearCaptureTimer();
+      stopCapture();
+      toast('Tiempo cumplido: captura detenida conservando tu pose', 'ok');
+      return;
+    }
+    const secsCeil = Math.ceil(remaining / 1000);
+    const label = remaining <= 3000 ? `${(remaining / 1000).toFixed(1)}s` : `${secsCeil} s`;
+    if (timerCountNode && label !== captureTimerLastText) {
+      timerCountNode.textContent = label;
+      captureTimerLastText = label;
+    }
+    if (timerHost) timerHost.classList.toggle('is-urgent', remaining <= 3000);
+    if (timerBarFill && captureTimerDuration > 0) {
+      const pct = Math.max(0, Math.min(100, (remaining / captureTimerDuration) * 100));
+      timerBarFill.style.width = `${pct.toFixed(1)}%`;
+    }
+  };
+
+  settings.on('mocap.timerSeconds', (v) => {
+    if (!source.active || source.kind !== 'webcam') return;
+    const secs = Math.max(0, Number(v) || 0);
+    if (secs > 0) armCaptureTimer(secs);
+    else clearCaptureTimer();
+  });
+
   // Las guias 2D se pintan tras actualizar la camara para no ir un cuadro por detras al orbitar.
   viewport.onAfterCamera(() => guides.draw());
 
   viewport.onFrame((dt) => {
+    if (!source.active) return;
+
+    tickCaptureTimer();
     if (!source.active) return;
 
     if (source.kind === 'imagen') {
@@ -1072,8 +1226,14 @@ async function main() {
 
       app.hooks.detectorInfo?.(detector.describe());
       if (source.kind === 'imagen') await actions.detectStill();
+      else if (source.kind === 'webcam') {
+        const secs = Math.max(0, Number(settings.get('mocap.timerSeconds')) || 0);
+        if (secs > 0) armCaptureTimer(secs);
+        else clearCaptureTimer();
+      }
       return true;
     } catch (err) {
+      clearCaptureTimer();
       console.error('[Captura]', err);
       ui.setStatus('No se pudo iniciar la captura', 'err');
       toast(`No se pudo iniciar la captura: ${errorText(err)}`, 'err');
@@ -1082,6 +1242,7 @@ async function main() {
   }
 
   function stopCapture() {
+    clearCaptureTimer();
     source.stop();
     detectorReady = false;
     lastFrame = null;

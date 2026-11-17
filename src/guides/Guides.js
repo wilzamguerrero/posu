@@ -90,10 +90,15 @@ export class Guides {
     this.perspective = new Perspective(settings, viewport);
     this.action = new ActionLine(settings, viewport, this.perspective);
     this.posing = null;
+    this.scene = null;
   }
 
   setPosing(posing) {
     this.posing = posing ?? null;
+  }
+
+  setScene(scene) {
+    this.scene = scene ?? null;
   }
 
   setCharacter(character) {
@@ -195,6 +200,8 @@ export class Guides {
     if (this.action.active) this.action.draw(ctx, W, H, this.dpr);
     // Los manipuladores del rig se pintan en 2D nitido por encima de cualquier deformacion 3D.
     if (this.posing?.enabled) this.posing.drawOverlay(ctx, W, H, this.dpr);
+    // Gizmo de escena en 2D nitido cuando la perspectiva deformada oculta el WebGL.
+    if (this.scene) this.scene.drawOverlay(ctx, W, H, this.dpr, this.posing);
 
     ctx.globalAlpha = 1;
   }

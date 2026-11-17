@@ -1017,6 +1017,56 @@ function mocapPanel(app) {
   const partSlider = (path, label) =>
     slider({ label, path: 'mocap.parts.' + path, min: 0, max: 1.4, step: 0.01 });
 
+  const pasteHint = el('span', { text: 'Clic para pegar del portapapeles o pulsa Ctrl+V' });
+  const pasteBox = el('div', {
+    class: 'clipboard-paste-box',
+    role: 'button',
+    tabindex: 0,
+    title: 'Pega una imagen copiada desde el navegador o cualquier programa',
+    onClick: async () => {
+      const res = await actions.pasteImageFromClipboard?.();
+      if (res === 'focus') {
+        pasteHint.textContent = 'Pulsa Ctrl+V ahora para pegar la imagen';
+        pasteBox.focus();
+      } else {
+        pasteHint.textContent = 'Clic para pegar del portapapeles o pulsa Ctrl+V';
+      }
+    },
+    onKeydown: (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        pasteBox.click();
+      }
+    },
+    onPaste: async (ev) => {
+      const items = [...(ev.clipboardData?.items ?? [])];
+      const img = items.find((i) => i.type?.startsWith('image/'))?.getAsFile();
+      if (!img) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      await actions.handleDroppedFile?.(img);
+    },
+  }, [
+    icon('image', 16),
+    el('div', { class: 'clipboard-paste-text' }, [
+      el('strong', { text: 'Pegar imagen del portapapeles' }),
+      pasteHint,
+    ]),
+  ]);
+
+  const timerPresetRow = el('div', { class: 'mocap-timer-presets' }, [0, 5, 10, 15].map((sec) => {
+    const b = el('button', {
+      type: 'button',
+      class: 'btn',
+      text: sec === 0 ? 'Apag.' : `${sec} s`,
+      onClick: () => settings.set('mocap.timerSeconds', sec),
+    });
+    const paint = () => b.classList.toggle('is-active', Number(settings.get('mocap.timerSeconds') || 0) === sec);
+    settings.on('mocap.timerSeconds', paint);
+    paint();
+    return b;
+  }));
+
   return [
     group({ id: 'mo-source', title: 'Fuente', icon: 'webcam' }, [
       segmented({
@@ -1027,9 +1077,22 @@ function mocapPanel(app) {
           { value: 'video', label: 'Video', icon: 'film', title: 'Archivo de video en bucle' },
         ],
       }),
-      enableWhen(el('div', {}, [devices.root, buttons([
-        { label: 'Actualizar camaras', icon: 'refresh-cw', onClick: refreshDevices },
-      ], { compact: true })]), 'mocap.source', (s) => s.get('mocap.source') === 'webcam'),
+      enableWhen(el('div', {}, [
+        devices.root,
+        buttons([
+          { label: 'Actualizar camaras', icon: 'refresh-cw', onClick: refreshDevices },
+        ], { compact: true }),
+        slider({
+          label: 'Temporizador de parada',
+          path: 'mocap.timerSeconds',
+          min: 0,
+          max: 30,
+          step: 1,
+          format: (v) => (v <= 0 ? 'Sin temporizador' : `${Math.round(v)} s`),
+          hint: 'Al iniciar la camara veras una cuenta regresiva en pantalla: cuando llegue a 0 detendra la captura automaticamente conservando tu pose.',
+        }),
+        timerPresetRow,
+      ]), 'mocap.source', (s) => s.get('mocap.source') === 'webcam'),
       buttons([
         { label: 'Iniciar', icon: 'play', variant: 'primary', onClick: () => actions.startCapture(),
           ref: (n) => { hooks.startBtn = n; } },
@@ -1041,6 +1104,7 @@ function mocapPanel(app) {
         { label: 'Analizar fotograma', icon: 'scan-face', title: 'Detecta la pose del fotograma actual',
           onClick: () => actions.detectStill() },
       ], { cols: 2 }),
+      pasteBox,
       buttons([
         { label: 'Buscar imagen en la web', icon: 'search', variant: 'primary',
           title: 'Buscador de imagenes de referencia (Espacio)',
