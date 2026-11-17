@@ -291,6 +291,7 @@ export class FloatingAI {
       class: 'atom-ai-pop hidden',
       role: 'dialog',
       'aria-label': 'Asistente IA de ATOM',
+      onAnimationend: () => this.pop.classList.remove('is-entering'),
     });
 
     this.fileInput = el('input', {
@@ -341,11 +342,13 @@ export class FloatingAI {
     this.handleBtn.classList.toggle('is-open', this.open);
     this.pop.classList.toggle('hidden', !this.open);
     if (this.open) {
+      this.pop.classList.add('is-entering');
       this.winPos = clampPos(this.winPos, this.winSize.width, this.winSize.height);
       this.#syncPositions();
       this.#scrollLogBottom();
       requestAnimationFrame(() => this.textareaEl?.focus());
     } else {
+      this.pop.classList.remove('is-entering');
       this.#stopDictation();
     }
   }
@@ -404,6 +407,7 @@ export class FloatingAI {
       if (!moved) {
         if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
         moved = true;
+        nodeEl.classList.remove('is-entering');
         nodeEl.classList.add('is-dragging');
       }
       if (!rafId) rafId = requestAnimationFrame(applyTransform);

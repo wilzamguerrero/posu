@@ -1032,8 +1032,8 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
   background: var(--bg-panel); border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg); box-shadow: var(--shadow);
   color: var(--fg); font-family: var(--font-ui);
-  animation: atom-ai-pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
+.atom-ai-pop.is-entering { animation: atom-ai-pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
 .atom-ai-pop.is-dragging { animation: none !important; transition: none !important; }
 .atom-ai-pop.is-file-over { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow); }
 @keyframes atom-ai-pop-in {
