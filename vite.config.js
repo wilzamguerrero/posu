@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { resolve, join, basename } from 'node:path';
 import fs from 'node:fs';
 import { searchImages, fetchImage, mismoOrigen } from './server/imageSearch.mjs';
@@ -159,8 +159,9 @@ function aiProxyApi() {
     '/api/github-device': (req, env) => handleGithubDevice(req, env),
   };
 
+  let loadedEnv = {};
   const attach = (isDev) => (server) => {
-    const env = { ...process.env, ...(isDev ? { ATOM_DEV: '1' } : {}) };
+    const env = { ...loadedEnv, ...process.env, ...(isDev ? { ATOM_DEV: '1' } : {}) };
     for (const [route, handler] of Object.entries(routes)) {
       server.middlewares.use(route, (req, res, next) => {
         const clean = (req.url || '/').split('?')[0];
@@ -179,6 +180,9 @@ function aiProxyApi() {
 
   return {
     name: 'atom-ai-proxy',
+    configResolved(config) {
+      loadedEnv = loadEnv(config.mode, process.cwd(), '');
+    },
     configureServer: attach(true),
     configurePreviewServer: attach(false),
   };

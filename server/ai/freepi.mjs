@@ -4,26 +4,31 @@
 import { sseHeaders } from './common.mjs';
 
 export const FREEPI_ROOT = 'https://api.freepi.ai';
-const DEFAULT_CLIENT_VERSION = '0.2.1';
+const DEFAULT_CLIENT_VERSION = '0.6.10';
 const CACHE_MS = 6 * 60 * 60 * 1000;
 const RETRY_MS = 2 * 60 * 1000;
-const NAMESPACE_SALT = 'atom:freepi-session:v1';
 
 let catalogCache = null;
 let failedAt = 0;
 let inflight = null;
+let clientVersion = DEFAULT_CLIENT_VERSION;
 
 export function isFreePi(url) {
-  return url.startsWith(FREEPI_ROOT);
+  try {
+    return new URL(url).hostname === 'api.freepi.ai';
+  } catch {
+    return url.startsWith(FREEPI_ROOT);
+  }
 }
 
-/** Genera UUID determinista a partir de la clave sin depender de `node:crypto` (compatible con Workers). */
+/** UUID v5 determinista derivado de la clave (mismo formato que CLI / Zence-R2 / iii). */
 async function sessionUuid(key) {
-  const data = new TextEncoder().encode(`${NAMESPACE_SALT}\0${key}`);
+  const seed = key?.trim() || `freepi:anon:${new Date().toISOString().slice(0, 10)}`;
+  const data = new TextEncoder().encode(`freepi:${seed}`);
   if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
-    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-1', data));
     const b = hash.slice(0, 16);
-    b[6] = (b[6] & 0x0f) | 0x40;
+    b[6] = (b[6] & 0x0f) | 0x50;
     b[8] = (b[8] & 0x3f) | 0x80;
     const hex = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
@@ -34,7 +39,7 @@ async function sessionUuid(key) {
     h1 = Math.imul(h1, 0x01000193);
   }
   const s = (h1 >>> 0).toString(16).padStart(8, '0');
-  return `${s}-${s.slice(0, 4)}-4${s.slice(1, 4)}-8${s.slice(1, 4)}-${s}${s.slice(0, 4)}`;
+  return `${s}-${s.slice(0, 4)}-5${s.slice(1, 4)}-8${s.slice(1, 4)}-${s}${s.slice(0, 4)}`;
 }
 
 function comparesLower(a, b) {
@@ -54,9 +59,10 @@ async function downloadCatalog(token) {
   try {
     const headers = { Accept: 'application/json' };
     if (token) headers.Authorization = `Bearer ${token}`;
+    if (clientVersion) headers['x-client-version'] = clientVersion;
     const response = await fetch(`${FREEPI_ROOT}/client-version`, {
       headers,
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(15_000),
       cache: 'no-store',
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -65,15 +71,16 @@ async function downloadCatalog(token) {
 
     const min = typeof data.min === 'string' ? data.min.trim() : '';
     const latest = typeof data.latest === 'string' ? data.latest.trim() : '';
-    const clientVersion = comparesLower(DEFAULT_CLIENT_VERSION, min)
-      ? (latest || min || DEFAULT_CLIENT_VERSION)
-      : DEFAULT_CLIENT_VERSION;
+    if (latest && comparesLower(clientVersion, min)) {
+      clientVersion = latest;
+    }
 
     const rawModels = Array.isArray(data.models) ? data.models : [];
     const models = rawModels.map((entry) => {
+      if (typeof entry === 'string') return { id: entry, name: entry, free: false, vision: false };
       const m = typeof entry === 'object' && entry !== null ? entry : {};
       const id = typeof m.id === 'string' ? m.id.trim() : '';
-      const label = typeof m.label === 'string' ? m.label.trim() : (typeof m.name === 'string' ? m.name.trim() : id);
+      const label = typeof m.name === 'string' ? m.name.trim() : (typeof m.label === 'string' ? m.label.trim() : id);
       const input = Array.isArray(m.input) ? m.input : [];
       return {
         id,
@@ -105,10 +112,11 @@ export async function freepiCatalog(token) {
 export async function freepiHeaders(token) {
   const key = (token ?? '').trim();
   const catalog = await freepiCatalog(key || null);
+  const ver = catalog?.clientVersion || clientVersion || DEFAULT_CLIENT_VERSION;
   const headers = {
-    'X-Pi-Client-Version': catalog?.clientVersion ?? DEFAULT_CLIENT_VERSION,
+    'x-session-id': await sessionUuid(key),
+    ...(ver ? { 'x-client-version': ver } : {}),
   };
-  if (key) headers['X-Session-Id'] = await sessionUuid(key);
   return headers;
 }
 

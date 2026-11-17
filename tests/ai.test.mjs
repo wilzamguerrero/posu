@@ -25,7 +25,9 @@ for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLCanvasEl
 
 const { readTarget, safeBase, BUILTIN_IDS } = await import('../server/ai/common.mjs');
 const { toAnthropicBody, fromAnthropicReply } = await import('../server/ai/anthropic.mjs');
-const { checkMessages, handleHealth } = await import('../server/ai/handlers.mjs');
+const { checkMessages, handleHealth, runNodeHandler } = await import('../server/ai/handlers.mjs');
+const { CONSENT_VERSION } = await import('../server/ai/freepiDevice.mjs');
+const { freepiHeaders } = await import('../server/ai/freepi.mjs');
 const {
   aiConfig, setProvider, setKey, clearKey, browserKey,
   addCustomProvider, removeCustomProvider, providerIds,
@@ -102,6 +104,29 @@ await test('handleHealth expone estado de proveedores sin filtrar claves', async
   assert.equal(data.ai.providers.openai, true);
   assert.equal(data.ai.providers.anthropic, false);
   assert.equal(JSON.stringify(data).includes('sk-secret'), false);
+
+  // runNodeHandler convierte IncomingMessage (cabeceras objeto plano) sin fallar
+  const { Readable } = await import('node:stream');
+  const fakeReq = Readable.from([]);
+  fakeReq.method = 'GET';
+  fakeReq.url = '/';
+  fakeReq.headers = { host: 'localhost:5173', 'sec-fetch-site': 'same-origin' };
+  let bodyOut = '';
+  const fakeRes = {
+    statusCode: 0,
+    headers: {},
+    setHeader(k, v) { this.headers[k] = v; },
+    write(c) { bodyOut += Buffer.from(c).toString(); },
+    end(c) { if (c) bodyOut += Buffer.from(c).toString(); },
+  };
+  await runNodeHandler(handleHealth, fakeReq, fakeRes, {});
+  assert.equal(fakeRes.statusCode, 200);
+  assert.equal(JSON.parse(bodyOut).ok, true);
+
+  assert.equal(CONSENT_VERSION, '4');
+  const fHdrs = await freepiHeaders('test-token');
+  assert.ok(/^[0-9a-f-]{36}$/.test(fHdrs['x-session-id']));
+  assert.ok(Boolean(fHdrs['x-client-version']));
 });
 
 await test('configuracion cliente, cabeceras y proveedores propios', async () => {

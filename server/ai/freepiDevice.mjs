@@ -1,20 +1,29 @@
 /**
- * ATOM · free-pi device flow + estado de cuenta
+ * ATOM · free-pi device flow + estado de cuenta (alineado con api.freepi.ai / Zence-R2 / iii)
  */
 import { FREEPI_ROOT } from './freepi.mjs';
 
-export const CONSENT_VERSION = '2025-10-01';
+export const CONSENT_VERSION = '4';
 const GITHUB_DEVICE = 'https://github.com/login/device';
 
 export const CONSENT_TEXT =
-  'free-pi opera gracias a publicidad contextual ocasional en los mensajes y registra métricas agregadas para evitar abusos. Debes aceptar estas condiciones para usar el nivel gratuito.';
+  'free-pi es gratis. A cambio, muestra anuncios y puede entrenar con tus datos. '
+  + 'Si quieres usarlo, aceptas eso. Si no, no lo uses.\n'
+  + 'Debes tener al menos 13 años en EE. UU., 16 en EEE/RU, o 18 en el resto.\n'
+  + 'Términos: https://freepi.ai/terms   Privacidad: https://freepi.ai/privacy';
 
 function str(value) {
   return typeof value === 'string' ? value : '';
 }
 
+function positive(value, fallback) {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const SESSION_RE = /^[0-9a-fA-F-]{16,64}$/;
 function validSession(value) {
-  return typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
+  return typeof value === 'string' && SESSION_RE.test(value.trim());
 }
 
 async function postRoot(path, body) {
@@ -22,21 +31,26 @@ async function postRoot(path, body) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(30_000),
   });
-  const data = await response.json().catch(() => ({}));
+  const raw = await response.text();
+  let data = {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') data = parsed;
+  } catch { /* cuerpo no JSON */ }
   return { status: response.status, data };
 }
 
 export async function deviceStart() {
-  const { status, data } = await postRoot('/auth/start', {});
-  const sessionId = str(data.session_id);
-  const userCode = str(data.user_code);
+  const { status, data } = await postRoot('/auth/github/device', {});
+  const sessionId = str(data.session_id).trim();
+  const userCode = str(data.user_code).trim();
   const verificationUri = str(data.verification_uri) || GITHUB_DEVICE;
-  const interval = Number(data.interval);
 
   if (status !== 200 || !sessionId || !userCode) {
-    throw new Error(str(data.message) || str(data.error) || `free-pi no dejó empezar el login (HTTP ${status}).`);
+    const message = str(data.message) || str(data.error);
+    throw new Error(`free-pi no dio código de dispositivo (HTTP ${status}${message ? `: ${message}` : ''}).`);
   }
 
   return {
@@ -44,8 +58,10 @@ export async function deviceStart() {
     userCode,
     verificationUri,
     verificationUriComplete: str(data.verification_uri_complete)
+      || str(data.verification_uri)
       || `${verificationUri}?user_code=${encodeURIComponent(userCode)}`,
-    interval: Number.isFinite(interval) && interval > 0 ? interval : 5,
+    interval: Math.max(3, positive(data.interval, 5)),
+    expiresIn: positive(data.expires_in, 900),
     consentText: CONSENT_TEXT,
   };
 }

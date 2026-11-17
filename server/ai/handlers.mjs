@@ -545,36 +545,46 @@ export async function handleFreePiDevice(request) {
   const parsed = await readJsonBody(request, 64 * 1024);
   if (parsed.error) return jsonRes({ error: 'bad_request', message: parsed.error }, parsed.status);
   const body = parsed.data ?? {};
-  const action = body.action;
+  const action = body.action || body.step;
 
   try {
     if (action === 'start') {
       const started = await deviceStart();
       return jsonRes({
+        ok: true,
         session_id: started.sessionId,
         user_code: started.userCode,
         verification_uri: started.verificationUri,
         verification_uri_complete: started.verificationUriComplete,
         interval: started.interval,
+        expires_in: started.expiresIn,
         consent_text: started.consentText,
       });
     }
     if (action === 'consent') {
       const sessionId = typeof body.session_id === 'string' ? body.session_id : '';
       await deviceConsent(sessionId);
-      return jsonRes({ ok: true });
+      return jsonRes({ ok: true, status: 'consent' });
     }
-    if (action === 'poll') {
+    if (action === 'poll' || action === 'token') {
       const sessionId = typeof body.session_id === 'string' ? body.session_id : '';
       const result = await devicePoll(sessionId);
-      if (result.kind === 'token') return jsonRes({ token: result.token, ...(result.days != null ? { days: result.days } : {}) });
-      if (result.kind === 'pending') return jsonRes({ status: 'pending', ...(result.retryAfter ? { retry_after: result.retryAfter } : {}) });
-      if (result.kind === 'consent') return jsonRes({ status: 'consent_required', message: result.message });
-      if (result.kind === 'expired') return jsonRes({ error: 'expired_token', message: result.message }, 410);
+      if (result.kind === 'token') {
+        return jsonRes({ ok: true, status: 'token', token: result.token, ...(result.days != null ? { days: result.days } : {}) });
+      }
+      if (result.kind === 'pending') {
+        return jsonRes({ ok: true, status: 'pending', ...(result.retryAfter ? { retry_after: result.retryAfter } : {}) });
+      }
+      if (result.kind === 'consent') {
+        return jsonRes({ ok: true, status: 'consent_required', message: result.message });
+      }
+      if (result.kind === 'expired') {
+        return jsonRes({ error: 'expired_token', status: 'expired', message: result.message }, 410);
+      }
       return jsonRes({ error: 'oauth_error', message: result.message }, 400);
     }
     if (action === 'me') {
-      const token = getHeader(request.headers, 'x-ai-key');
+      const token = getHeader(request.headers, 'x-ai-key') || (typeof body.token === 'string' ? body.token.trim() : '');
       if (!token) return jsonRes({ error: 'missing_key', message: 'Falta el token de free-pi.' }, 401);
       const me = await freepiMe(token);
       if (!me) return jsonRes({ error: 'provider_unreachable', message: 'free-pi no devolvió la cuenta.' }, 502);
@@ -657,13 +667,13 @@ async function nodeToWebRequest(req) {
 }
 
 export async function runNodeHandler(webHandler, req, res, env) {
-  if (!mismoOrigen(req.headers)) {
+  const request = await nodeToWebRequest(req);
+  if (!mismoOrigen(request.headers)) {
     res.statusCode = 403;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify({ error: 'forbidden', message: 'Petición externa rechazada.' }));
     return;
   }
-  const request = await nodeToWebRequest(req);
   const response = await webHandler(request, env);
   res.statusCode = response.status;
   response.headers.forEach((value, key) => {
