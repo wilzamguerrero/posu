@@ -106,8 +106,8 @@ export class OrganicOrb {
       : 1 + Math.sin(this.phase) * 0.015;
     const r = baseR * pulse;
 
-    const accentRgb = this.thinking ? '78, 201, 176' : '77, 170, 252';
-    const accentHex = this.thinking ? '#4ec9b0' : '#4daafc';
+    const accentRgb = this.thinking ? '242, 245, 250' : '77, 170, 252';
+    const accentHex = this.thinking ? '#f2f5fa' : '#4daafc';
 
     ctx.clearRect(0, 0, w, h);
 

@@ -567,12 +567,6 @@ export class FloatingAI {
     this.logEl = el('div', { class: 'atom-ai-log' });
     this.footWarnEl = el('div', { class: 'atom-ai-foot-warn hidden' });
     this.attachStripEl = el('div', { class: 'atom-ai-attach-strip hidden' });
-    this.providerBadgeEl = el('button', {
-      type: 'button',
-      class: 'atom-ai-prov-pill',
-      title: 'Cambiar proveedor o modelo de IA',
-      onClick: () => this.onOpenSettings(),
-    });
 
     this.micBtn = el('button', {
       type: 'button',
@@ -582,8 +576,8 @@ export class FloatingAI {
     }, icon('mic', 14));
 
     this.textareaEl = el('textarea', {
-      rows: 2,
-      placeholder: 'Pide poses, cantidad de figuras, luz o adjunta/pega un boceto…',
+      rows: 1,
+      placeholder: 'Pide poses, figuras, luz o pega un boceto…',
       onInput: (e) => { this.draft = e.target.value; },
       onKeydown: (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -625,7 +619,6 @@ export class FloatingAI {
           title: 'Nueva conversación',
           onClick: () => this.#newConversation(),
         }, [icon('plus', 11), el('span', { text: 'Nueva' })]),
-        this.providerBadgeEl,
         el('button', {
           type: 'button',
           class: 'icon-btn tiny',
@@ -812,12 +805,6 @@ export class FloatingAI {
   #renderFooterAndStatus() {
     const provider = activeProvider();
     const authed = hasCredential(provider);
-    const modelName = chosenModel(provider);
-
-    if (this.providerBadgeEl) {
-      const shortModel = modelName ? ` · ${modelName.split('/').pop()}` : '';
-      this.providerBadgeEl.textContent = `${providerLabel(provider)}${shortModel}`;
-    }
 
     this.orbHandle.setThinking(this.busy);
     this.orbMini.setThinking(this.busy);

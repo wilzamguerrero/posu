@@ -360,8 +360,8 @@ await test('FloatingAI y AiSettings se montan e interactuan en DOM sin errores',
   handle.click();
   assert.equal(pop.classList.contains('hidden'), false, 'clic en el orbe abre el panel');
 
-  pop.querySelector('.atom-ai-prov-pill').click();
-  assert.equal(openedSettings, true, 'pildora de proveedor abre Ajustes > IA');
+  pop.querySelector('[title*="Configurar API"]').click();
+  assert.equal(openedSettings, true, 'boton de engranaje abre Ajustes > IA');
 
   const textarea = pop.querySelector('textarea');
   textarea.value = 'pon 2 figuras en camara frente';
