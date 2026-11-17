@@ -245,6 +245,57 @@ for (const l of bad.landmarks) l.visibility = 0.05;
 engine.update(bad, 1 / 60);
 check('con visibilidad baja no aparecen NaN', skeletonSane(), 'confianza=' + engine.confidence.toFixed(2));
 
+// Pose tumbada horizontal (como volando boca abajo): rodilla y pie no deben
+// sufrir giro de 180° en caramelo respecto al muslo y la espinilla.
+settings.set('mocap.engine', 'directo');
+character.resetToRest();
+engine.reset();
+const pronePts = [];
+const pset = (i, x, y, z) => { pronePts[i] = { x, y, z }; };
+// Cuerpo horizontal boca abajo en espacio BlazePose (+Y abajo -> pies abajo en z/y):
+// Cabeza/hombros hacia -X, caderas en 0, piernas extendidas hacia +X, cara mirando +Y (abajo).
+pset(LM.LEFT_HIP, 0, -0.05, 0.1); pset(LM.RIGHT_HIP, 0, -0.05, -0.1);
+pset(LM.LEFT_SHOULDER, -0.5, -0.05, 0.16); pset(LM.RIGHT_SHOULDER, -0.5, -0.05, -0.16);
+pset(LM.LEFT_EAR, -0.66, -0.02, 0.08); pset(LM.RIGHT_EAR, -0.66, -0.02, -0.08);
+pset(LM.NOSE, -0.70, 0.06, 0);
+pset(LM.LEFT_ELBOW, -0.45, 0.1, 0.35); pset(LM.RIGHT_ELBOW, -0.45, 0.1, -0.35);
+pset(LM.LEFT_WRIST, -0.68, 0.1, 0.32); pset(LM.RIGHT_WRIST, -0.68, 0.1, -0.32);
+pset(LM.LEFT_KNEE, 0.42, -0.03, 0.10); pset(LM.RIGHT_KNEE, 0.42, -0.03, -0.10);
+pset(LM.LEFT_ANKLE, 0.84, -0.01, 0.10); pset(LM.RIGHT_ANKLE, 0.84, -0.01, -0.10);
+// Punteras con ruido lateral exagerado para comprobar el acotado del tobillo.
+pset(LM.LEFT_FOOT_INDEX, 0.96, 0.10, 0.34); pset(LM.RIGHT_FOOT_INDEX, 0.96, 0.10, -0.34);
+feed(frameFrom(pronePts), 60);
+character.root.updateMatrixWorld(true);
+
+const worldDirOf = (bone, restWorld, restPosChild, restPosSelf) => {
+  const rw = character.rest.world.get(bone);
+  const wq = bone.getWorldQuaternion(new THREE.Quaternion());
+  const d = wq.multiply(rw.clone().invert());
+  return restPosChild.clone().sub(restPosSelf).normalize().applyQuaternion(d);
+};
+const frontOf = (bone) => {
+  const rw = character.rest.world.get(bone);
+  const wq = bone.getWorldQuaternion(new THREE.Quaternion());
+  return new THREE.Vector3(0, 0, 1).applyQuaternion(character.basis).applyQuaternion(wq.multiply(rw.clone().invert()));
+};
+const thighFront = frontOf(character.bones.rightUpLeg);
+const shinFront = frontOf(character.bones.rightLeg);
+const alignKnee = thighFront.dot(shinFront);
+check('en pose tumbada la espinilla no se retuerce 180° en la rodilla',
+  alignKnee > 0.85, 'dot=' + alignKnee.toFixed(3));
+const footDir = worldDirOf(
+  character.bones.rightFoot,
+  character.rest.world.get(character.bones.rightFoot),
+  character.rest.position.get(character.bones.rightToe),
+  character.rest.position.get(character.bones.rightFoot),
+);
+const shinLeft = new THREE.Vector3(1, 0, 0).applyQuaternion(character.basis)
+  .applyQuaternion(character.bones.rightLeg.getWorldQuaternion(new THREE.Quaternion())
+    .multiply(character.rest.world.get(character.bones.rightLeg).clone().invert()));
+const latFoot = Math.abs(footDir.dot(shinLeft));
+check('el tobillo acota la torsión lateral del pie respecto a la espinilla',
+  latFoot <= 0.42, 'lateral=' + latFoot.toFixed(3));
+
 character.dispose();
 server.close();
 fs.rmSync(tmpDir, { recursive: true, force: true });

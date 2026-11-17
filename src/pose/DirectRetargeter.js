@@ -80,10 +80,12 @@ const _fm = new THREE.Matrix4();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
 const _n1 = new THREE.Vector3();
 const _n2 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
 const _pq = new THREE.Quaternion();
 const _pq2 = new THREE.Quaternion();
 
@@ -291,20 +293,127 @@ export class DirectRetargeter {
     }
 
     // --------------------------------------------------------- extremidades ---
+    // Transporte paralelo desde el padre (`inheritedWorld = parent * restLocal`)
+    // en lugar de partir del reposo global: evita giros de 180° tipo caramelo
+    // en rodillas, pantorrillas y tobillos cuando el cuerpo gira horizontalmente,
+    // se acuesta o se inclina boca abajo.
     const solveChain = (c) => {
       const key = c.key;
+      const bone = B[key];
+      const rw = RW(key);
+      const rp = RP(key);
       const childP = RP(c.child);
-      if (!RW(key) || !RP(key) || !childP || !this.ok[c.from]) return;
+      if (!bone || !rw || !rp || !childP || !this.ok[c.from]) return;
       const to = c.toMid ? this.#mid(c.toMid[0], c.toMid[1], _v3) : (this.ok[c.to] ? this.points[c.to] : null);
       if (!to) return;
-      const restDir = _v1.copy(childP).sub(RP(key));
+
+      const restDir = _v1.copy(childP).sub(rp);
       const liveDir = _v2.copy(to).sub(this.points[c.from]);
       if (restDir.lengthSq() < 1e-10 || liveDir.lengthSq() < 1e-10) return;
-      const d = soften(_q1.setFromUnitVectors(restDir.normalize(), liveDir.normalize()), gain(key));
-      commit(key, _q2.copy(d).multiply(RW(key)));
+      restDir.normalize();
+      liveDir.normalize();
+
+      const rl = character.rest.local.get(bone);
+      const inheritedWorld = rl
+        ? _q3.copy(parentWorld(bone)).multiply(rl)
+        : _q3.copy(rw);
+      const parentDelta = _pq2.copy(inheritedWorld).multiply(_q2.copy(rw).invert());
+      const inheritedDir = _n1.copy(restDir).applyQuaternion(parentDelta).normalize();
+
+      // Para los pies: acota la desviacion lateral (eversion/inversion) respecto
+      // al plano sagital de la espinilla y evita que el ruido Z de BlazePose
+      // retuerza el tobillo hacia los lados o hacia atras.
+      if (key === 'leftFoot' || key === 'rightFoot') {
+        const legKey = key === 'leftFoot' ? 'leftLeg' : 'rightLeg';
+        const legW = B[legKey] ? this.worldByBone.get(B[legKey]) : null;
+        const legRW = RW(legKey);
+        if (legW && legRW) {
+          const legDelta = _pq.copy(legW).multiply(_q2.copy(legRW).invert());
+          const legLeft = _n2.set(1, 0, 0).applyQuaternion(character.basis).applyQuaternion(legDelta).normalize();
+          const lat = liveDir.dot(legLeft);
+          const maxLat = 0.35; // ~20 grados maximo de inclinacion lateral del tobillo
+          if (Math.abs(lat) > maxLat) {
+            const targetLat = Math.sign(lat) * maxLat;
+            liveDir.addScaledVector(legLeft, -lat);
+            if (liveDir.lengthSq() > 1e-8) {
+              liveDir.normalize()
+                .multiplyScalar(Math.sqrt(1 - targetLat * targetLat))
+                .addScaledVector(legLeft, targetLat)
+                .normalize();
+            } else {
+              liveDir.copy(inheritedDir);
+            }
+          }
+          // Tampoco deja que los dedos apunten hacia atras respecto al empeine heredado
+          if (liveDir.dot(inheritedDir) < -0.35) {
+            liveDir.lerp(inheritedDir, 0.65).normalize();
+          }
+        }
+      }
+
+      const dot = THREE.MathUtils.clamp(inheritedDir.dot(liveDir), -1, 1);
+      if (dot < -0.992) {
+        const axis = _v4.set(1, 0, 0).applyQuaternion(character.basis).applyQuaternion(parentDelta);
+        axis.addScaledVector(inheritedDir, -axis.dot(inheritedDir));
+        if (axis.lengthSq() < 1e-6) axis.set(0, 0, 1).applyQuaternion(character.basis).applyQuaternion(parentDelta);
+        _q1.setFromAxisAngle(axis.normalize(), Math.PI);
+      } else {
+        _q1.setFromUnitVectors(inheritedDir, liveDir);
+      }
+
+      const deltaFromRest = _q1.multiply(parentDelta);
+      const worldTarget = _q2.copy(soften(deltaFromRest, gain(key))).multiply(rw);
+      commit(key, worldTarget);
     };
 
-    for (const c of LIMB_CHAINS) if (!c.late) solveChain(c);
+    for (const c of LIMB_CHAINS) {
+      if (c.late) continue;
+      solveChain(c);
+
+      // Alinea suavemente el frente del muslo con el plano real de flexion de la
+      // rodilla (cadera -> rodilla -> tobillo) cuando la pierna esta doblada,
+      // evitando que la rotula mire hacia un lado aunque el cuerpo gire.
+      if (c.key === 'leftUpLeg' || c.key === 'rightUpLeg') {
+        const side = c.key === 'leftUpLeg' ? 'left' : 'right';
+        const hIdx = side === 'left' ? LM.LEFT_HIP : LM.RIGHT_HIP;
+        const kIdx = side === 'left' ? LM.LEFT_KNEE : LM.RIGHT_KNEE;
+        const aIdx = side === 'left' ? LM.LEFT_ANKLE : LM.RIGHT_ANKLE;
+        const bone = B[c.key];
+        const upW = bone ? this.worldByBone.get(bone) : null;
+        const upRW = RW(c.key);
+        if (upW && upRW && this.ok[hIdx] && this.ok[kIdx] && this.ok[aIdx]) {
+          const toHip = _v1.copy(this.points[hIdx]).sub(this.points[kIdx]);
+          const toAnkle = _v2.copy(this.points[aIdx]).sub(this.points[kIdx]);
+          if (toHip.lengthSq() > 1e-8 && toAnkle.lengthSq() > 1e-8) {
+            toHip.normalize();
+            toAnkle.normalize();
+            // Bisectriz opuesta al pliegue: cuando la rodilla dobla hacia adelante, apunta a la rotula
+            const bendCos = THREE.MathUtils.clamp(toHip.dot(toAnkle), -1, 1);
+            const bendDeg = Math.acos(bendCos) / (Math.PI / 180);
+            if (bendDeg < 168) {
+              const thighAxis = _v3.copy(this.points[kIdx]).sub(this.points[hIdx]).normalize();
+              const kneeFront = _n1.copy(toHip).add(toAnkle).multiplyScalar(-1);
+              kneeFront.addScaledVector(thighAxis, -kneeFront.dot(thighAxis));
+              if (kneeFront.lengthSq() > 1e-6) {
+                kneeFront.normalize();
+                const delta = _q2.copy(upW).multiply(_pq.copy(upRW).invert());
+                const curFront = _n2.set(0, 0, 1).applyQuaternion(character.basis).applyQuaternion(delta);
+                curFront.addScaledVector(thighAxis, -curFront.dot(thighAxis));
+                if (curFront.lengthSq() > 1e-6) {
+                  curFront.normalize();
+                  const angle = Math.atan2(_v4.crossVectors(curFront, kneeFront).dot(thighAxis), curFront.dot(kneeFront));
+                  const weight = THREE.MathUtils.clamp((168 - bendDeg) / 28, 0, 1) * gain('leftUpLeg');
+                  if (Math.abs(angle) > 1e-3 && weight > 0) {
+                    _q1.setFromAxisAngle(thighAxis, angle * weight).multiply(upW);
+                    commit(c.key, _q1);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
     // ---------------------------------------------- torsion de los antebrazos ---
     // El giro del antebrazo sobre su eje no se deduce de la posicion del codo:
